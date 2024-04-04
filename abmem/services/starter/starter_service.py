@@ -1,15 +1,14 @@
-import sys
 
-sys.path.append("D:\lokal\Projeler\Tez\abm\abmem_project\test")
-from services.file_reader import reader_service as ReaderService
-from services.simulation import simulation_factory as SimulationFactory
-from services.simulation import simulation_service as SimulationService
-from django_model.db.models import Simulation,Resource
-from services.starter import resource_service as ResourceService
-from constants import *
-
+from ..file_reader import reader_service as ReaderService
+from ..simulation import simulation_factory as SimulationFactory
+from ..simulation import simulation_service as SimulationService
+from ...models import Simulation,Resource
+from . import resource_service as ResourceService
+from ...constants import *
+import django
 
 def start() -> None:
+    django.setup()
     simData,resourceData = readStarterData()
     simulation = createSimulation(simData)
     checkResources(resourceData)

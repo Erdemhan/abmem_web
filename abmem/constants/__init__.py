@@ -1,6 +1,6 @@
 import sys
 sys.path.append("D:/Projeler/abm/abmem_project/test")
 
-from constants.dictionary_keys import *
-from constants.paths import *
-from constants.strings import *
+from .dictionary_keys import *
+from .paths import *
+from .strings import *

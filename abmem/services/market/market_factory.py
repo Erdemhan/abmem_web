@@ -1,7 +1,7 @@
 import sys
 sys.path.append("D:/Projeler/abm/abmem_project/test")
-from django_model.db.models.market import Market
-from django_model.db.models.enums import MarketStrategy,MarketState
+from ...models.market import Market
+from ...models.enums import MarketStrategy,MarketState
 
 
 def create(sim, strategy: MarketStrategy,lowerBound: int, upperBound: int) -> Market:

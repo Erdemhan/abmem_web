@@ -1,5 +1,5 @@
 
-DATAPATH = 'test/data/'
+DATAPATH = 'abmem/data/'
 SIMULATION_DATA_PATH= 'simulation.yml'
 MARKET_DATA_PATH= 'market.yml'
 AGENT_DATA_PATH= 'agents.yml'

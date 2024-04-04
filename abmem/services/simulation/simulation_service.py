@@ -1,12 +1,11 @@
-import sys
-sys.path.append("D:/Projeler/abm/abmem_project/test")
-from django_model.db.models import Simulation
-from django_model.db.models.enums import *
-from services.file_reader import reader_service as ReaderService
-from services.market import market_factory as MarketFactory
-from services.market import market_service as MarketService
-from services.visualization import visualization_service as VisualizationService
-from constants import *
+
+from ...models.simulation import Simulation
+from ...models.enums import *
+from ...services.file_reader import reader_service as ReaderService
+from ...services.market import market_factory as MarketFactory
+from ...services.market import market_service as MarketService
+from ...services.visualization import visualization_service as VisualizationService
+from ...constants import *
 import timeit
 
 

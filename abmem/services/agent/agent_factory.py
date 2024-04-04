@@ -1,6 +1,6 @@
-from models.agent import Agent
-from models.market import Market
-from models.enums import AgentState,AgentType
+from ...models.agent import Agent
+from ...models.market import Market
+from ...models.enums import AgentState,AgentType
 
 def create(market: Market, budget: int,type):
     type = AgentType.get(type)

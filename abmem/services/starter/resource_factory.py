@@ -1,7 +1,7 @@
 import sys
 sys.path.append("D:/Projeler/abm/abmem_project/test")
-from django_model.db.models.models import Resource
-from django_model.db.models.enums import *
+from ...models.models import Resource
+from ...models.enums import *
 from decimal import Decimal
 
 def create(name: str, energyType: EnergyType, fuelCost: Decimal, emission = Decimal) -> (Resource,bool):

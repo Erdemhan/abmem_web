@@ -1,7 +1,7 @@
 import sys
 sys.path.append("D:/Projeler/abm/abmem_project/test")
-from django_model.db.models.simulation import Simulation
-from django_model.db.models.enums import SimulationMode,SimulationState,PeriodType
+from ...models.simulation import Simulation
+from ...models.enums import SimulationMode,SimulationState,PeriodType
 
 def create(name: str, mode: SimulationMode, periodType: PeriodType, periodNumber: int) -> Simulation:
     pass

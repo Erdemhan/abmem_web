@@ -1,10 +1,10 @@
 import sys
 import os
 sys.path.append("D:/Projeler/abm/abmem_project/test")
-from django_model.db.models.models import Portfolio,Plant,Resource,Agent
-from django_model.db.models.enums import *
-from constants import *
-from services.logger.error_service import ResourceNotFoundError
+from ...models.models import Portfolio,Plant,Resource,Agent
+from ...models.enums import *
+from ...constants import *
+from ...services.logger.error_service import ResourceNotFoundError
 import logging
 
 logger = logging.getLogger('FileLogger')

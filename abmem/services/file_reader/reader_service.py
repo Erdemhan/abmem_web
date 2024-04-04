@@ -1,9 +1,8 @@
 import sys
-sys.path.append("D:/Projeler/abm/abmem_project/test")
 import pandas as pd
-from django_model.db.models.enums import *
+from ...models.enums import *
 import yaml
-from constants.paths import DATAPATH,SIMULATION_DATA_PATH
+from ...constants.paths import DATAPATH,SIMULATION_DATA_PATH
 import logging
 
 # TODO: yaml scheme validator / checkers (IO operations, consistency agent portfolio resources already saved?) / ErrorService / 

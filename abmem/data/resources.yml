@@ -15,7 +15,7 @@ resources:
     energytype: FOSSIL
     fuelcost: 40
     emission: 0 
-  - name: wind
+  - name: winds
     energytype: RENEWABLE
     fuelcost: 0
     emission: 0 

@@ -1,7 +1,13 @@
 from django.shortcuts import render, redirect
 from .forms import ResourceForm, PortfolioForm, PlantForm, PeriodForm, OfferForm
 from .models.models import Resource, Portfolio, Plant, Period, Offer
+from django.http.response import HttpResponse
+from .services.starter import starter_service as StarterService
 
+
+def index(request):
+    StarterService.start()
+    return HttpResponse("Started")
 
 #RESOURCE
 

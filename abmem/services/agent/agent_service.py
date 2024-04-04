@@ -1,10 +1,14 @@
 import sys
 sys.path.append("D:/Projeler/abm/abmem_project/test")
-from django_model.db.models.enums import AgentState
-from django_model.db.models import Agent,Offer,Portfolio,Resource
-from services.file_reader import reader_service as ReaderService
-from services.agent import portfolio_factory as PortfolioFactory
-from services.agent import offer_factory as OfferFactory
+
+import django
+django.setup()
+
+from ...models.enums import AgentState
+from ...models import Agent,Offer,Portfolio,Resource
+from ...services.file_reader import reader_service as ReaderService
+from ...services.agent import portfolio_factory as PortfolioFactory
+from ...services.agent import offer_factory as OfferFactory
 import random
 
 def init(agent: Agent, portfolioData: dict):
@@ -46,6 +50,7 @@ def createPortfolio(agent: Agent, plantsData: dict) -> Portfolio:
 
 
 def run(agent: Agent) -> bool:
+
     if agent.state == AgentState.CREATED:
         print("entered to agent init in run")
         agent.__init__()

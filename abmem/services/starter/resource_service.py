@@ -1,8 +1,8 @@
 import sys
 sys.path.append("D:/Projeler/abm/abmem_project/test")
-from django_model.db.models.models import Resource
-from services.starter import resource_factory as ResourceFactory
-from constants import *
+from ...models.models import Resource
+from ...services.starter import resource_factory as ResourceFactory
+from ...constants import *
 
 
 def createFromData(resourcesData: dict) -> [Resource]:
