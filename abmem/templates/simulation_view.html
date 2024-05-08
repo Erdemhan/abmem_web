@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Simulation Details</title>
+</head>
+<body>
+  <div class="container">
+    <h1>Simulation Details</h1>
+    <table class="table table-striped">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Created At</th>
+          <th>Updated At</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for simulation in latest_simulations %}
+        <tr>
+            <td>{{ simulation.name }}</td>
+            <td>{{ simulation.created_at }}</td>
+            <td>{{ simulation.updated_at }}</td>
+            <td>{{ simulation.state }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <h2>Latest Simulation Results</h2>
+    {% if latest_simulations %}
+      <table class="table table-striped">
+        <thead>
+          <tr>
+            <th>Metric</th>
+            <th>Value</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for simulation in latest_simulations %}
+            {% for metric, value in simulation.results.items %}
+              <tr>
+                <td>{{ metric }}</td>
+                <td>{{ value }}</td>
+              </tr>
+            {% endfor %}
+          {% endfor %}
+        </tbody>
+      </table>
+    {% else %}
+      <p>No simulation results available.</p>
+    {% endif %}
+  </div>
+</body>
+</html>

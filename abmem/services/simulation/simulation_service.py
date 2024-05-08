@@ -34,12 +34,13 @@ def readMarketData() -> dict:
 def run(simulation: Simulation) -> bool:
     isOk = True
     start = timeit.default_timer()
+    tOffers = []
     if simulation.market.state == MarketState.CREATED:
         simulation.market.init()
         print("market inited")
     while simulation.currentPeriod < simulation.periodNumber:
         print("market run start")
-        MarketService.run(simulation.market)
+        tOffers.append(MarketService.run(simulation.market))
         simulation.currentPeriod += 1
         simulation.state = SimulationState.STARTED
         simulation.save()
@@ -53,6 +54,6 @@ def run(simulation: Simulation) -> bool:
     print("sim viz")
     VisualizationService.visulaizeSimulation(simulation.market.period_set.all())
     #print("T: " , timeit.default_timer() - start)
-    return isOk
+    return tOffers
 
 

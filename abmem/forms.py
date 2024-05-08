@@ -1,10 +1,9 @@
 from django import forms
 from .models.models import Resource, Portfolio, Plant, Period, Offer
-
 class ResourceForm(forms.ModelForm):
     class Meta:
         model = Resource
-        fields = ['energyType', 'name', 'fuelCost', 'emission']
+        fields = ['name', 'energyType',  'emission', 'fuelCost']
 
 class PortfolioForm(forms.ModelForm):
     class Meta:

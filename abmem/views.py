@@ -1,23 +1,50 @@
 from django.shortcuts import render, redirect
 from .forms import ResourceForm, PortfolioForm, PlantForm, PeriodForm, OfferForm
 from .models.models import Resource, Portfolio, Plant, Period, Offer
+from .models import Simulation, Agent, enums
 from django.http.response import HttpResponse
 from .services.starter import starter_service as StarterService
+from django.http import HttpResponseNotFound
 
 
-def index(request):
-    StarterService.start()
-    return HttpResponse("Started")
+def start(request):
+    offers = StarterService.start()
+    return HttpResponse(offers)
 
-#RESOURCE
+
+def dashboard(request):
+    num_resources = Resource.objects.count()
+    num_agents = Agent.objects.count()
+    num_simulations = Simulation.objects.count()
+    latest_simulations = Simulation.objects.order_by('-created_at')[:5]
+    context = {
+        'num_resources': num_resources,
+        'num_agents': num_agents,
+        'num_simulations': num_simulations,
+        'latest_simulations': latest_simulations
+    }
+    return render(request, 'pages/dashboard.html', context)
+
+
+def blank(request):
+    return render(request, 'pages/blank.html')
+
+
 
 def resource_list(request):
     resources = Resource.objects.all()
-    return render(request, 'resource_list.html', {'resources': resources})
+    return render(request, 'pages/resource-list.html', {'resources': resources})
 
-def resource_detail(request, pk):
-    resource = Resource.objects.get(pk=pk)
-    return render(request, 'resource_detail.html', {'resource': resource})
+'''def resource_detail(request, resource_id):
+    resource = Resource.objects.filter(id=resource_id).first()
+    if resource:
+        resourceDTO={'energyType':resource.energyType, 
+                'name': resource.name, 
+                'fuelCost': resource.fuelCost, 
+                'emission': resource.emission}
+        return render(request, 'pages/resource-view.html', {'resource': resourceDTO})
+    else:
+        return HttpResponseNotFound("KAYNAK BULUNAMADI")'''
 
 def resource_create(request):
     if request.method == 'POST':
@@ -27,25 +54,45 @@ def resource_create(request):
             return redirect('resource_list')
     else:
         form = ResourceForm()
-    return render(request, 'resource_form.html', {'form': form})
+    return redirect(resource_list)
 
-def resource_update(request, pk):
-    resource = Resource.objects.get(pk=pk)
+def resource_delete(request, resource_id):
+    resource = Resource.objects.get(id=resource_id)
+    if request.method == 'GET' and resource:
+        resource.delete()
+        return redirect('resource_list')
+    else:
+        return HttpResponseNotFound("KAYNAK BULUNAMADI")
+
+def resource_update(request, resource_id):
+    resource = Resource.objects.get(id=resource_id)
     if request.method == 'POST':
         form = ResourceForm(request.POST, instance=resource)
         if form.is_valid():
             form.save()
             return redirect('resource_list')
     else:
-        form = ResourceForm(instance=resource)
-    return render(request, 'resource_form.html', {'form': form})
+        return HttpResponseNotFound("KAYNAK BULUNAMADI")
 
-def resource_delete(request, pk):
-    resource = Resource.objects.get(pk=pk)
-    if request.method == 'POST':
-        resource.delete()
-        return redirect('resource_list')
-    return render(request, 'resource_confirm_delete.html', {'resource': resource})
+
+def simulation_list(request):
+    simulations = Simulation.objects.order_by('-created_at')
+    return render(request, 'pages/simulation-list.html', {'simulations': simulations})
+
+def simulation_create(request):
+    simulations = Simulation.objects.order_by('-created_at')
+    return render(request, 'pages/simulation-create.html', {'simulations': simulations})
+
+def simulation_view(request, sim_id):
+    simulations = Simulation.objects.order_by('-created_at')
+    return render(request, 'pages/blank.html', {'simulations': simulations})
+
+
+
+
+
+#RESOURCE
+
 
 
 #PORTFOLIO

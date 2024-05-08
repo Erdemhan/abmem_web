@@ -1,0 +1,33 @@
+<resource-form>
+    <div class="card-body">
+        <form role="form text-left" action="create" method="post" id="res-form-modal">
+            {% csrf_token %}
+            <div class="mb-3">
+                <input type="text" id="name" name="name" class="form-control" placeholder="Name" aria-label="Name"
+                    aria-describedby="email-addon" value="{{ resource.name|default_if_none:''}}">
+            </div>
+            <div class="mb-3">
+                <div class="form-group">
+                    <label for="energyType">Energy type
+                    </label>
+                    <select class="form-control" id="energyType" name="energyType" >
+                        <option value="0">RENEWABLE</option>
+                        <option value="1" >FOSSIL</option>
+                        <option value="2" >NUCLEAR</option>
+                    </select>
+                </div>
+            </div>
+            <div class="mb-3">
+                <input type="number" id="emission"  name="emission" class="form-control" placeholder="Emission" aria-label="Emission"
+                    aria-describedby="password-addon" >
+            </div>
+            <div class="mb-3">
+                <input type="number" id="fuelCost" name="fuelCost" class="form-control" placeholder="FuelCost" aria-label="FuelCost"
+                    aria-describedby="password-addon" >
+            </div>
+            <div class="text-center">
+                <button type="submit" class="btn bg-gradient-dark w-100 my-4 mb-2">Save</button>
+            </div>
+        </form>
+    </div>
+</resource-form>

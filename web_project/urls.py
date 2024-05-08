@@ -1,8 +1,7 @@
-from django.urls import path
-
-from django.urls import path
-from . import views
+from django.urls import path,include
+from django.contrib import admin
 
 urlpatterns = [
-    path('resource/', views.resource_create, name='resource')
+    path('dev/', include( 'abmem.urls')),
+    path('admin/', admin.site.urls)
 ]

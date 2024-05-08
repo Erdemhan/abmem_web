@@ -155,7 +155,7 @@ def run(market: Market) -> bool:
     print("period details will be shown")
     showPeriodDetails(period)
     print(timeit.default_timer() - start)
-    return True
+    return offers
 
 def getDemand() -> int:
     return 1630

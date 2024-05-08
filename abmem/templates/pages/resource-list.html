@@ -1,0 +1,220 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <title>
+    ABMEM SIMULATION
+  </title>
+  <!--     Fonts and icons     -->
+  <link href="https://fonts.googleapis.com/css?family=Open+Sans:300,400,600,700" rel="stylesheet" />
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
+  <!-- MDB -->
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/7.2.0/mdb.min.css" rel="stylesheet" />
+  <!-- Nucleo Icons -->
+  <link href="{% static 'assets/css/nucleo-icons.css' %}" rel="stylesheet" />
+  <link href="{% static 'assets/css/nucleo-svg.css' %}" rel="stylesheet" />
+  <!-- Font Awesome Icons -->
+  <script src="https://kit.fontawesome.com/42d5adcbca.js" crossorigin="anonymous"></script>
+  <link href="{% static 'assets/css/nucleo-svg.css' %}" rel="stylesheet" />
+  <!-- CSS Files -->
+  <link id="pagestyle" href="{% static 'assets/css/soft-ui-dashboard.css' %}" rel="stylesheet" />
+  <link id="pagestyle" href="{% static 'assets/css/abmem.css' %}" rel="stylesheet" />
+
+  <script src="https://code.jquery.com/jquery-3.7.1.min.js"
+    integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=" crossorigin="anonymous"></script>
+
+</head>
+
+
+
+<body class="g-sidenav-show  bg-gray-100">
+
+
+  <!-- SIDEBAR -->
+  <aside class="sidenav navbar navbar-vertical navbar-expand-xs border-0 border-radius-xl my-3 fixed-start ms-3 "
+    id="sidenav-main">
+    {% include '../static/assets/components/sidebar.html' %}
+  </aside>
+  <!-- END SIDEBAR -->
+
+
+  <!-- MAIN-->
+  <main class="main-content position-relative max-height-vh-100 h-100 border-radius-lg ">
+
+    <!-- NAVBAR -->
+    {% include '../static/assets/components/navbar.html' with contextName="Resource" pageName="Resources" topPageName="ABMEM" %}
+    <!-- END NAVBAR -->
+
+    <!-- CONTAINER -->
+    <div class="container-fluid py-4">
+
+      <!-- MENU ROW 1  -->
+      <div class="row">
+        <div class="col-xl-3 col-sm-6 mb-xl-0 mb-4 zoom4-1">
+          <div class="card">
+            <div class="card-body p-3">
+              <div type="button" id="create-res" >
+                <div class="row align-items-center">
+                  <div class="col-8">
+                    <div class="numbers align-items-center">
+                      <h5 class="font-weight-bolder ">
+                        Create Resource
+                      </h5>
+                    </div>
+                  </div>
+                  <div class="col-4 text-end">
+                    <div class="icon icon-shape bg-gradient-primary shadow text-center border-radius-md">
+                      <i class="fas fa-plus"></i>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+
+
+        <!-- Modal -->
+        <div class="modal fade" id="resource-modal" tabindex="-1" role="dialog" aria-labelledby="resource-modal"
+          aria-hidden="true">
+          <div class="modal-dialog modal-dialog-centered" role="document">
+            <div class="modal-content">
+              <div class="modal-header">
+                <h5 class="modal-title" id="resource-modal-label">Resource</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">
+                  <span aria-hidden="true">&times;</span>
+                </button>
+              </div>
+              <div class="modal-body">
+                {% include '../static/assets/components/resource-form.html' %}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- END MENU ROW 1  -->
+        <div class="row my-4">
+          <div class="col-12">
+            <div class="card mb-4">
+              <div class="card-header pb-0">
+                <h6>Resources</h6>
+              </div>
+              <div class="card-body px-0 pb-2 pt-0">
+                <div class="table-responsive">
+                  <table class="table align-items-center mb-0">
+                    <thead>
+                      <tr>
+                        <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Name</th>
+                        <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">Energy Type
+                        </th>
+                        <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Fuel Cost</th>
+                        <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">Emission</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        {% for resource in resources %}
+                        <td>
+                          <div class="d-flex px-2 py-1">
+                            <div class="text-center d-flex flex-column justify-content-center ">
+                              <h6 class="mb-0 text-sm">{{resource.name}}</h6>
+                            </div>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="d-flex px-2 py-1">
+                            <div class=" text-center d-flex flex-column justify-content-center">
+                              <h6 class="mb-0 text-sm">{{resource.energyType}}</h6>
+                            </div>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="d-flex px-2 py-1">
+                            <div class="d-flex flex-column justify-content-center">
+                              <h6 class="mb-0 text-sm">{{resource.fuelCost}}</h6>
+                            </div>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="d-flex px-2 py-1">
+                            <div class="d-flex flex-column justify-content-center">
+                              <div>
+                                <h6 class="mb-0 text-sm">{{resource.emission}}</h6>
+                              </div>
+                            </div>
+                          </div>
+                        </td>
+                        <td>
+                          <row class="row">
+                            <!-- Button trigger modal -->
+                            <div type="button"
+                              class="icon icon-shape bg-gradient-primary shadow text-center border-radius-md zoom4-1"
+                              id="pen-{{ resource.id }}">
+                              <i class="fa-solid fa-pencil"></i>
+                            </div>
+                            <div class="col-2 ">
+                              <form action="delete/{{ resource.id }}" method="DELETE">
+                                <button type="submit"  class=" center icon icon-shape bg-gradient-danger text-center border-radius-md zoom4-1" style="border:none ">
+                                <i class="fa-solid fa-trash mb-5"></i>
+                              </button>
+                            </form>
+                            </div>                                
+                          </row>
+
+                        </td>
+                      </tr>
+                      {% endfor %}
+
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+      <!-- END CONTAINER -->
+
+  </main>
+  <!-- END MAIN-->
+
+  <script type="text/javascript">
+    {% for resource in resources %}
+    $("#pen-{{ resource.id }}").click(function () {
+      $("#resource-modal").modal('show');
+      $("#res-form-modal").attr('action', '{{ resource.id }}');
+      $("#name").val('{{ resource.name }}');
+      $("#energyType").val('{{ resource.energyType.value }}').change();
+      $("#emission").val('{{ resource.emission }}');
+      $("#fuelCost").val('{{ resource.fuelCost }}');
+    });
+    {% endfor %}
+
+  </script>
+
+  <script type="text/javascript">
+    $("#create-res").on("click", function () {
+      $('#resource-modal').modal('show');
+    });
+  </script>
+
+
+  <!--   Core JS Files   -->
+  <script src="{% static 'assets/js/core/popper.min.js' %}"></script>
+  <script src="{% static 'assets/js/core/bootstrap.min.js' %}"></script>
+  <script src="{% static 'assets/js/plugins/perfect-scrollbar.min.js' %}"></script>
+  <script src="{% static 'assets/js/plugins/smooth-scrollbar.min.js' %}"></script>
+  <script src="{% static 'assets/js/plugins/chartjs.min.js' %}"></script>
+  <!-- Github buttons -->
+  <script async defer src="https://buttons.github.io/buttons.js"></script>
+  <!-- MDB -->
+  <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/7.2.0/mdb.umd.min.js"></script>
+
+</body>
+
+</html>
