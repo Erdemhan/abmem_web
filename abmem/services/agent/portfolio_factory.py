@@ -26,3 +26,9 @@ def createPlant(portfolio: Portfolio, plantData: dict):
         plant.save()
         return plant
 
+def createPlant(portfolio: Portfolio, resource: Resource, capacity):
+
+        plant = Plant(portfolio= portfolio, resource= resource, capacity=capacity) 
+        plant.save()
+        return plant
+

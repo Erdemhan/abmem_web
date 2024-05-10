@@ -9,6 +9,7 @@ urlpatterns = [
     path('simulation/create', views.simulation_create, name='simulation_create'),
     path('simulation/list', views.simulation_list, name='simulation_list'),
     path('simulation/<int:sim_id>', views.simulation_view, name='simulation_view'),
+    path('agent/create', views.create_agent_and_related, name='agent_create'),
     path('blank/', views.blank, name='blank'),
     path('start', views.start, name='start'),
     path('', views.dashboard, name='dashboard'),

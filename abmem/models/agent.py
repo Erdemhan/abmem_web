@@ -11,7 +11,7 @@ from django.db import models
 
 # AGENT
 class Agent(Base):
-    market = models.ForeignKey(Market,on_delete=models.CASCADE,null=False)
+    market = models.ForeignKey(Market,on_delete=models.CASCADE,null=True)
     state = enum.EnumField(AgentState,null=True,default=AgentState.CREATED)
     budget = models.DecimalField(decimal_places=2,max_digits=12,null=False,default=0)
     type = enum.EnumField(AgentType,null=True,default=AgentType.FOSSIL)
@@ -20,6 +20,11 @@ class Agent(Base):
         super().__init__(*args, **kwargs)
         self.state = AgentState.INITIALIZED
         self.save()
+
+
+class AgentProxy(Agent):
+    class Meta:
+        proxy = True
      
     
 

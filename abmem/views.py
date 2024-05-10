@@ -1,10 +1,11 @@
 from django.shortcuts import render, redirect
-from .forms import ResourceForm, PortfolioForm, PlantForm, PeriodForm, OfferForm
+from .forms import ResourceForm, PortfolioForm, PlantForm, PeriodForm, OfferForm, AgentForm
 from .models.models import Resource, Portfolio, Plant, Period, Offer
 from .models import Simulation, Agent, enums
 from django.http.response import HttpResponse
 from .services.starter import starter_service as StarterService
 from django.http import HttpResponseNotFound
+from .services.agent import portfolio_factory as PortfolioFactory
 
 
 def start(request):
@@ -27,10 +28,12 @@ def dashboard(request):
 
 
 def blank(request):
-    return render(request, 'pages/blank.html')
+    resources = Resource.objects.all()
+    return render(request, 'pages/blank.html', {'resources': resources})
 
 
 
+#RESOURCE
 def resource_list(request):
     resources = Resource.objects.all()
     return render(request, 'pages/resource-list.html', {'resources': resources})
@@ -75,6 +78,8 @@ def resource_update(request, resource_id):
         return HttpResponseNotFound("KAYNAK BULUNAMADI")
 
 
+
+#SIMULATION
 def simulation_list(request):
     simulations = Simulation.objects.order_by('-created_at')
     return render(request, 'pages/simulation-list.html', {'simulations': simulations})
@@ -88,10 +93,37 @@ def simulation_view(request, sim_id):
     return render(request, 'pages/blank.html', {'simulations': simulations})
 
 
+#AGENT
+def proxyAgent_create(request):
+    if request.method == 'POST':
+        form = ResourceForm(request.POST)
+        if form.is_valid():
+            form.save()
+            return redirect('resource_list')
+    else:
+        form = ResourceForm()
+    return redirect(resource_list)
 
+def create_agent_and_related(request):
+    if request.method == 'GET':
+        return render(request, 'pages/agent-create.html')
 
+    if request.method == 'POST':
+        agent_form = AgentForm(request.POST)
+        resources = request.POST.getlist('resources[]')
+        capacities = request.POST.getlist('capacities[]')
+        plant_forms = [PlantForm({'resource': resource, 'capacity': capacity}) for resource, capacity in zip(resources, capacities)]
 
-#RESOURCE
+        if agent_form.is_valid() and all([form.is_valid() for form in plant_forms]):
+            agent = agent_form.save()
+            portfolio = Portfolio.objects.create(agent=agent)
+            
+            for form in plant_forms:
+                capacity = form.cleaned_data['capacity']
+                Plant.objects.create(portfolio=portfolio, resource=form.cleaned_data['resource'], capacity=capacity)
+            
+            return redirect('dashboard')
+
 
 
 
