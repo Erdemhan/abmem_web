@@ -5,7 +5,7 @@ import yaml
 from ...constants.paths import DATAPATH,SIMULATION_DATA_PATH
 import logging
 
-# TODO: yaml scheme validator / checkers (IO operations, consistency agent portfolio resources already saved?) / ErrorService / 
+# TODO: yaml scheme validator / checkers (IO operations, consistency agent portfolio resources already saved?)
 logger = logging.getLogger('FileLogger')
 
 

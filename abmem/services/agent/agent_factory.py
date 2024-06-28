@@ -2,8 +2,7 @@ from ...models.agent import Agent
 from ...models.market import Market
 from ...models.enums import AgentState,AgentType
 
-def create(market: Market, budget: int,type):
-    type = AgentType.get(type)
-    agent = Agent(market= market, state= AgentState.CREATED, budget= budget, type= type)
+def create(market: Market,name: str, budget: int,type: AgentType, proxy: bool):
+    agent = Agent(market= market,name=name, state= AgentState.CREATED, budget= budget, type= type, proxy=proxy)
     agent.save()
     return  agent

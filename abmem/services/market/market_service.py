@@ -16,16 +16,12 @@ import timeit
 
 def init(market: Market) -> None:
     market.state = MarketState.INITIALIZED
-    agentData = readAgentData()
-    agents = createAgents(market,agentData)
-    for agentData,agent in zip(agentData,agents):
-        AgentService.init(agent= agent,portfolioData= agentData[AGENTS_PORTFOLIO_KEY])
     market.save()
 
 def startPool(market: Market) -> None:
     market.state = MarketState.WAITINGAGENTS
     market.save()
-    agents = market.agent_set.all()
+    agents = list(market.agent_set.all())
     return ParallelService.startPool(agents)
 
 from collections import defaultdict
@@ -129,6 +125,7 @@ def payasptf(offers: [Offer], ptf: int):
             offer.acceptancePrice = ptf
     return offers
 
+import time
 def run(market: Market) -> bool:
     start = timeit.default_timer()
     
@@ -158,4 +155,4 @@ def run(market: Market) -> bool:
     return offers
 
 def getDemand() -> int:
-    return 1630
+    return 1500

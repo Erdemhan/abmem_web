@@ -1,0 +1,302 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>ABMEM SIMULATION</title>
+    <!-- Fonts and icons -->
+    <link href="https://fonts.googleapis.com/css?family=Open+Sans:300,400,600,700" rel="stylesheet" />
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
+    <!-- MDB -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/7.2.0/mdb.min.css" rel="stylesheet" />
+    <!-- Nucleo Icons -->
+    <link href="{% static 'assets/css/nucleo-icons.css' %}" rel="stylesheet" />
+    <link href="{% static 'assets/css/nucleo-svg.css' %}" rel="stylesheet" />
+    <!-- Font Awesome Icons -->
+    <script src="https://kit.fontawesome.com/42d5adcbca.js" crossorigin="anonymous"></script>
+    <link href="{% static 'assets/css/nucleo-svg.css' %}" rel="stylesheet" />
+    <!-- CSS Files -->
+    <link id="pagestyle" href="{% static 'assets/css/soft-ui-dashboard.css' %}" rel="stylesheet" />
+    <link id="pagestyle" href="{% static 'assets/css/abmem.css' %}" rel="stylesheet" />
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"
+        integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=" crossorigin="anonymous"></script>
+
+
+    <script>
+        function nextPeriod() {
+            $.ajax({
+                url: "{% url 'nextPeriod' %}",  // Adjust the URL pattern name
+                data: {
+                    'simulation_id': {{ simulation_id }}
+            },
+        dataType: 'json',
+            success: function (data) {
+            },
+        error: function (xhr, status, error) {
+            console.error('Error fetching simulation status:', error);
+        }
+    })
+    };
+
+    </script>
+</head>
+
+<body class="g-sidenav-show bg-gray-100">
+
+
+    <!-- SIDEBAR -->
+    <aside class="sidenav navbar navbar-vertical navbar-expand-xs border-0 border-radius-xl my-3 fixed-start ms-3"
+        id="sidenav-main">
+        {% include '../static/assets/components/sidebar.html' %}
+    </aside>
+    <!-- END SIDEBAR -->
+
+    <!-- MAIN -->
+    <main class="main-content position-relative max-height-vh-100 h-100 border-radius-lg">
+
+        <!-- NAVBAR -->
+        {% include '../static/assets/components/navbar.html' with contextName="Dashboard" pageName="Blank"
+        topPageName="ABMEM" %}
+        <!-- END NAVBAR -->
+
+        <!-- CONTAINER -->
+        <div class="container-fluid py-4">
+            <row>
+                <div class="row ">
+                    <h4 class="modal-title pb-3" id="resource-modal-label">Simulation Status</h4>
+                    <div class="card pt-3">
+                        <div class="row " id="simulation-status">
+                            <div class="col mb-3">
+                                <p>Status: <span span id="status"
+                                        class="badge badge-sm bg-gradient-primary">CREATED</span></p>
+                            </div>
+                            <div class="col mb-3">
+                                <p>Market Status: <span span id="marketStatus"
+                                        class="badge badge-sm bg-gradient-primary">CREATED</span></p>
+                            </div>
+                            <div class="col mb-3">
+                                <p>Current Period: <span id="period"></span></p>
+                            </div>
+                        </div>
+                        <div class="row " id="nextRow">
+                            <div class="form-group col">
+                                <button type="button" class="btn btn-info" onclick="nextPeriod()">Continue</button>
+                            </div>
+                        </div>
+                    </div>
+                    <!-- AGENTS TABLE -->
+                    <div class="row px-0 pt-3">
+                        <div class="col-12 px-0">
+                            <div class="card mb-2">
+                                <div class="card-header pb-0">
+                                    <h4>Agents</h4>
+                                </div>
+                                <div class="card-body px-0 pb-2 pt-0">
+                                    <div class="table-responsive">
+                                        <table class="table align-items-center mb-0" id="agents-table">
+                                            <thead>
+                                                <tr>
+                                                    <th
+                                                        class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">
+                                                        Name</th>
+                                                    <th
+                                                        class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">
+                                                        State</th>
+                                                    <th
+                                                        class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">
+                                                        Budget</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!--PERIOD TABLE-->
+                        <div class="row px-0 pt-1">
+                            <div class="col-12 px-0">
+                                <div class="card mb-4">
+                                    <div class="card-header pb-0">
+                                        <h4 id="offers-period">Period -1 Offers</h4>
+                                    </div>
+                                    <div class="card-body px-0 pb-2 pt-0">
+                                        <div class="table-responsive">
+                                            <table class="table align-items-center mb-0" id="period-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th
+                                                            class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">
+                                                            Agent</th>
+                                                        <th
+                                                            class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">
+                                                            Resource</th>
+                                                        <th
+                                                            class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">
+                                                            Amount</th>
+                                                        <th
+                                                            class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">
+                                                            Accepted Amount</th>
+                                                        <th
+                                                            class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">
+                                                            Offer Price</th>
+                                                        <th
+                                                            class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">
+                                                            Acceptance Price</th>
+                                                        <th
+                                                            class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">
+                                                            Acceptance</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        <!--PERIOD TABLE-->
+                    </div>
+                </div>
+            </row>
+
+
+
+            </row>
+        </div>
+        <!-- END CONTAINER -->
+
+    </main>
+    <!-- END MAIN -->
+
+
+    <script>
+
+        $(document).ready(function () {
+            $('#nextRow').hide();
+            var flag = false
+            function getSimulationStatus() {
+                $.ajax({
+                    url: "{% url 'get_simulation_status' %}",  // Adjust the URL pattern name
+                    data: {
+                        'simulation_id': {{ simulation_id }}
+        },
+            dataType: 'json',
+            success: function (data) {
+                // Check if status is FINISHED
+                /*
+                if (flag) {
+                    setTimeout(function () {
+                        window.history.back();
+                    }, 3000); // Wait for 3 seconds before redirecting
+                    return;
+                }*/
+                if (data.status === 'STARTED') {
+                    $('#status').removeClass('bg-gradient-primary');
+                    $('#status').addClass('bg-gradient-info');
+                }
+                if (data.status === 'FINISHED') {
+                    flag = true
+                    $('#status').removeClass('bg-gradient-info');
+                    $('#status').addClass('bg-gradient-success');
+                }
+                if (data.status === 'CANCELED') {
+                    flag = true
+                    $('#status').removeClass('bg-gradient-info');
+                    $('#status').removeClass('bg-gradient-primary');
+                    $('#status').addClass('bg-gradient-danger');
+                }
+                if (data.marketStatus === 'WAITINGAGENTS') {
+                    $('#marketStatus').removeClass('bg-gradient-primary');
+                    $('#marketStatus').addClass('bg-gradient-info');
+                }
+                if (data.marketStatus === 'PERIODEND') {
+                    $('#marketStatus').removeClass('bg-gradient-info');
+                    $('#marketStatus').addClass('bg-gradient-success');
+                    if (data.mode === 'PERIODBYPERIOD' && data.status != 'FINISHED') {
+                        $('#nextRow').show();
+                    } else {
+                        $('#nextRow').hide();
+                    }
+                } else {
+                    $('#nextRow').hide();
+                }
+                $('#status').text(data.status);
+                $('#marketStatus').text(data.marketStatus);
+                $('#period').text(data.period + ' / ' + data.total);
+                $('#offers-period').text('Period: ' + data.period + '   Offers');
+
+                var agentRows = '';
+                data.agents.forEach(function (agent) {
+                    agentRows += '<tr><td>' + agent.name + '</td><td>' + agent.state + '</td><td>' + agent.budget + '</td></tr>';
+                });
+                $('#agents-table tbody').html(agentRows);
+                
+                data.offers.sort(function (a, b) {
+                    return a.offerPrice - b.offerPrice;
+                });
+
+                var hasIdMinusOne = data.offers.some(function (offer) {
+                    return offer.id === -1;
+                });
+
+                var offerRows = '';
+                data.offers.forEach(function (offer) {
+                    if (hasIdMinusOne) {
+                        if (offer.id === -1) {
+                            offerRows += '<tr style="background-color: #ADD8E6;"><td>' + offer.agent + '</td><td>' + offer.resource + '</td><td>' + offer.amount + '</td><td>' + offer.acceptanceAmount + '</td><td>' + offer.offerPrice + '</td><td>' + offer.acceptancePrice + '</td><td>' + offer.acceptance + '</td></tr>';
+                        } else {
+                            if (!offer.acceptance) {
+                                offerRows += '<tr style="background-color: #FC6868;"><td>' + offer.agent + '</td><td>' + offer.resource + '</td><td>' + offer.amount + '</td><td>' + offer.acceptanceAmount + '</td><td>' + offer.offerPrice + '</td><td>' + offer.acceptancePrice + '</td><td>' + offer.acceptance + '</td></tr>';
+                            } else {
+                                offerRows += '<tr style="background-color: #7AFC68;"><td>' + offer.agent + '</td><td>' + offer.resource + '</td><td>' + offer.amount + '</td><td>' + offer.acceptanceAmount + '</td><td>' + offer.offerPrice + '</td><td>' + offer.acceptancePrice + '</td><td>' + offer.acceptance + '</td></tr>';
+                            }
+                        }
+                    }
+                    else {
+                        offerRows += '<tr><td>' + offer.agent + '</td><td>' + offer.resource + '</td><td>' + offer.amount + '</td><td>' + offer.acceptanceAmount + '</td><td>' + offer.offerPrice + '</td><td>' + offer.acceptancePrice + '</td><td>' + offer.acceptance + '</td></tr>';
+                    }
+                });
+                $('#period-table tbody').html(offerRows);
+            },
+            error: function (xhr, status, error) {
+                console.error('Error fetching simulation status:', error);
+            }
+                });
+        if (flag) {
+            clearInterval(intervalId)
+        }
+            }
+        // Initial fetch
+        getSimulationStatus();
+        var intervalId = setInterval(getSimulationStatus, 1000);
+
+
+        });
+
+    </script>
+
+
+
+    <!-- Core JS Files -->
+    <script src="{% static 'assets/js/core/popper.min.js' %}"></script>
+    <script src="{% static 'assets/js/core/bootstrap.min.js' %}"></script>
+    <script src="{% static 'assets/js/plugins/perfect-scrollbar.min.js' %}"></script>
+    <script src="{% static 'assets/js/plugins/smooth-scrollbar.min.js' %}"></script>
+    <script src="{% static 'assets/js/plugins/chartjs.min.js' %}"></script>
+    <!-- Github buttons -->
+    <script async defer src="https://buttons.github.io/buttons.js"></script>
+    <!-- MDB -->
+    <script type="text/javascript"
+        src="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/7.2.0/mdb.umd.min.js"></script>
+
+</body>
+
+</html>

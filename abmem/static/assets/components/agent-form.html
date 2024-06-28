@@ -1,15 +1,13 @@
 <agent-form>
-    <div class="card-body col-4">
-        <form role="form text-left" id="my_form" method="post" action="{% url 'agent_create' %}">
+    <div class="card-body">
+        <form role="form text-left" id="agent-form" method="post" action="create">
             {% csrf_token %}
             <!-- Agent bilgileri için alanlar -->
             <div class="mb-3">
-                <input type="text" id="agent_name" name="agent_name" class="form-control" placeholder="Name"
-                    aria-label="Name" aria-describedby="password-addon" required>
+                <input type="text" id="agent_name" name="name" class="form-control" placeholder="Name" aria-label="Name" aria-describedby="password-addon" required>
             </div>
             <div class="mb-3">
-                <input type="number" id="budget" name="budget" class="form-control" placeholder="Budget"
-                    aria-label="Budget" aria-describedby="password-addon" required>
+                <input type="number" id="budget" name="budget" class="form-control" placeholder="Budget" aria-label="Budget" aria-describedby="password-addon" required>
             </div>
             <div class="mb-3">
                 <div class="form-group">
@@ -27,10 +25,8 @@
                         <table class="table align-items-center mb-0" id="plant_table">
                             <thead>
                                 <tr>
-                                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">
-                                        Resource</th>
-                                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">
-                                        Capacity</th>
+                                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Resource</th>
+                                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">Capacity</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -47,111 +43,110 @@
                                     </td>
                                     <td>
                                         <div class="mb-3">
-                                            <input type="number" name="capacities[]" class="form-control"
-                                                placeholder="Capacity" aria-describedby="password-addon" required>
+                                            <input type="number" name="capacities[]" class="form-control" placeholder="Capacity" aria-describedby="password-addon" required>
+                                        </div>
+                                        <div class="mb-3">
+                                            <input type="text" name="proxy" class="form-control" placeholder="Capacity" aria-describedby="password-addon" hidden="true" value="True">
                                         </div>
                                     </td>
                                     <td>
                                         <div class="col mb-3">
-                                            <button type="button" onclick="deleteRow(this)"
-                                                class=" center icon icon-shape bg-gradient-danger text-center border-radius-md zoom4-1 "
-                                                style="border:none;  ">
+                                            <button type="button" onclick="deleteRow(this)" class=" center icon icon-shape bg-gradient-danger text-center border-radius-md zoom4-1 " style="border:none;">
                                                 <i class="fa-solid fa-trash mb-5"></i>
                                             </button>
                                         </div>
-
                                     </td>
                                 </tr>
                             </tbody>
                         </table>
-                            
+
                         <!-- Yeni Plant ekleme butonu -->
-                        <button type="button" class=" mt-4 col bg-gradient-primary  border-radius-md mx-3 mb-2 zoom4-1"
-                            style="border: none;" onclick="addPlantRow()">
+                        <button type="button" class="mt-4 col bg-gradient-primary  border-radius-md mx-3 mb-2 zoom4-1" style="border: none;" onclick="addPlantRow()">
                             <i class="fa-solid fa-pencil"></i>
                             Add Plant
                         </button>
 
                         <!-- Formu gönderme butonu -->
-                        <button type="button" class=" mt-4 col bg-gradient-success border-radius-md mx-3 mb-2 zoom4-1"
-                            style="border: none;" onclick="submitForm()">
+                        <button type="button" class="mt-4 col bg-gradient-success border-radius-md mx-3 mb-2 zoom4-1" style="border: none;" onclick="submitForm()" id="submit-button">
                             <i class="fas fa-plus"></i>
-                            Create Agent and Related
+                            <span>Create Agent and Related</span>
                         </button>
+                    </div>
+                </div>
+            </div>
         </form>
     </div>
-    <script>
-        function addPlantRow() {
-            var table = document.getElementById("plant_table").getElementsByTagName('tbody')[0];
-            var rowTemplate = document.getElementById("row_template");
-            var newRow = rowTemplate.cloneNode(true);
-            newRow.removeAttribute("id");
-            newRow.style.display = "table-row";
-
-            // Boş bir kaynak ve kapasite eklemek için kontrol yapalım
-            var selectElement = newRow.querySelector('select[name="resources[]"]');
-            selectElement.value = ""; // Boş kaynak
-            var inputElement = newRow.querySelector('input[name="capacities[]"]');
-            inputElement.value = ""; // Boş kapasite
-
-            table.appendChild(newRow);
-        }
-
-        function deleteRow(button) {
-            var row = button.parentNode.parentNode;
-            row.parentNode.removeChild(row);
-        }
-
-        function submitForm() {
-            // Agent bilgileri için alanları al
-            var agentName = document.getElementById("agent_name").value.trim();
-            var budget = document.getElementById("budget").value.trim();
-            var energyType = document.getElementById("type").value;
-
-            // Agent adı, bütçe ve enerji tipi alanlarını kontrol et
-            if (agentName === "" || budget === "" || energyType === "") {
-                // Eğer herhangi biri boşsa, kullanıcıya uyarı ver ve formu gönderme
-                alert("Please fill in all agent details.");
-                return;
-            }
-
-            // Tüm satırları al
-            var rows = document.querySelectorAll("#plant_table tbody tr");
-            var resourcesAdded = false; // Kaynak eklenip eklenmediğini belirlemek için değişken
-
-            // Her satır için kontrol yap
-            for (var i = 0; i < rows.length; i++) {
-                // Satırdaki kaynak ve kapasite alanlarını al
-                var resourceSelect = rows[i].querySelector('select[name="resources[]"]');
-                var capacityInput = rows[i].querySelector('input[name="capacities[]"]');
-
-                // Eğer kaynak veya kapasite alanlarından biri boş değilse
-                if (resourceSelect.value !== "" && capacityInput.value !== "") {
-                    resourcesAdded = true; // En az bir kaynak eklenmiş
-                }
-
-                // Eğer kaynak veya kapasite alanlarından biri boşsa ve bu alan row template değilse
-                if (!capacityInput.closest("#row_template") && (resourceSelect.value === "" || capacityInput.value === "")) {
-                    // Kullanıcıya uyarı ver ve formu gönderme
-                    alert("Please fill in all resource details.");
-                    return;
-                }
-            }
-
-            // Eğer hiçbir kaynak eklenmemişse
-            if (!resourcesAdded) {
-                // Kullanıcıya uyarı ver ve formu gönderme
-                alert("Please add at least one resource.");
-                return;
-            }
-
-            // Row template'i göndermeyi önlemek için kaldır
-            var rowTemplate = document.getElementById("row_template");
-            rowTemplate.remove();
-
-            // Formu gönder
-            document.getElementById("my_form").submit();
-        }
-
-    </script>
 </agent-form>
+
+<script>
+    function addPlantRow() {
+        var table = document.getElementById("plant_table").getElementsByTagName('tbody')[0];
+        var rowTemplate = document.getElementById("row_template");
+        var newRow = rowTemplate.cloneNode(true);
+        newRow.removeAttribute("id");
+        newRow.style.display = "table-row";
+
+        var selectElement = newRow.querySelector('select[name="resources[]"]');
+        selectElement.value = "";
+        var inputElement = newRow.querySelector('input[name="capacities[]"]');
+        inputElement.value = "";
+
+        table.appendChild(newRow);
+    }
+
+    function deleteRow(button) {
+        var row = button.closest("tr");
+        row.remove();
+    }
+
+    function submitForm() {
+        var agentName = document.getElementById("agent_name").value.trim();
+        var budget = document.getElementById("budget").value.trim();
+        var energyType = document.getElementById("type").value;
+
+        if (agentName === "" || budget === "" || energyType === "") {
+            alert("Please fill in all agent details.");
+            return;
+        }
+
+        var rows = document.querySelectorAll("#plant_table tbody tr");
+        var resourcesAdded = false;
+
+        for (var i = 0; i < rows.length; i++) {
+            var resourceSelect = rows[i].querySelector('select[name="resources[]"]');
+            var capacityInput = rows[i].querySelector('input[name="capacities[]"]');
+
+            if (resourceSelect.value !== "" && capacityInput.value !== "") {
+                resourcesAdded = true;
+            }
+
+            if (!capacityInput.closest("#row_template") && (resourceSelect.value === "" || capacityInput.value === "")) {
+                alert("Please fill in all resource details.");
+                return;
+            }
+        }
+
+        if (!resourcesAdded) {
+            alert("Please add at least one resource.");
+            return;
+        }
+
+        var rowTemplate = document.getElementById("row_template");
+        rowTemplate.remove();
+
+        var agentData = {
+            name: agentName,
+            budget: budget,
+            type: energyType
+        };
+
+        var agents = JSON.parse(localStorage.getItem("agents")) || [];
+        agents.push(agentData);
+        localStorage.setItem("agents", JSON.stringify(agents));
+
+        $("#agent-modal").modal('hide');
+
+        // Clear the form for the next agent
+        document.getElementById("agent-form").reset();
+    }
+</script>

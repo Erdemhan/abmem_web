@@ -41,7 +41,7 @@
   <main class="main-content position-relative max-height-vh-100 h-100 border-radius-lg ">
 
     <!-- NAVBAR -->
-    {% include '../static/assets/components/navbar.html' with contextName="Simulation" pageName="Simulations" topPageName="ABMEM" %}
+    {% include '../static/assets/components/navbar.html' with contextName="Simulation" pageName="Templates" topPageName="ABMEM" %}
     <!-- END NAVBAR -->
 
     <!-- CONTAINER -->
@@ -52,12 +52,12 @@
         <div class="col-xl-3 col-sm-6 mb-xl-0 mb-4 zoom4-1">
           <div class="card">
             <div class="card-body p-3">
-              <a class="nav-link  active" href="{% url 'simulation_list_proxy' %}">
+              <a class="nav-link  active" href="{% url 'create_simulation' %}">
                 <div class="row align-items-center">
                   <div class="col-8">
                     <div class="numbers align-items-center">
                       <h6 class="font-weight-bolder ">
-                        Run Simulation
+                        Create Simulation
                       </h6>
                     </div>
                   </div>
@@ -85,7 +85,7 @@
                       <tr>
                         <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Name</th>
                         <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">Created</th>
-                        <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">State</th>
+                        <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Last Update</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -108,36 +108,33 @@
                         <td>
                           <div class="d-flex px-2 py-1">
                             <div class="d-flex flex-column justify-content-center">
-                              <div>
-                                {% if simulation.state.value == 0 %}
-                                <span class="badge badge-sm bg-gradient-primary">CREATED</span>
-                                {% elif simulation.state.value == 1 %}
-                                <span class="badge badge-sm bg-gradient-info">STARTED</span>
-                                {% elif simulation.state.value == 7 %}
-                                <span class="badge badge-sm bg-gradient-success">FINISHED</span>
-                                {% elif simulation.state.value == 8 %}
-                                <span class="badge badge-sm bg-gradient-warning">STOPPED</span>
-                                {% elif simulation.state.value == 9 %}
-                                <span class="badge badge-sm bg-gradient-danger">CANCELED</span>
-                                {% else %}
-                                <span class="badge badge-sm bg-gradient-secondary">{{simulation.state}}</span>
-                                {% endif %}
-                              </div>
+                              <h6 class="mb-0 text-sm">{{simulation.updated_at}}</h6>
                             </div>
                           </div>
-                        </td>
+                        </td>                 
                         <td>
                           <row class="row">
+                            <div class="col-2 mx-2">
+                              <form action="update/{{ simulation.id }}/" method="GET">
+                                <button type="submit"
+                                  class=" center icon icon-shape bg-gradient-primary text-center border-radius-md zoom4-1"
+                                  style="border:none ">
+                                  <i class="fa-solid fa-pencil mb-5 "></i>
+                                </button>
+                              </form>
+                            </div>
+
                             <div class="col-2 mx-2">
                               <a class="nav-link active" href="{% url 'run_simulation' simulation_id=simulation.id %}">
                                 <div class="col-4 text-end">
                                   <div
                                     class="icon icon-shape bg-gradient-info shadow text-center border-radius-md zoom4-1">
-                                    <i class="fas fa-info"></i>
+                                    <i class="fas fa-play"></i>
                                   </div>
                                 </div>
                               </a>
                             </div>
+
                             <div class="col-2 mx-2">
                               <form action="delete/{{ simulation.id }}" method="DELETE">
                                 <button type="submit"

@@ -6,15 +6,18 @@ from ...models import Simulation,Resource
 from . import resource_service as ResourceService
 from ...constants import *
 import django
+import logging
 
-def start() -> None:
-    django.setup()
-    simData,resourceData = readStarterData()
-    simulation = createSimulation(simData)
-    checkResources(resourceData)
-    initSimulation(simulation)
-    offers = SimulationService.run(simulation)
-    return offers
+logger = logging.getLogger('FileLogger')
+
+def start(simulation: Simulation) -> None:
+    if simulation.proxy == False:
+        django.setup()
+        import multiprocessing
+        # multiprocessing işlemi başlatmak için bir işlem objesi oluşturun
+        process = multiprocessing.Process(target= SimulationService.run, args=(simulation,))
+        process.start()
+    return simulation.id
 
 
 def readStarterData() -> (dict,dict):

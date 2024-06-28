@@ -40,6 +40,12 @@ class Period(Base):
     ptf = models.IntegerField()
 
 
+
+
+from django.core.serializers.json import DjangoJSONEncoder
+import json
+
+
 # OFFER
 class Offer(Base):
     period = models.ForeignKey(Period, on_delete=models.CASCADE, null=False)
@@ -50,3 +56,18 @@ class Offer(Base):
     acceptance = models.BooleanField(null=True)
     acceptancePrice = models.DecimalField(decimal_places=2, max_digits=7, null=True)
     acceptanceAmount = models.IntegerField(null=True)
+
+    def to_dict(self):
+        return {
+        'id': self.id,
+        'agent': self.agent.name,
+        'resource': self.resource.name,
+        'amount': self.amount,
+        'offerPrice': str(self.offerPrice),
+        'acceptance': self.acceptance,
+        'acceptancePrice': str(self.acceptancePrice) if self.acceptancePrice is not None else None,
+        'acceptanceAmount': self.acceptanceAmount,
+        }
+
+    def to_json(self):
+        return json.dumps(self.to_dict(), cls=DjangoJSONEncoder)

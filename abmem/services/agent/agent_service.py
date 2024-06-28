@@ -16,6 +16,10 @@ def init(agent: Agent, portfolioData: dict):
     createPortfolio(agent,portfolioData)
     agent.save()
 
+def init(agent: Agent):
+    agent.state = AgentState.INITIALIZED
+    agent.save()
+
 def relearn(agent: Agent, results) -> None:
     agent.state = AgentState.LEARNING
     agent.save()
@@ -32,7 +36,6 @@ def calculateOffers(agent: Agent, prediction: int) -> [Offer]:
     agent.state = AgentState.CALCULATING
     agent.save()
     offers = []
-
     for plant in agent.portfolio.plant_set.all():
         lowerBound = plant.resource.fuelCost
         offer = OfferFactory.create(agent=agent, resource=plant.resource, amount=plant.capacity, offerPrice=random.randint(lowerBound,250))
@@ -50,10 +53,9 @@ def createPortfolio(agent: Agent, plantsData: dict) -> Portfolio:
 
 
 def run(agent: Agent) -> bool:
-
+    print(agent)
     if agent.state == AgentState.CREATED:
-        print("entered to agent init in run")
-        agent.__init__()
+        init(agent)
     print(agent.id, " entered to agent run. Budget: ", agent.budget)
     agent.state = AgentState.RUNNING
     agent.save()

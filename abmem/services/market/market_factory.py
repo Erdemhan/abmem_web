@@ -5,6 +5,13 @@ from ...models.enums import MarketStrategy,MarketState
 
 
 def create(sim, strategy: MarketStrategy,lowerBound: int, upperBound: int) -> Market:
-    market = Market(strategy= MarketStrategy[strategy], state= MarketState.CREATED, lowerBidBound= lowerBound, upperBidBound= upperBound, simulation= sim)
+    proxy = sim.proxy
+    market = Market(strategy= strategy, 
+                    state= MarketState.CREATED, 
+                    lowerBidBound= lowerBound, 
+                    upperBidBound= upperBound, 
+                    simulation= sim,
+                    proxy = proxy
+                    )
     market.save()
     return market

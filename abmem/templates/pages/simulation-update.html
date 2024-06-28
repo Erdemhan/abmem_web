@@ -5,7 +5,7 @@
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-    <title>ABMEM SIMULATION</title>
+    <title>ABMEM SIMULATION - Update</title>
     <!-- Fonts and icons -->
     <link href="https://fonts.googleapis.com/css?family=Open+Sans:300,400,600,700" rel="stylesheet" />
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
@@ -37,7 +37,7 @@
     <main class="main-content position-relative max-height-vh-100 h-100 border-radius-lg">
 
         <!-- NAVBAR -->
-        {% include '../static/assets/components/navbar.html' with contextName="Simulation" pageName="Create"  topPageName="ABMEM" %}
+        {% include '../static/assets/components/navbar.html' with contextName="Dashboard" pageName="Update Simulation" topPageName="ABMEM" %}
         <!-- END NAVBAR -->
 
         <!-- CONTAINER -->
@@ -48,15 +48,15 @@
                     <form role="form text-left" id="simulation-form" class="mb-4">
                         {% csrf_token %}
                         <div class="mb-3">
-                            <input type="text" id="simulation_name" name="name" class="form-control" placeholder="Name"
-                                aria-label="Name" aria-describedby="password-addon" required>
+                            <input type="text" id="simulation_name" name="name" class="form-control"
+                                placeholder="Name" aria-label="Name" aria-describedby="password-addon" value="{{ simulation.name }}" required>
                         </div>
                         <div class="mb-3">
                             <div class="form-group">
                                 <label for="mode">Simulation Mode</label>
                                 <select class="form-control" id="mode" name="mode">
-                                    <option value="0">Period by Period</option>
-                                    <option value="1">Only Result</option>
+                                    <option value="0" {% if simulation.mode == 0 %}selected{% endif %}>Period by Period</option>
+                                    <option value="1" {% if simulation.mode == 1 %}selected{% endif %}>Only Result</option>
                                 </select>
                             </div>
                         </div>
@@ -64,14 +64,14 @@
                             <div class="form-group">
                                 <label for="periodType">Period Type</label>
                                 <select class="form-control" id="periodType" name="periodType">
-                                    <option value="0">Hour</option>
+                                    <option value="0" {% if simulation.periodType == 0 %}selected{% endif %}>Hour</option>
                                 </select>
                             </div>
                         </div>
                         <div class="mb-3">
                             <input type="number" id="periodNumber" name="periodNumber" class="form-control"
-                                placeholder="Period Number" aria-label="Period Number" aria-describedby="password-addon"
-                                required>
+                                placeholder="Period Number" aria-label="Period Number"
+                                aria-describedby="password-addon" value="{{ simulation.periodNumber }}" required>
                         </div>
 
                 </div>
@@ -81,20 +81,20 @@
                         <div class="form-group">
                             <label for="mode">Market Strategy</label>
                             <select class="form-control" id="strategy" name="strategy">
-                                <option value="0">Pay as Bid</option>
-                                <option value="1">Pay as MCP</option>
+                                <option value="0" {% if simulation.market.strategy == 0 %}selected{% endif %}>Pay as Bid</option>
+                                <option value="1" {% if simulation.market.strategy == 1 %}selected{% endif %}>Pay as MCP</option>
                             </select>
                         </div>
                     </div>
                     <div class="mb-3">
                         <input type="number" id="lowerBound" name="lowerBound" class="form-control"
-                            placeholder="Lower Bid Bound" aria-label="Period Number" aria-describedby="password-addon"
-                            required>
+                            placeholder="Lower Bid Bound" aria-label="Period Number"
+                            aria-describedby="password-addon" value="{{ simulation.market.lowerBidBound }}" required>
                     </div>
                     <div class="mb-3">
                         <input type="number" id="upperBound" name="upperBound" class="form-control"
-                            placeholder="Upper Bid Bound" aria-label="Period Number" aria-describedby="password-addon"
-                            required>
+                            placeholder="Upper Bid Bound" aria-label="Period Number"
+                            aria-describedby="password-addon" value="{{ simulation.market.upperBidBound }}" required>
                     </div>
                 </div>
 
@@ -109,27 +109,70 @@
                         </tr>
                     </thead>
                     <tbody id="agents-tbody">
-                        <!-- Agent rows will be appended here -->
+                        {% for agent in simulation.market.agent_set.all %}
+                        <tr class="agent" data-index="{{ forloop.counter0 }}">
+                            <td>
+                                <input type="text" class="form-control agent-name" id="agent-name" placeholder="Name" value="{{ agent.name }}" required>
+                            </td>
+                            <td>
+                                <select class="form-control agent-type" id="agent-type">
+                                    <option value="0" {% if agent.type == 0 %}selected{% endif %}>Renewable</option>
+                                    <option value="1" {% if agent.type == 1 %}selected{% endif %}>Fossil</option>
+                                    <option value="2" {% if agent.type == 2 %}selected{% endif %}>Nuclear</option>
+                                    <option value="3" {% if agent.type == 3 %}selected{% endif %}>Hybrid</option>
+                                </select>
+                            </td>
+                            <td>
+                                <input type="number" class="form-control agent-budget" id="agent-budget" placeholder="Budget" value="{{ agent.budget }}" required>
+                            </td>
+                            <td>
+                                <table class="table table-bordered plants-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Resource</th>
+                                            <th>Capacity</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="plants-tbody">
+                                        {% for plant in agent.portfolio.plant_set.all %}
+                                        <tr class="plant" data-index="{{ forloop.counter0 }}">
+                                            <td>
+                                                <select class="form-control plant-resource" id="plant-resource" name="resources[]">
+                                                    <option value="">Select Resource</option>
+                                                    {% for resource in resources %}
+                                                    <option value="{{ resource.id }}" {% if plant.resource.id == resource.id %}selected{% endif %}>{{ resource.name }}</option>
+                                                    {% endfor %}
+                                                </select>
+                                            </td>
+                                            <td>
+                                                <input type="number" class="form-control plant-capacity" placeholder="Capacity" value="{{ plant.capacity }}" required>
+                                            </td>
+                                            <td>
+                                                <button type="button" class="btn btn-danger" onclick="removePlant({{ forloop.parentloop.counter0 }}, {{ forloop.counter0 }})">Remove Plant</button>
+                                            </td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                                <button type="button" class="btn btn-secondary" onclick="addPlant({{ forloop.counter0 }})">Add Plant</button>
+                            </td>
+                            <td>
+                                <button type="button" class="btn btn-danger" onclick="removeAgent({{ forloop.counter0 }})">Remove Agent</button>
+                            </td>
+                        </tr>
+                        {% endfor %}
                     </tbody>
                 </table>
                 <row class="form-group row">
                     <div class="form-group col">
                         <button type="button" class="btn btn-primary" onclick="createAgent()">Create Agent</button>
                     </div>
-                    <div class="form-group col">
-                        <button type="button" class="btn btn-primary" onclick="addAgent()">Add Agent</button>
-                    </div>
-
                 </row>
                 <row class="form-group row">
-                    <button type="button" class="btn btn-success col-3" onclick="submitForm()">Save Simulation</button>
+                    <button type="button" class="btn btn-success col-3" onclick="submitForm()">Update Simulation</button>
                 </row>
                 </form>
             </div>
-
-
-        </div>
-
         </div>
         <!-- END CONTAINER -->
 
@@ -137,8 +180,9 @@
     <!-- END MAIN -->
 
     <script>
-        var agents = [];
-
+        
+        var agents = collectAgentsData()
+        console.log("agents")
         function createAgent() {
             var agentIndex = agents.length;
             agents.push({ plants: [] });
@@ -181,6 +225,37 @@
             $('#agents-tbody').append(agentHtml);
         }
 
+        function collectAgentsData() {
+    var agentsData = [];
+
+    $('#agents-tbody tr.agent').each(function () {
+        var agentIndex = $(this).data('index');
+        var agentName = $(this).find('.agent-name').val();
+        var agentType = $(this).find('.agent-type').val();
+        var agentBudget = $(this).find('.agent-budget').val();
+
+        var plantsData = [];
+        $(this).find('.plants-tbody tr.plant').each(function () {
+            var plantResource = $(this).find('.plant-resource').val();
+            var plantCapacity = $(this).find('.plant-capacity').val();
+
+            plantsData.push({
+                resource: plantResource,
+                capacity: plantCapacity
+            });
+        });
+
+        agentsData.push({
+            name: agentName,
+            type: agentType,
+            budget: agentBudget,
+            plants: plantsData
+        });
+    });
+
+    return agentsData;
+}
+
         function addPlant(agentIndex) {
             var plantIndex = agents[agentIndex].plants.length;
             agents[agentIndex].plants.push({});
@@ -189,11 +264,11 @@
                 <tr class="plant" data-index="${plantIndex}">
                     <td>
                         <select class="form-control plant-resource" id="plant-resource" name="resources[]">
-                                                <option value="">Select Resource</option>
-                                                {% for resource in resources %}
-                                                <option value="{{ resource.id }}">{{ resource.name }}</option>
-                                                {% endfor %}
-                                            </select>
+                            <option value="">Select Resource</option>
+                            {% for resource in resources %}
+                            <option value="{{ resource.id }}">{{ resource.name }}</option>
+                            {% endfor %}
+                        </select>
                     </td>
                     <td>
                         <input type="number" class="form-control plant-capacity" placeholder="Capacity" required>
@@ -265,22 +340,20 @@
             };
 
             $.ajax({
-                url: "{% url 'create_simulation' %}",
+                url: "{% url 'update_simulation' simulation.id %}",
                 type: "POST",
                 data: JSON.stringify(postData),
                 contentType: "application/json",
                 success: function (response) {
                     if (response.status === 'success') {
-                        alert("Simulation created successfully!");
+                        alert("Simulation updated successfully!");
                         var baseUrl = window.location.origin;
-
-                        // Hedef URL'yi oluştur
-                        var targetUrl = baseUrl + '/dev/simulation/list-proxy';
-
-                        // Yönlendirme işlemi
-                        window.location.href = targetUrl;
+                // Hedef URL'yi oluştur
+                var targetUrl = baseUrl + '/dev/simulation/list-proxy';
+                // Hedef URL'ye yönlendir
+                window.location.href = targetUrl;
                     } else {
-                        alert("There was an error creating the simulation.");
+                        alert("There was an error updating the simulation.");
                     }
                 },
                 error: function (xhr, status, error) {

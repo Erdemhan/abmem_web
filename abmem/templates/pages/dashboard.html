@@ -49,13 +49,13 @@
         <div class="col-xl-3 col-sm-6 mb-xl-0 mb-4 zoom4-1">
           <div class="card">
             <div class="card-body p-3">
-              <a class="nav-link  active"  href="{% url 'simulation_create' %}">
+              <a class="nav-link  active"  href="{% url 'create_simulation' %}">
               <div class="row align-items-center">
                 <div class="col-8">
                   <div class="numbers align-items-center">
-                    <h5 class="font-weight-bolder ">
+                    <h6 class="font-weight-bolder ">
                       Create Simulation
-                    </h5>
+                    </h6>
                   </div>
                 </div>
                 <div class="col-4 text-end">
@@ -65,6 +65,30 @@
                 </div>
               </div>
             </a>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-xl-3 col-sm-6 mb-xl-0 mb-4 zoom4-1">
+          <div class="card">
+            <div class="card-body p-3">
+              <a class="nav-link  active"  href="{% url 'simulation_list_proxy' %}">
+              <div class="row">
+                <div class="col-8">
+                  <div class="numbers">
+                    <p class="text-sm mb-0 text-capitalize font-weight-bold">Simulation Templates</p>
+                    <h5 class="font-weight-bolder mb-0">
+                      {{ num_proxy_simulations }}
+                    </h5>
+                  </div>
+                </div>
+                <div class="col-4 text-end">
+                  <div class="icon icon-shape bg-gradient-primary shadow text-center border-radius-md">
+                    <i class="fas fa-pen-nib"></i>
+                  </div>
+                </div>
+              </div>
+              </a>
             </div>
           </div>
         </div>
@@ -84,7 +108,7 @@
                 </div>
                 <div class="col-4 text-end">
                   <div class="icon icon-shape bg-gradient-primary shadow text-center border-radius-md">
-                    <i class="ni ni-money-coins text-lg opacity-10" aria-hidden="true"></i>
+                    <i class="ni ni-world text-lg opacity-10" aria-hidden="true"></i>
                   </div>
                 </div>
               </div>
@@ -108,7 +132,7 @@
                 </div>
                 <div class="col-4 text-end">
                   <div class="icon icon-shape bg-gradient-primary shadow text-center border-radius-md">
-                    <i class="ni ni-world text-lg opacity-10" aria-hidden="true"></i>
+                    <i class="fas fa-bolt-lightning"></i>
                   </div>
                 </div>
               </div>
@@ -120,9 +144,10 @@
         
       
 
-      <div class="col-xl-3 col-sm-6 mb-xl-0 mb-4">
+<!--       <div class="col-xl-3 col-sm-6 mb-xl-0 mb-4 zoom4-1">
         <div class="card">
           <div class="card-body p-3">
+            <a class="nav-link  active"  href="{% url 'agent_list' %}">
             <div class="row">
               <div class="col-8">
                 <div class="numbers">
@@ -138,9 +163,11 @@
                 </div>
               </div>
             </div>
+          </a>
           </div>
         </div>
-      </div>
+      </div> -->
+      
     </div>
       <!-- END MENU ROW 1  -->
 
@@ -158,7 +185,6 @@
                   <tr>
                     <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Name</th>
                     <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">Created</th>
-                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Last Update</th>
                     <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">State</th>
                   </tr>
                 </thead>
@@ -176,13 +202,6 @@
                       <div class="d-flex px-2 py-1">
                         <div class=" text-center d-flex flex-column justify-content-center">
                           <h6 class="mb-0 text-sm">{{simulation.created_at}}</h6>
-                        </div>
-                      </div>
-                    </td>
-                    <td>
-                      <div class="d-flex px-2 py-1">
-                        <div class="d-flex flex-column justify-content-center">
-                          <h6 class="mb-0 text-sm">{{simulation.updated_at}}</h6>
                         </div>
                       </div>
                     </td>
@@ -208,11 +227,28 @@
                       </div>
                     </td>
                     <td>
-                      <form action="simulation/{{ simulation.id }}" method="GET">
-                        <button type="submit"  class=" center icon icon-shape bg-gradient-primary text-center border-radius-md zoom4-1" style="border:none ">
-                        <i class="fa-solid fa-pencil mb-5" ></i>
-                      </button>
-                    </form>
+                      <row class="row mx-1">
+                        <div class="col-2 mx-2">
+                          <a class="nav-link active" href="{% url 'watch_simulation' simulation_id=simulation.id %}">
+                            <div class="col-4 text-end">
+                              <div
+                                class="icon icon-shape bg-gradient-info shadow text-center border-radius-md zoom4-1">
+                                <i class="fas fa-info"></i>
+                              </div>
+                            </div>
+                          </a>
+                        </div>
+                        <div class="col-2 mx-2">
+                          <form action="simulation/delete/{{ simulation.id }}" method="DELETE">
+                            <button type="submit"
+                              class=" center icon icon-shape bg-gradient-danger text-center border-radius-md zoom4-1"
+                              style="border:none ">
+                              <i class="fa-solid fa-trash mb-5 "></i>
+                            </button>
+                          </form>
+                        </div>
+                      </row>
+
                     </td>
                   </tr>
 
@@ -260,12 +296,6 @@
 <!-- END MAIN-->
   </main>
   </div>
-
-  <script type="text/javascript">
-    $("#create-res").on("click", function () {
-      $('#resource-modal').modal('show');
-    });
-  </script>
 
 
   <!--   Core JS Files   -->
