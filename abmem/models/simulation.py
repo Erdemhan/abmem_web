@@ -16,6 +16,7 @@ class Simulation(Base):
     periodType = enum.EnumField(PeriodType,null=False)
     periodNumber = models.IntegerField(null=False)
     currentPeriod = models.IntegerField(null=False)
+    day = models.IntegerField(null=False)
 
 
     def __init__(self, *args: Any, **kwargs: Any) -> None:

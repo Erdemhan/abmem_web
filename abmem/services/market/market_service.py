@@ -1,11 +1,14 @@
 import sys
+# Add the specified directory to the system path to allow imports from that location
 sys.path.append("D:/Projeler/abm/abmem_project/test")
-from ...models.enums import MarketState,MarketStrategy
+
+# Import necessary modules and services from the project
+from ...models.enums import MarketState, MarketStrategy
 from ...services.market import period_factory as PeriodFactory
 from ...services.visualization import visualization_service as VisualizationService
-from ...models import Market,Period,Offer,Agent
+from ...models import Market, Period, Offer, Agent
 from decimal import Decimal
-from ...services.agent import agent_service as AgentService
+from ...services.algorithms import MPIP
 from ...services.agent import agent_factory as AgentFactory
 from ...services.simulation import parallel_service as ParallelService
 from ...services.file_reader import reader_service as ReaderService
@@ -13,37 +16,138 @@ from ...constants import *
 import numpy as np
 import decimal
 import timeit
+from django.db.models import Q
+
+# Initialize a global variable for market data
+marketData = []
 
 def init(market: Market) -> None:
+    global marketData
+    # Read market data from an Excel file and map the columns
+    marketData = ReaderService.readExcel(
+        path='marketData.xlsx',
+        columns=['Submitted Bid Order Volume(MWh)', 'Daily exchange rates(USD)', 
+                 'Natural Gas Price (USD/1000Sm3)', 'İstanbul average temperature'],
+        map=['demand', 'der', 'ngp', 'ist']
+    )
+    # Set the market state to INITIALIZED and save
     market.state = MarketState.INITIALIZED
     market.save()
 
+def estimatePTF(market: Market):
+    day = market.simulation.day
+    currentPeriod = market.simulation.currentPeriod
+
+    # Determine if the current day is a holiday (if day % 6 == 0)
+    holiday = 0
+    if day % 6 == 0:
+        holiday = 1
+
+    # Fetch periods for specific previous intervals (1, 24, 168, and 672 periods ago)
+    periods = market.period_set.filter(
+        Q(periodNumber=currentPeriod - 1) |
+        Q(periodNumber=currentPeriod - 24) |
+        Q(periodNumber=currentPeriod - 168) |
+        Q(periodNumber=currentPeriod - 672)
+    )
+
+    # Initialize variables for previous market clearing prices and total generation
+    mcp24 = 1
+    mcp168 = 1
+    mcp672 = 1
+    tg = 1
+
+    # Extract relevant data from previous periods
+    for period in periods:
+        if period.periodNumber == currentPeriod - 1:
+            tg = float(period.marketVolume)
+        if period.periodNumber == currentPeriod - 24:
+            mcp24 = float(period.ptf)
+        elif period.periodNumber == currentPeriod - 168:
+            mcp168 = float(period.ptf)
+        elif period.periodNumber == currentPeriod - 672:
+            mcp672 = float(period.ptf)
+
+    # Extract market data for the current period
+    der = marketData['der'][currentPeriod] # Daily Exchange Rate
+    ngp = marketData['ngp'][currentPeriod] # Natural Gas Price
+    ist = marketData['ist'][currentPeriod] # İstanbul Weather
+
+    # Initialize resource capacities
+    ng = 1
+    lig = 1
+    rhyd = 1
+    icoal = 1
+    sol = 1
+    asph = 1
+    bcoal = 1
+    imex = 1
+
+    # Sum up the capacities for each resource type based on the agents' portfolios
+    agents = market.agent_set.all()
+    for agent in agents:
+        for plant in agent.portfolio.plant_set.all():
+            if plant.resource.name == "naturalgas":
+                ng += plant.capacity
+            elif plant.resource.name == "lignite":
+                lig += plant.capacity
+            elif plant.resource.name == "hydro":
+                rhyd += plant.capacity
+            elif plant.resource.name == "importcoal":
+                icoal += plant.capacity
+            elif plant.resource.name == "solar":
+                sol += plant.capacity
+            elif plant.resource.name == "asphaltitecoal":
+                asph += plant.capacity
+            elif plant.resource.name == "blackcoal":
+                bcoal += plant.capacity
+            elif plant.resource.name == "imex":
+                imex += plant.capacity
+
+    # Calculate the PTF (Market Clearing Price) using the MPIP algorithm
+    ptf = MPIP.calculate(
+        holy=holiday, mcp24=mcp24, mcp168=mcp168, mcp672=mcp672, der=der,
+        tg=tg, ng=ng, lig=lig, rhyd=rhyd, icoal=icoal, sol=sol, asph=asph, bcoal=bcoal, imex=imex,
+        ngp=ngp, ist=ist
+    )
+    
+    print(ptf)
+    return ptf
+
 def startPool(market: Market) -> None:
+    # Set market state to WAITINGAGENTS and save
     market.state = MarketState.WAITINGAGENTS
     market.save()
+    
+    # Retrieve all agents and start the parallel service pool
     agents = list(market.agent_set.all())
     return ParallelService.startPool(agents)
 
 from collections import defaultdict
 
 def marketClearing(market: Market, offers: [Offer], demand: int):
+    # Set market state to CALCULATING and save
     market.state = MarketState.CALCULATING
     market.save()
+    
     metDemand = demand
     ptf = 0
     
-    # Fiyatlara göre teklifleri grupla
+    # Group offers by their prices
     offer_groups = defaultdict(list)
+    volume = 0
     for offer in offers:
         offer_groups[offer.offerPrice].append(offer)
+        volume += offer.amount
     
-    # Fiyat gruplarını fiyatlarına göre sırala
+    # Sort the offer groups by price in ascending order
     sorted_groups = sorted(offer_groups.items(), key=lambda x: x[0])
 
+    # Match offers to demand based on price
     for _, group in sorted_groups:
         if demand > 0:
             total_amount = sum(offer.amount for offer in group)
-            # Grubun toplam miktarı talebi karşılıyorsa
+            # If the group's total amount meets the demand
             if total_amount <= demand:
                 for offer in group:
                     offer.acceptanceAmount = offer.amount
@@ -52,17 +156,18 @@ def marketClearing(market: Market, offers: [Offer], demand: int):
                     demand -= offer.acceptanceAmount
                     ptf = offer.acceptancePrice
             else:
-                ptf = priceGroupCalculation(group,demand)
+                # If the group's total amount exceeds demand, perform recursive calculation
+                ptf = priceGroupCalculation(group, demand)
                 break
         else:
             break
     
-    return offers, metDemand - demand,ptf
+    return offers, metDemand - demand, ptf, volume
 
 def priceGroupCalculation(group: [Offer], demand: int):
-    #RECURSIVE
+    # Recursive function to calculate the PTF for the group
     ptf = 0
-    if len(group) <=0 or demand <=0:
+    if len(group) <= 0 or demand <= 0:
         return 0
     gDemand = demand / len(group)
     for offer in group:
@@ -82,11 +187,13 @@ def priceGroupCalculation(group: [Offer], demand: int):
             ptf = offer.offerPrice
     return ptf
 
-def updatePeriod(period:Period) -> Period:
+def updatePeriod(period: Period) -> Period:
+    # Save the period data and return the updated period
     period.save()
     return period
 
 def saveOffers(market: Market, offers: [Offer], ptf: Decimal) -> None:
+    # Set market state to BROADCASTING and save offers
     market.state = MarketState.BROADCASTING
     for offer in offers:
         offer.save()
@@ -95,31 +202,37 @@ def saveOffers(market: Market, offers: [Offer], ptf: Decimal) -> None:
         agent.save()
 
 def budgetCalculation(offer: Offer):
-    return  decimal.Decimal((offer.acceptanceAmount * offer.acceptancePrice)) - (offer.resource.fuelCost * decimal.Decimal(offer.acceptanceAmount))
+    # Calculate and return the budget based on the offer's acceptance amount and price
+    return decimal.Decimal((offer.acceptanceAmount * offer.acceptancePrice)) - (offer.resource.fuelCost * decimal.Decimal(offer.acceptanceAmount))
 
 def createPeriod(market: Market) -> Period:
-    return PeriodFactory.create(market= market, num= market.simulation.currentPeriod, demand= getDemand())
+    # Create and return a new period for the market
+    return PeriodFactory.create(market=market, num=market.simulation.currentPeriod, demand=getDemand(market.simulation.currentPeriod))
 
 def readAgentData() -> dict:
-    return ReaderService.readData(path= AGENT_DATA_PATH, key= AGENTS_DATA_KEY)
+    # Read and return agent data from a file
+    return ReaderService.readData(path=AGENT_DATA_PATH, key=AGENTS_DATA_KEY)
 
 def createAgents(market: Market, agentData: dict):    
+    # Create and return a list of agents based on the provided data
     agents = []
     for agent in agentData:
-        agents.append(AgentFactory.create(market= market,
-                                          budget= agent[AGENTS_BUDGET_KEY],
-                                          type= agent[AGENTS_TYPE_KEY]))
+        agents.append(AgentFactory.create(market=market,
+                                          budget=agent[AGENTS_BUDGET_KEY],
+                                          type=agent[AGENTS_TYPE_KEY]))
     return agents
 
 def showPeriodDetails(period: Period) -> None:
+    # Display details of the given period
     print("PTF: ", period.ptf)
     offers = period.offer_set.all()
     for offer in offers:
-        print("Agent: ", offer.agent.id, "Resource: ",offer.resource.name,offer.amount,"MW/h        ",
-               offer.offerPrice,"$      ", offer.acceptance," ", offer.acceptancePrice,"$   ",offer.acceptanceAmount,"/",offer.amount,"MW/h")
+        print("Agent: ", offer.agent.id, "Resource: ", offer.resource.name, offer.amount, "MW/h        ",
+              offer.offerPrice, "$      ", offer.acceptance, " ", offer.acceptancePrice, "$   ", offer.acceptanceAmount, "/", offer.amount, "MW/h")
     VisualizationService.visualizePeriod(period)
 
 def payasptf(offers: [Offer], ptf: int):
+    # Adjust acceptance prices of accepted offers to the PTF
     for offer in offers:
         if offer.acceptance:
             offer.acceptancePrice = ptf
@@ -133,20 +246,24 @@ def run(market: Market) -> bool:
         print("market inited in market service")
         init(market)
 
+    # Create a new period, estimate the PTF, and start the agent pool
     period = createPeriod(market)
-    demand = getDemand()
+    period.estimatedPtf = estimatePTF(market)
     offers = startPool(market)
     offers = np.concatenate(offers)
 
-    offers,metDemand,ptf = marketClearing(market,offers,demand)
+    # Perform market clearing and adjust offers according to the market strategy
+    offers, metDemand, ptf, volume = marketClearing(market, offers, period.demand)
     if market.strategy == MarketStrategy.PAYASPTF:
-        payasptf(offers,ptf)
+        payasptf(offers, ptf)
 
-    period.metDemand, period.ptf = metDemand, ptf
+    # Update the period and save the offers
+    period.metDemand, period.ptf, period.marketVolume = metDemand, ptf, volume
     period = updatePeriod(period=period)
-    saveOffers(market,offers,ptf)
-    print(" funcs called and period updated")
+    saveOffers(market, offers, ptf)
+    print("funcs called and period updated")
 
+    # Mark the market state as PERIODEND and save
     market.state = MarketState.PERIODEND
     market.save()
     print("period details will be shown")
@@ -154,5 +271,6 @@ def run(market: Market) -> bool:
     print(timeit.default_timer() - start)
     return offers
 
-def getDemand() -> int:
-    return 1500
+def getDemand(currentPeriod: int) -> int:
+    # Retrieve and return the demand for the current period from the market data
+    return marketData['demand'][currentPeriod]

@@ -1,18 +1,20 @@
 {
-    "name": "Django",
-    "type": "python",
-    "request": "launch",
-    "stopOnEntry": false,
-    "pythonPath": "${config.python.pythonPath}",
-    "program": "${workspaceRoot}/manage.py",
-    "args": [
-        "runserver",
-        "--noreload"
-    ],
-    "debugOptions": [
-        "WaitOnAbnormalExit",
-        "WaitOnNormalExit",
-        "RedirectOutput",
-        "DjangoDebugging"
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Django",
+            "type": "python",
+            "request": "launch",
+            "stopOnEntry": false,
+            "pythonPath": "${workspaceFolder}/venv/bin/python",
+            "program": "${workspaceFolder}/manage.py",
+            "args": [
+                "runserver",
+                "--noreload"
+            ],
+            "django": true,
+            "justMyCode": false,
+            "console": "integratedTerminal"
+        }
     ]
 }

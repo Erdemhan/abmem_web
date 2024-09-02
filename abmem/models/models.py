@@ -37,7 +37,8 @@ class Period(Base):
     demand = models.IntegerField()
     metDemand = models.IntegerField()
     marketVolume = models.IntegerField()
-    ptf = models.IntegerField()
+    ptf = models.DecimalField(decimal_places=2, max_digits=7, null=True)
+    estimatedPtf = models.DecimalField(decimal_places=2, max_digits=7, null=True)
 
 
 
