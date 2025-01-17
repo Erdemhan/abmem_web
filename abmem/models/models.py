@@ -40,6 +40,9 @@ class Period(Base):
     ptf = models.DecimalField(decimal_places=2, max_digits=7, null=True)
     estimatedPtf = models.DecimalField(decimal_places=2, max_digits=7, null=True)
 
+    class Meta:
+        get_latest_by = 'created_at'  # veya 'created_at' kullanabilirsiniz.
+
 
 
 
