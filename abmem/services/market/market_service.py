@@ -239,6 +239,7 @@ def payasptf(offers: [Offer], ptf: int):
             offer.acceptancePrice = ptf
     return offers
 
+
 import time
 def run(market: Market) -> bool:
     start = timeit.default_timer()
