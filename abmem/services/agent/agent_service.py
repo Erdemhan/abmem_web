@@ -9,7 +9,10 @@ from ...models import Agent, Offer, Portfolio, Resource
 from ...services.file_reader import reader_service as ReaderService
 from ...services.agent import portfolio_factory as PortfolioFactory
 from ...services.agent import offer_factory as OfferFactory
+from ..algorithms.agent_algorithm import AgentAlgorithm
+from ..algorithms.algorithm_utils import State
 import random
+from decimal import Decimal
 
 def init(agent: Agent, portfolioData: dict):
     # Initialize the agent's state and create a portfolio using the provided data
@@ -20,14 +23,16 @@ def init(agent: Agent, portfolioData: dict):
 def init(agent: Agent):
     # Initialize the agent's state without creating a portfolio
     agent.state = AgentState.INITIALIZED
+    action_dim = agent.portfolio.plant_set.count()
+    agent.algorithm = AgentAlgorithm(action_dim)
     agent.save()
 
 def relearn(agent: Agent, results) -> None:
     # Set the agent's state to learning and save
     agent.state = AgentState.LEARNING
     agent.save()
-    # Learning module placeholder
-    pass
+    # learn(self, state, action, next_state, reward, done=False):
+    agent.algorithm.learn(results[0],results[1],results[2],results[3])
 
 def predict(agent: Agent, results) -> int:
     # Set the agent's state to predicting and save
@@ -36,23 +41,44 @@ def predict(agent: Agent, results) -> int:
     # Prediction module placeholder, returns a random prediction
     return random.randint(10, 1000)
 
-def calculateOffers(agent: Agent, prediction: int) -> [Offer]:
+def calculateOffers(agent: Agent) -> [Offer]:
     # Set the agent's state to calculating and save
     agent.state = AgentState.CALCULATING
     agent.save()
     offers = []
-    # Calculate random offers for each plant in the agent's portfolio
+
+    period = agent.market.period_set.latest()
+    played_period = agent.market.period_set.order_by('-id')[1]
+    state = State(mcp=played_period.ptf,demand=period.demand)
+    actions = agent.algorithm.selectAction(state)
+
+    counter = 0
     for plant in agent.portfolio.plant_set.all():
-        lowerBound = plant.resource.fuelCost
         offer = OfferFactory.create(
             agent=agent,
             resource=plant.resource,
             amount=plant.capacity,
-            offerPrice=random.randint(lowerBound, agent.market.upperBidBound)
+            offerPrice=Decimal(float(actions[counter]))
+        )
+        counter +=1 
+        offers.append(offer)
+    return offers
+
+def calculateRandomOffers(agent: Agent) -> [Offer]:
+    # Set the agent's state to calculating and save
+    agent.state = AgentState.CALCULATING
+    agent.save()
+    offers = []
+    for plant in agent.portfolio.plant_set.all():
+        offer = OfferFactory.create(
+            agent=agent,
+            resource=plant.resource,
+            amount=plant.capacity,
+            offerPrice=random.randint(0,200)
         )
         offers.append(offer)
-    # Offer module placeholder
     return offers
+
 
 def saveOffers(offers: [Offer]) -> None:
     # Save all the generated offers to the database
@@ -66,9 +92,7 @@ def createPortfolio(agent: Agent, plantsData: dict) -> Portfolio:
 def run(agent: Agent) -> bool:
     # Main function to run the agent's operations
     print(agent)
-    if agent.state == AgentState.CREATED:
-        # Initialize the agent if it is in the created state
-        init(agent)
+    init(agent)
     print(agent.id, " entered to agent run. Budget: ", agent.budget)
     
     # Set the agent's state to running and save
@@ -76,9 +100,31 @@ def run(agent: Agent) -> bool:
     agent.save()
     
     # Perform learning and prediction, then calculate and save offers
-    relearn(agent, results=0)
-    prediction = predict(agent, results=0)
-    offers = calculateOffers(agent, prediction)
+    # TODO algoritma buraya gelecek relarne
+    if(agent.market.period_set.count()>= 3):
+        last_period = agent.market.period_set.order_by('-id')[2]
+        played_period = agent.market.period_set.order_by('-id')[1]
+        last_offers = agent.offer_set.filter(period = played_period)
+        actions = []
+        reward = 0
+        for offer in last_offers:
+            actions.append(offer.offerPrice)
+            reward += offer.acceptancePrice * offer.acceptanceAmount
+
+        results = [State(mcp = last_period.ptf,demand=last_period.demand),
+                actions,
+                State(mcp = played_period.ptf,demand=played_period.demand),
+                reward
+                ]
+        relearn(agent, results)
+        offers = calculateOffers(agent)
+
+    else:
+        offers = calculateRandomOffers(agent)
+
+    # TODO Prediction marketten gelecek
+    #prediction = predict(agent, results=0)
+    
     saveOffers(offers)
     
     # Set the agent's state to waiting and save

@@ -92,7 +92,7 @@ def run(simulation: Simulation) -> bool:
             simulation.save()  # Save the updated simulation state
 
         print("Simulation visualization")
-        VisualizationService.visualizeSimulation(simulation.market.period_set.all())  # Visualize the entire simulation
+        #VisualizationService.visualizeSimulation(simulation.market.period_set.all())  # Visualize the entire simulation
 
         simulation.state = SimulationState.FINISHED  # Mark the simulation as FINISHED
         simulation.save()  # Save the final state of the simulation

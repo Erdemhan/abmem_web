@@ -187,6 +187,7 @@ def priceGroupCalculation(group: [Offer], demand: int):
             ptf = offer.offerPrice
     return ptf
 
+
 def updatePeriod(period: Period) -> Period:
     # Save the period data and return the updated period
     period.save()
@@ -203,7 +204,7 @@ def saveOffers(market: Market, offers: [Offer], ptf: Decimal) -> None:
 
 def budgetCalculation(offer: Offer):
     # Calculate and return the budget based on the offer's acceptance amount and price
-    return decimal.Decimal((offer.acceptanceAmount * offer.acceptancePrice)) - (offer.resource.fuelCost * decimal.Decimal(offer.acceptanceAmount))
+    return decimal.Decimal((decimal.Decimal(offer.acceptanceAmount) * offer.acceptancePrice)) - (offer.resource.fuelCost * decimal.Decimal(offer.acceptanceAmount))
 
 def createPeriod(market: Market) -> Period:
     # Create and return a new period for the market

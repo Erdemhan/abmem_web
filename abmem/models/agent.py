@@ -16,6 +16,7 @@ class Agent(Base):
     state = enum.EnumField(AgentState,null=True,default=AgentState.CREATED)
     budget = models.DecimalField(decimal_places=2,max_digits=12,null=False,default=0)
     type = enum.EnumField(AgentType,null=True,default=AgentType.FOSSIL)
+    algorithm = 0
       
 
    
