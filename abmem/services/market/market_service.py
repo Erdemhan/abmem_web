@@ -193,7 +193,7 @@ def updatePeriod(period: Period) -> Period:
     period.save()
     return period
 
-def saveOffers(market: Market, offers: [Offer], ptf: Decimal) -> None:
+def saveOffers(market: Market, offers: [Offer]) -> None:
     # Set market state to BROADCASTING and save offers
     market.state = MarketState.BROADCASTING
     for offer in offers:
@@ -260,10 +260,16 @@ def run(market: Market) -> bool:
         payasptf(offers, ptf)
 
     # Update the period and save the offers
-    period.metDemand, period.ptf, period.marketVolume = metDemand, ptf, volume
+    period.metDemand = metDemand
+    period.ptf = ptf  # MCP (PTF) değerini period'a kaydediyoruz
+    period.marketVolume = volume
     period = updatePeriod(period=period)
-    saveOffers(market, offers, ptf)
+    saveOffers(market, offers)
     print("funcs called and period updated")
+
+    # Offer nesnelerine period bilgisini ekle
+    for offer in offers:
+        offer.period = period
 
     # Mark the market state as PERIODEND and save
     market.state = MarketState.PERIODEND
@@ -271,6 +277,7 @@ def run(market: Market) -> bool:
     print("period details will be shown")
     showPeriodDetails(period)
     print(timeit.default_timer() - start)
+    
     return offers
 
 def getDemand(currentPeriod: int) -> int:
