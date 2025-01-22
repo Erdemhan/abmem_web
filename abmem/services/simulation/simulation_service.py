@@ -5,9 +5,7 @@ django.setup()  # Initialize Django to make sure the ORM and models are availabl
 from ...models.simulation import Simulation
 from ...models.enums import *
 from ...services.file_reader import reader_service as ReaderService
-from ...services.market import market_factory as MarketFactory
 from ...services.market import market_service as MarketService
-from ...services.visualization import visualization_service as VisualizationService
 from ...constants import *
 import timeit
 import json

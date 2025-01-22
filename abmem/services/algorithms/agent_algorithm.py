@@ -1,9 +1,3 @@
-from ...models.enums import AgentState
-from ...models import Agent, Offer, Portfolio, Resource
-from ...services.file_reader import reader_service as ReaderService
-from ...services.agent import portfolio_factory as PortfolioFactory
-from ...services.agent import offer_factory as OfferFactory
-from ...services.agent import agent_service as AgentService
 from .ddpg import DDPG,ReplayBuffer
 from .algorithm_utils import State
 import numpy as np
@@ -30,7 +24,8 @@ ITERATION = 100
 
 class AgentAlgorithm:
 
-    def __init__(self,action_dim):
+    def __init__(self,action_dim,agent_id):
+        self.agent_id = agent_id
         self.replayBuffer =  ReplayBuffer(10000)
         self.ddpg = DDPG(self.replayBuffer,learning_rate_actor=LEARNING_RATE_ACTOR,learning_rate_critic=LEARNING_RATE_CRITIC,noise=NOISE_STD,noise_decay=NOISE_DECAY,noise_min=NOISE_MIN,action_dim=action_dim)
         

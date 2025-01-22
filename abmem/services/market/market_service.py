@@ -9,7 +9,7 @@ from ...services.visualization import visualization_service as VisualizationServ
 from ...models import Market, Period, Offer, Agent
 from decimal import Decimal
 from ...services.algorithms import MPIP
-from ...services.agent import agent_factory as AgentFactory
+from ...services.agent import agent_factory as AgentFactory, agent_service as AgentService
 from ...services.simulation import parallel_service as ParallelService
 from ...services.file_reader import reader_service as ReaderService
 from ...constants import *
@@ -21,6 +21,8 @@ from django.db.models import Q
 # Initialize a global variable for market data
 marketData = []
 
+algorithms = []
+
 def init(market: Market) -> None:
     global marketData
     # Read market data from an Excel file and map the columns
@@ -30,6 +32,10 @@ def init(market: Market) -> None:
                  'Natural Gas Price (USD/1000Sm3)', 'İstanbul average temperature'],
         map=['demand', 'der', 'ngp', 'ist']
     )
+    for agent in market.agent_set.all():
+        algorithm = AgentService.init(agent)
+        algorithms.append(algorithm)
+
     # Set the market state to INITIALIZED and save
     market.state = MarketState.INITIALIZED
     market.save()
@@ -114,14 +120,11 @@ def estimatePTF(market: Market):
     print(ptf)
     return ptf
 
-def startPool(market: Market) -> None:
+def startPool(market: Market,algorithms) -> None:
     # Set market state to WAITINGAGENTS and save
     market.state = MarketState.WAITINGAGENTS
     market.save()
-    
-    # Retrieve all agents and start the parallel service pool
-    agents = list(market.agent_set.all())
-    return ParallelService.startPool(agents)
+    return ParallelService.startPool(market.agent_set.all(),algorithms)
 
 from collections import defaultdict
 
@@ -210,19 +213,6 @@ def createPeriod(market: Market) -> Period:
     # Create and return a new period for the market
     return PeriodFactory.create(market=market, num=market.simulation.currentPeriod, demand=getDemand(market.simulation.currentPeriod))
 
-def readAgentData() -> dict:
-    # Read and return agent data from a file
-    return ReaderService.readData(path=AGENT_DATA_PATH, key=AGENTS_DATA_KEY)
-
-def createAgents(market: Market, agentData: dict):    
-    # Create and return a list of agents based on the provided data
-    agents = []
-    for agent in agentData:
-        agents.append(AgentFactory.create(market=market,
-                                          budget=agent[AGENTS_BUDGET_KEY],
-                                          type=agent[AGENTS_TYPE_KEY]))
-    return agents
-
 def showPeriodDetails(period: Period) -> None:
     # Display details of the given period
     print("PTF: ", period.ptf)
@@ -247,11 +237,11 @@ def run(market: Market) -> bool:
     if market.state == MarketState.CREATED:
         print("market inited in market service")
         init(market)
-
+    global algorithms
     # Create a new period, estimate the PTF, and start the agent pool
     period = createPeriod(market)
     period.estimatedPtf = estimatePTF(market)
-    offers = startPool(market)
+    algorithms,offers = startPool(market,algorithms)
     offers = np.concatenate(offers)
 
     # Perform market clearing and adjust offers according to the market strategy
@@ -270,6 +260,7 @@ def run(market: Market) -> bool:
     # Offer nesnelerine period bilgisini ekle
     for offer in offers:
         offer.period = period
+        offer.save()
 
     # Mark the market state as PERIODEND and save
     market.state = MarketState.PERIODEND
