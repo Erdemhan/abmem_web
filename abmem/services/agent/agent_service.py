@@ -13,6 +13,7 @@ from ..algorithms.algorithm_utils import State
 import random
 from decimal import Decimal
 
+PENALTY = 5000
 
 def init(agent: Agent):
     # Initialize the agent's state without creating a portfolio
@@ -98,7 +99,10 @@ def run(agent,algorithm) -> bool:
 
         for offer in last_offers:
             actions.append(offer.offerPrice)
-            reward += offer.acceptancePrice * offer.acceptanceAmount
+            if offer.acceptanceAmount > 0:
+                reward += ((Decimal(offer.acceptanceAmount) * offer.acceptancePrice)) - (offer.resource.fuelCost * Decimal(offer.acceptanceAmount))
+            else:
+                reward += -(PENALTY)
 
         results = [
             State(mcp=last_period.ptf, demand=last_period.demand),

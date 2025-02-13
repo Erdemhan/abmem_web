@@ -202,8 +202,9 @@ def resource_create(request):
         if form.is_valid():
             form.save()
             return redirect('resource_list')
-    else:
-        form = ResourceForm()
+        else:
+            print(form.errors)
+            return HttpResponseBadRequest()
     return redirect(resource_list)
 
 def resource_delete(request, resource_id):

@@ -1,0 +1,632 @@
+{
+    "simulation_id": "498",
+    "total_periods": 200,
+    "agents": {
+        "Konya Şeker": {
+            "initial_budget": 41229.0,
+            "final_budget": 3048543.41,
+            "average_budget_change": 15112.13271356784,
+            "acceptance_rate": 20.0,
+            "average_offer_price": 159.75265646934508,
+            "average_accepted_price": 76.02108111381531,
+            "resources": {
+                "lignite": {
+                    "total_offers": 200,
+                    "accepted_offers": 40,
+                    "acceptance_rate": 20.0,
+                    "average_offer_price": 159.75265646934508,
+                    "average_accepted_price": 76.02108111381531
+                }
+            }
+        },
+        "Limak": {
+            "initial_budget": -35690.0,
+            "final_budget": 12677786.87,
+            "average_budget_change": 63886.81844221105,
+            "acceptance_rate": 15.5,
+            "average_offer_price": 151.42427934527396,
+            "average_accepted_price": 99.20112609094188,
+            "resources": {
+                "naturalgas": {
+                    "total_offers": 200,
+                    "accepted_offers": 18,
+                    "acceptance_rate": 9.0,
+                    "average_offer_price": 172.43747077941896,
+                    "average_accepted_price": 135.28490236070422
+                },
+                "hydro": {
+                    "total_offers": 200,
+                    "accepted_offers": 77,
+                    "acceptance_rate": 38.5,
+                    "average_offer_price": 81.70478957653046,
+                    "average_accepted_price": 76.50621725057627
+                },
+                "solar": {
+                    "total_offers": 200,
+                    "accepted_offers": 6,
+                    "acceptance_rate": 3.0,
+                    "average_offer_price": 186.7946800994873,
+                    "average_accepted_price": 130.1513989766439
+                },
+                "geotermal": {
+                    "total_offers": 200,
+                    "accepted_offers": 23,
+                    "acceptance_rate": 11.5,
+                    "average_offer_price": 164.76017692565918,
+                    "average_accepted_price": 138.86627263608187
+                }
+            }
+        },
+        "OYAK": {
+            "initial_budget": 0.0,
+            "final_budget": -3590253.86,
+            "average_budget_change": -18041.476683417084,
+            "acceptance_rate": 79.0,
+            "average_offer_price": 10.213392884340138,
+            "average_accepted_price": 6.852785753369143,
+            "resources": {
+                "importcoal": {
+                    "total_offers": 200,
+                    "accepted_offers": 158,
+                    "acceptance_rate": 79.0,
+                    "average_offer_price": 10.213392884340138,
+                    "average_accepted_price": 6.852785753369143
+                }
+            }
+        },
+        "Altek Alarko": {
+            "initial_budget": 35823.0,
+            "final_budget": -2009475.8272523142,
+            "average_budget_change": -10277.88355403173,
+            "acceptance_rate": 63.83333333333333,
+            "average_offer_price": 44.081666930280626,
+            "average_accepted_price": 8.009212950521754,
+            "resources": {
+                "importcoal": {
+                    "total_offers": 200,
+                    "accepted_offers": 92,
+                    "acceptance_rate": 46.0,
+                    "average_offer_price": 82.58814860060811,
+                    "average_accepted_price": 9.902471012071423
+                },
+                "naturalgas": {
+                    "total_offers": 200,
+                    "accepted_offers": 159,
+                    "acceptance_rate": 79.5,
+                    "average_offer_price": 10.031380818523466,
+                    "average_accepted_price": 6.2358461556100995
+                },
+                "hydro": {
+                    "total_offers": 200,
+                    "accepted_offers": 132,
+                    "acceptance_rate": 66.0,
+                    "average_offer_price": 39.6254713717103,
+                    "average_accepted_price": 8.82577036513072
+                }
+            }
+        },
+        "Özaltın": {
+            "initial_budget": 0.0,
+            "final_budget": 1520009.93,
+            "average_budget_change": 7638.2408542713565,
+            "acceptance_rate": 58.75,
+            "average_offer_price": 57.334348225332796,
+            "average_accepted_price": 8.79924231488654,
+            "resources": {
+                "hydro": {
+                    "total_offers": 200,
+                    "accepted_offers": 85,
+                    "acceptance_rate": 42.5,
+                    "average_offer_price": 101.06531482808292,
+                    "average_accepted_price": 10.811590240632787
+                },
+                "solar": {
+                    "total_offers": 200,
+                    "accepted_offers": 150,
+                    "acceptance_rate": 75.0,
+                    "average_offer_price": 13.603381622582674,
+                    "average_accepted_price": 7.658911823630333
+                }
+            }
+        },
+        "Akenerji": {
+            "initial_budget": 0.0,
+            "final_budget": 1869758.82,
+            "average_budget_change": 9395.772964824122,
+            "acceptance_rate": 37.333333333333336,
+            "average_offer_price": 68.08902839963014,
+            "average_accepted_price": 22.599580461009673,
+            "resources": {
+                "naturalgas": {
+                    "total_offers": 200,
+                    "accepted_offers": 32,
+                    "acceptance_rate": 16.0,
+                    "average_offer_price": 115.79185240507125,
+                    "average_accepted_price": 84.84861151874065
+                },
+                "hydro": {
+                    "total_offers": 200,
+                    "accepted_offers": 86,
+                    "acceptance_rate": 43.0,
+                    "average_offer_price": 59.33626320540905,
+                    "average_accepted_price": 17.22145519007084
+                },
+                "wind": {
+                    "total_offers": 200,
+                    "accepted_offers": 106,
+                    "acceptance_rate": 53.0,
+                    "average_offer_price": 29.13896958841011,
+                    "average_accepted_price": 8.17080479547522
+                }
+            }
+        },
+        "Aksa": {
+            "initial_budget": 7329.0,
+            "final_budget": 152541.3,
+            "average_budget_change": 729.7100502512562,
+            "acceptance_rate": 37.75,
+            "average_offer_price": 81.39613715618151,
+            "average_accepted_price": 12.762857144815687,
+            "resources": {
+                "lignite": {
+                    "total_offers": 200,
+                    "accepted_offers": 134,
+                    "acceptance_rate": 67.0,
+                    "average_offer_price": 39.82602664409671,
+                    "average_accepted_price": 4.4005865389967695
+                },
+                "naturalgas": {
+                    "total_offers": 200,
+                    "accepted_offers": 17,
+                    "acceptance_rate": 8.5,
+                    "average_offer_price": 122.96624766826629,
+                    "average_accepted_price": 78.67722544950597
+                }
+            }
+        },
+        "Aydem": {
+            "initial_budget": 13053.0,
+            "final_budget": 1089126.8551540088,
+            "average_budget_change": 5407.406307306577,
+            "acceptance_rate": 59.0,
+            "average_offer_price": 49.28686828629463,
+            "average_accepted_price": 7.705509002326388,
+            "resources": {
+                "hydro": {
+                    "total_offers": 200,
+                    "accepted_offers": 75,
+                    "acceptance_rate": 37.5,
+                    "average_offer_price": 90.273570022583,
+                    "average_accepted_price": 12.275389684041341
+                },
+                "wind": {
+                    "total_offers": 200,
+                    "accepted_offers": 155,
+                    "acceptance_rate": 77.5,
+                    "average_offer_price": 10.880609824857675,
+                    "average_accepted_price": 6.553872287531774
+                },
+                "solar": {
+                    "total_offers": 200,
+                    "accepted_offers": 79,
+                    "acceptance_rate": 39.5,
+                    "average_offer_price": 87.70168741777539,
+                    "average_accepted_price": 10.166352510829515
+                },
+                "geotermal": {
+                    "total_offers": 200,
+                    "accepted_offers": 163,
+                    "acceptance_rate": 81.5,
+                    "average_offer_price": 8.291605879962445,
+                    "average_accepted_price": 5.5052390789693115
+                }
+            }
+        },
+        "Enka ": {
+            "initial_budget": 0.0,
+            "final_budget": 1887884.15,
+            "average_budget_change": 9486.855025125626,
+            "acceptance_rate": 4.0,
+            "average_offer_price": 187.29378337860106,
+            "average_accepted_price": 120.23083019256592,
+            "resources": {
+                "naturalgas": {
+                    "total_offers": 200,
+                    "accepted_offers": 8,
+                    "acceptance_rate": 4.0,
+                    "average_offer_price": 187.29378337860106,
+                    "average_accepted_price": 120.23083019256592
+                }
+            }
+        },
+        "Eren": {
+            "initial_budget": 850.0,
+            "final_budget": 6598571.627821064,
+            "average_budget_change": 33154.380039301825,
+            "acceptance_rate": 50.74999999999999,
+            "average_offer_price": 63.58194635150954,
+            "average_accepted_price": 24.567237959376403,
+            "resources": {
+                "naturalgas": {
+                    "total_offers": 200,
+                    "accepted_offers": 46,
+                    "acceptance_rate": 23.0,
+                    "average_offer_price": 118.50259472489357,
+                    "average_accepted_price": 86.75330902700838
+                },
+                "bio": {
+                    "total_offers": 200,
+                    "accepted_offers": 157,
+                    "acceptance_rate": 78.5,
+                    "average_offer_price": 8.661297978125512,
+                    "average_accepted_price": 6.347115226184866
+                }
+            }
+        },
+        "IC İçtaş": {
+            "initial_budget": 836.0,
+            "final_budget": 1808482.97,
+            "average_budget_change": 9083.653115577888,
+            "acceptance_rate": 34.75,
+            "average_offer_price": 84.20250179869123,
+            "average_accepted_price": 35.30710764274859,
+            "resources": {
+                "lignite": {
+                    "total_offers": 200,
+                    "accepted_offers": 31,
+                    "acceptance_rate": 15.5,
+                    "average_offer_price": 127.42337657749653,
+                    "average_accepted_price": 28.41524069155416
+                },
+                "hydro": {
+                    "total_offers": 200,
+                    "accepted_offers": 108,
+                    "acceptance_rate": 54.0,
+                    "average_offer_price": 40.98162701988593,
+                    "average_accepted_price": 37.28532871207291
+                }
+            }
+        },
+        "Gama": {
+            "initial_budget": 0.0,
+            "final_budget": 609998.7650879622,
+            "average_budget_change": 3065.3204275776993,
+            "acceptance_rate": 47.16666666666667,
+            "average_offer_price": 67.28285308058064,
+            "average_accepted_price": 9.47108178730567,
+            "resources": {
+                "naturalgas": {
+                    "total_offers": 200,
+                    "accepted_offers": 9,
+                    "acceptance_rate": 4.5,
+                    "average_offer_price": 142.47784625530244,
+                    "average_accepted_price": 101.81043550703261
+                },
+                "hydro": {
+                    "total_offers": 200,
+                    "accepted_offers": 114,
+                    "acceptance_rate": 56.99999999999999,
+                    "average_offer_price": 50.20148891627789,
+                    "average_accepted_price": 7.0609471097327114
+                },
+                "wind": {
+                    "total_offers": 200,
+                    "accepted_offers": 160,
+                    "acceptance_rate": 80.0,
+                    "average_offer_price": 9.169224070161581,
+                    "average_accepted_price": 5.994214098341763
+                }
+            }
+        },
+        "İÇDAŞ": {
+            "initial_budget": -9630.0,
+            "final_budget": 234407.85,
+            "average_budget_change": 1226.3208542713567,
+            "acceptance_rate": 47.0,
+            "average_offer_price": 69.82148423667996,
+            "average_accepted_price": 11.585157957403585,
+            "resources": {
+                "importcoal": {
+                    "total_offers": 200,
+                    "accepted_offers": 33,
+                    "acceptance_rate": 16.5,
+                    "average_offer_price": 126.80798838675022,
+                    "average_accepted_price": 37.61189767447385
+                },
+                "wind": {
+                    "total_offers": 200,
+                    "accepted_offers": 155,
+                    "acceptance_rate": 77.5,
+                    "average_offer_price": 12.834980086609722,
+                    "average_accepted_price": 6.04398111441443
+                }
+            }
+        },
+        "Bilgin ": {
+            "initial_budget": 0.0,
+            "final_budget": 1926961.81,
+            "average_budget_change": 9683.225175879397,
+            "acceptance_rate": 48.66666666666667,
+            "average_offer_price": 58.88369021584125,
+            "average_accepted_price": 15.550535994977372,
+            "resources": {
+                "naturalgas": {
+                    "total_offers": 200,
+                    "accepted_offers": 33,
+                    "acceptance_rate": 16.5,
+                    "average_offer_price": 105.34271029591561,
+                    "average_accepted_price": 74.185206897331
+                },
+                "hydro": {
+                    "total_offers": 200,
+                    "accepted_offers": 108,
+                    "acceptance_rate": 54.0,
+                    "average_offer_price": 61.46595777973533,
+                    "average_accepted_price": 10.474889908123899
+                },
+                "wind": {
+                    "total_offers": 200,
+                    "accepted_offers": 151,
+                    "acceptance_rate": 75.5,
+                    "average_offer_price": 9.842402571872809,
+                    "average_accepted_price": 6.366599820159523
+                }
+            }
+        },
+        "Cengiz": {
+            "initial_budget": 2414.0,
+            "final_budget": 1118646.73,
+            "average_budget_change": 5609.209698492462,
+            "acceptance_rate": 27.1,
+            "average_offer_price": 110.2142300775051,
+            "average_accepted_price": 12.623709836404261,
+            "resources": {
+                "lignite": {
+                    "total_offers": 200,
+                    "accepted_offers": 8,
+                    "acceptance_rate": 4.0,
+                    "average_offer_price": 187.57971387162806,
+                    "average_accepted_price": 84.49423092976213
+                },
+                "naturalgas": {
+                    "total_offers": 200,
+                    "accepted_offers": 6,
+                    "acceptance_rate": 3.0,
+                    "average_offer_price": 141.26585332870482,
+                    "average_accepted_price": 84.48691304524739
+                },
+                "hydro": {
+                    "total_offers": 200,
+                    "accepted_offers": 95,
+                    "acceptance_rate": 47.5,
+                    "average_offer_price": 48.51357715845108,
+                    "average_accepted_price": 8.546166224228708
+                },
+                "wind": {
+                    "total_offers": 200,
+                    "accepted_offers": 133,
+                    "acceptance_rate": 66.5,
+                    "average_offer_price": 26.864256553798914,
+                    "average_accepted_price": 5.558716292556067
+                },
+                "solar": {
+                    "total_offers": 200,
+                    "accepted_offers": 29,
+                    "acceptance_rate": 14.499999999999998,
+                    "average_offer_price": 146.84774947494267,
+                    "average_accepted_price": 23.6881028187686
+                }
+            }
+        },
+        "Çelikler": {
+            "initial_budget": 51160.0,
+            "final_budget": 4506088.49,
+            "average_budget_change": 22386.575326633167,
+            "acceptance_rate": 58.5,
+            "average_offer_price": 46.16052560436229,
+            "average_accepted_price": 12.889747604218304,
+            "resources": {
+                "lignite": {
+                    "total_offers": 200,
+                    "accepted_offers": 40,
+                    "acceptance_rate": 20.0,
+                    "average_offer_price": 114.63843574285507,
+                    "average_accepted_price": 69.3254967212677
+                },
+                "hydro": {
+                    "total_offers": 200,
+                    "accepted_offers": 163,
+                    "acceptance_rate": 81.5,
+                    "average_offer_price": 6.916229850053787,
+                    "average_accepted_price": 4.84633006895978
+                },
+                "geotermal": {
+                    "total_offers": 200,
+                    "accepted_offers": 148,
+                    "acceptance_rate": 74.0,
+                    "average_offer_price": 16.92691122017801,
+                    "average_accepted_price": 6.495471209388327
+                }
+            }
+        },
+        "Diler": {
+            "initial_budget": -3780.0,
+            "final_budget": 1767711.22,
+            "average_budget_change": 8901.965929648242,
+            "acceptance_rate": 28.999999999999996,
+            "average_offer_price": 89.96832311868667,
+            "average_accepted_price": 30.006823728824482,
+            "resources": {
+                "importcoal": {
+                    "total_offers": 200,
+                    "accepted_offers": 25,
+                    "acceptance_rate": 12.5,
+                    "average_offer_price": 131.34835883140565,
+                    "average_accepted_price": 94.69879028320312
+                },
+                "hydro": {
+                    "total_offers": 200,
+                    "accepted_offers": 91,
+                    "acceptance_rate": 45.5,
+                    "average_offer_price": 48.58828740596771,
+                    "average_accepted_price": 12.234305444654527
+                }
+            }
+        },
+        "EÜAŞ": {
+            "initial_budget": 0.0,
+            "final_budget": 13773807.515102139,
+            "average_budget_change": 69215.11314121677,
+            "acceptance_rate": 30.625000000000004,
+            "average_offer_price": 135.0493679056689,
+            "average_accepted_price": 21.14816242857855,
+            "resources": {
+                "lignite": {
+                    "total_offers": 200,
+                    "accepted_offers": 11,
+                    "acceptance_rate": 5.5,
+                    "average_offer_price": 180.04832223415374,
+                    "average_accepted_price": 105.28822326660156
+                },
+                "naturalgas": {
+                    "total_offers": 200,
+                    "accepted_offers": 10,
+                    "acceptance_rate": 5.0,
+                    "average_offer_price": 186.43013559341432,
+                    "average_accepted_price": 112.83272552490234
+                },
+                "hydro": {
+                    "total_offers": 200,
+                    "accepted_offers": 124,
+                    "acceptance_rate": 62.0,
+                    "average_offer_price": 77.86295405849815,
+                    "average_accepted_price": 11.783208239222727
+                },
+                "wind": {
+                    "total_offers": 200,
+                    "accepted_offers": 100,
+                    "acceptance_rate": 50.0,
+                    "average_offer_price": 95.85605973660945,
+                    "average_accepted_price": 14.336842621564864
+                }
+            }
+        },
+        "Emba ": {
+            "initial_budget": 13200.0,
+            "final_budget": 1110371.62,
+            "average_budget_change": 5513.425226130654,
+            "acceptance_rate": 4.5,
+            "average_offer_price": 188.42768932342528,
+            "average_accepted_price": 126.13653733995226,
+            "resources": {
+                "importcoal": {
+                    "total_offers": 200,
+                    "accepted_offers": 9,
+                    "acceptance_rate": 4.5,
+                    "average_offer_price": 188.42768932342528,
+                    "average_accepted_price": 126.13653733995226
+                }
+            }
+        },
+        "Enerjisa": {
+            "initial_budget": -32298.0,
+            "final_budget": 3311327.71,
+            "average_budget_change": 16802.139246231156,
+            "acceptance_rate": 28.799999999999997,
+            "average_offer_price": 116.56062999079377,
+            "average_accepted_price": 19.26015629202852,
+            "resources": {
+                "lignite": {
+                    "total_offers": 200,
+                    "accepted_offers": 31,
+                    "acceptance_rate": 15.5,
+                    "average_offer_price": 145.9492397928238,
+                    "average_accepted_price": 28.315754029058642
+                },
+                "naturalgas": {
+                    "total_offers": 200,
+                    "accepted_offers": 32,
+                    "acceptance_rate": 16.0,
+                    "average_offer_price": 162.4677494585514,
+                    "average_accepted_price": 44.956156350672245
+                },
+                "hydro": {
+                    "total_offers": 200,
+                    "accepted_offers": 78,
+                    "acceptance_rate": 39.0,
+                    "average_offer_price": 60.17837446659804,
+                    "average_accepted_price": 23.640431721241047
+                },
+                "wind": {
+                    "total_offers": 200,
+                    "accepted_offers": 143,
+                    "acceptance_rate": 71.5,
+                    "average_offer_price": 24.97027782935649,
+                    "average_accepted_price": 5.129674359999753
+                },
+                "solar": {
+                    "total_offers": 200,
+                    "accepted_offers": 4,
+                    "acceptance_rate": 2.0,
+                    "average_offer_price": 189.2375084066391,
+                    "average_accepted_price": 163.2606315612793
+                }
+            }
+        },
+        "Kalyon": {
+            "initial_budget": 869.0,
+            "final_budget": 6628241.702249059,
+            "average_budget_change": 33303.380413311854,
+            "acceptance_rate": 52.166666666666664,
+            "average_offer_price": 49.992657493405666,
+            "average_accepted_price": 21.132615878136633,
+            "resources": {
+                "hydro": {
+                    "total_offers": 200,
+                    "accepted_offers": 153,
+                    "acceptance_rate": 76.5,
+                    "average_offer_price": 21.352990098753946,
+                    "average_accepted_price": 6.6746304610902385
+                },
+                "wind": {
+                    "total_offers": 200,
+                    "accepted_offers": 86,
+                    "acceptance_rate": 43.0,
+                    "average_offer_price": 73.4501764178276,
+                    "average_accepted_price": 56.16948230322017
+                },
+                "solar": {
+                    "total_offers": 200,
+                    "accepted_offers": 74,
+                    "acceptance_rate": 37.0,
+                    "average_offer_price": 55.17480596363544,
+                    "average_accepted_price": 10.306957178824657
+                }
+            }
+        },
+        "Kolin": {
+            "initial_budget": 0.0,
+            "final_budget": 751987.05,
+            "average_budget_change": 3778.8293969849246,
+            "acceptance_rate": 28.999999999999996,
+            "average_offer_price": 96.44869044825435,
+            "average_accepted_price": 13.593847144780488,
+            "resources": {
+                "lignite": {
+                    "total_offers": 200,
+                    "accepted_offers": 12,
+                    "acceptance_rate": 6.0,
+                    "average_offer_price": 166.54315832614898,
+                    "average_accepted_price": 68.26490292946498
+                },
+                "hydro": {
+                    "total_offers": 200,
+                    "accepted_offers": 104,
+                    "acceptance_rate": 52.0,
+                    "average_offer_price": 26.354222570359706,
+                    "average_accepted_price": 7.285648400393816
+                }
+            }
+        }
+    }
+}

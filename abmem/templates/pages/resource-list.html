@@ -109,8 +109,10 @@
                     <thead>
                       <tr>
                         <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Name</th>
-                        <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">Energy Type
-                        </th>
+                        <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">Energy Type </th>
+                        <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">İnvestment Cost</th>
+                        <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">O&M Cost</th>
+                        <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">CO2 Cost</th>
                         <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Fuel Cost</th>
                         <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">Emission</th>
                       </tr>
@@ -129,6 +131,27 @@
                           <div class="d-flex px-2 py-1">
                             <div class=" text-center d-flex flex-column justify-content-center">
                               <h6 class="mb-0 text-sm">{{resource.energyType}}</h6>
+                            </div>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="d-flex px-2 py-1">
+                            <div class="d-flex flex-column justify-content-center">
+                              <h6 class="mb-0 text-sm">{{resource.investmentCost}}</h6>
+                            </div>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="d-flex px-2 py-1">
+                            <div class="d-flex flex-column justify-content-center">
+                              <h6 class="mb-0 text-sm">{{resource.omCost}}</h6>
+                            </div>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="d-flex px-2 py-1">
+                            <div class="d-flex flex-column justify-content-center">
+                              <h6 class="mb-0 text-sm">{{resource.co2Cost}}</h6>
                             </div>
                           </div>
                         </td>
@@ -192,6 +215,9 @@
       $("#energyType").val('{{ resource.energyType.value }}').change();
       $("#emission").val('{{ resource.emission }}');
       $("#fuelCost").val('{{ resource.fuelCost }}');
+      $("#omCost").val('{{ resource.omCost }}');
+      $("#investmentCost").val('{{ resource.investmentCost }}');
+      $("#co2Cost").val('{{ resource.co2Cost }}');
     });
     {% endfor %}
 

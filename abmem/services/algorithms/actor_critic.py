@@ -15,9 +15,10 @@ class Actor(nn.Module):
 
         # Network layers: input state_dim, output action_dim
         # action_space_limits is needed to scale the 0-1 sigmoid output
-        self.layer_1 = nn.Linear(state_dim, 64)
-        self.layer_2 = nn.Linear(64, 32)
-        self.layer_3 = nn.Linear(32, action_dim)
+        self.layer_1 = nn.Linear(state_dim, 128)
+        self.layer_2 = nn.Linear(128, 64)
+        self.layer_3 = nn.Linear(64, 32)
+        self.layer_4 = nn.Linear(32, action_dim)
         
         self.action_space_limits = action_space_limits
 
@@ -28,8 +29,9 @@ class Actor(nn.Module):
         # Pass the input through the network
         x = F.relu(self.layer_1(x))
         x = F.relu(self.layer_2(x))
+        x = F.relu(self.layer_3(x))
         # Get output between 0-1 with sigmoid
-        x = F.sigmoid(self.layer_3(x))
+        x = F.sigmoid(self.layer_4(x))
 
         # Add noise to the output for exploration
         noise = torch.normal(mean=0, std=self.noise_scale, size=x.size())
@@ -63,13 +65,15 @@ class Critic(nn.Module):
     def __init__(self, state_dim,action_dim):
         # Network layers: input state_dim + action_dim, output 1
         super(Critic, self).__init__()
-        self.layer_1 = nn.Linear(state_dim + action_dim, 64)
-        self.layer_2 = nn.Linear(64, 32)
-        self.layer_3 = nn.Linear(32, 1)
+        self.layer_1 = nn.Linear(state_dim + action_dim, 128)
+        self.layer_2 = nn.Linear(128, 64)
+        self.layer_3 = nn.Linear(64, 32)
+        self.layer_4 = nn.Linear(32, 1)
 
         
 
     def forward(self, x, u):
         x = F.relu(self.layer_1(torch.cat([x, u], 1)))
         x = F.relu(self.layer_2(x))
-        return self.layer_3(x)
+        x = F.relu(self.layer_3(x))
+        return self.layer_4(x)

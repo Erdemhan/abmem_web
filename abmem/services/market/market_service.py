@@ -240,7 +240,7 @@ def run(market: Market) -> bool:
     global algorithms
     # Create a new period, estimate the PTF, and start the agent pool
     period = createPeriod(market)
-    period.estimatedPtf = estimatePTF(market)
+    #period.estimatedPtf = estimatePTF(market)
     algorithms,offers = startPool(market,algorithms)
     offers = np.concatenate(offers)
 

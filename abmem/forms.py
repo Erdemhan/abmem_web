@@ -5,7 +5,7 @@ from django.forms import inlineformset_factory
 class ResourceForm(forms.ModelForm):
     class Meta:
         model = Resource
-        fields = ['name', 'energyType',  'emission', 'fuelCost']
+        fields = ['name', 'energyType',  'emission', 'fuelCost', 'omCost', 'investmentCost', 'co2Cost']
 
 
 class AgentForm(forms.ModelForm):

@@ -14,8 +14,11 @@ from .base import Base
 class Resource(Base):
     energyType = enum.EnumField(EnergyType, null=False)
     name = models.CharField(max_length=20, null=False, unique=True)
-    fuelCost = models.DecimalField(decimal_places=1, max_digits=5, null=False, default=0)
-    emission = models.DecimalField(decimal_places=1, max_digits=5, null=False, default=0)
+    fuelCost = models.DecimalField(decimal_places=2, max_digits=6, null=False, default=0)
+    omCost = models.DecimalField(decimal_places=2, max_digits=6, null=False, default=0)
+    investmentCost = models.DecimalField(decimal_places=2, max_digits=6, null=False, default=0)
+    co2Cost = models.DecimalField(decimal_places=2, max_digits=6, null=False, default=0)
+    emission = models.DecimalField(decimal_places=2, max_digits=6, null=False, default=0)
 
 
 # PORTFOLIO

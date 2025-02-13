@@ -18,11 +18,33 @@
                 </div>
             </div>
             <div class="mb-3">
-                <input type="number" id="emission"  name="emission" class="form-control" placeholder="Emission" aria-label="Emission"
+                <label for="energyType">Emission
+                </label>
+                <input type="number" id="emission"  name="emission" step=".01" class="form-control" placeholder="Emission" aria-label="Emission"
                     aria-describedby="password-addon" >
             </div>
             <div class="mb-3">
-                <input type="number" id="fuelCost" name="fuelCost" class="form-control" placeholder="FuelCost" aria-label="FuelCost"
+                <label for="energyType">İnvestment Cost
+                </label>
+                <input type="number" id="investmentCost" step=".01" name="investmentCost" class="form-control" placeholder="İnvestment Cost" aria-label="investmentCost"
+                    aria-describedby="password-addon" >
+            </div>
+            <div class="mb-3">
+                <label for="energyType">O&M Cost
+                </label>
+                <input type="number" id="omCost" name="omCost" step=".01" class="form-control" placeholder="O&M Cost" aria-label="O&M Cost"
+                    aria-describedby="password-addon" >
+            </div>
+            <div class="mb-3">
+                <label for="energyType">CO2 Cost
+                </label>
+                <input type="number" id="co2Cost" name="co2Cost" step=".01" class="form-control" placeholder="CO2 Cost" aria-label="CO2 Cost"
+                    aria-describedby="password-addon" >
+            </div>
+            <div class="mb-3">
+                <label for="energyType">Fuel Cost
+                </label>
+                <input type="number" id="fuelCost" name="fuelCost" step=".01" class="form-control" placeholder="Fuel Cost" aria-label="Fuel Cost"
                     aria-describedby="password-addon" >
             </div>
             <div class="text-center">
