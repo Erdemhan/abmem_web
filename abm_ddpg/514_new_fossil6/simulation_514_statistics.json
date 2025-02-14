@@ -1,0 +1,108 @@
+{
+    "simulation_id": "514",
+    "total_periods": 168,
+    "agents": {
+        "Coal": {
+            "initial_budget": 0.0,
+            "final_budget": 88582231.81275,
+            "average_budget_change": 530432.5258248503,
+            "acceptance_rate": 54.761904761904766,
+            "average_offer_price": 160.18330680188677,
+            "average_accepted_price": 141.10356524716252,
+            "resources": {
+                "Coal": {
+                    "total_offers": 168,
+                    "accepted_offers": 92,
+                    "acceptance_rate": 54.761904761904766,
+                    "average_offer_price": 160.18330680188677,
+                    "average_accepted_price": 141.10356524716252
+                }
+            }
+        },
+        "CCGT": {
+            "initial_budget": -46375.0,
+            "final_budget": 82734037.97775,
+            "average_budget_change": 495691.0956751497,
+            "acceptance_rate": 60.71428571428571,
+            "average_offer_price": 154.15151269095284,
+            "average_accepted_price": 133.44850846832873,
+            "resources": {
+                "CCGT": {
+                    "total_offers": 168,
+                    "accepted_offers": 102,
+                    "acceptance_rate": 60.71428571428571,
+                    "average_offer_price": 154.15151269095284,
+                    "average_accepted_price": 133.44850846832873
+                }
+            }
+        },
+        "Biofuel": {
+            "initial_budget": 0.0,
+            "final_budget": 134541312.1116382,
+            "average_budget_change": 805636.5994708873,
+            "acceptance_rate": 72.02380952380952,
+            "average_offer_price": 155.79902661698205,
+            "average_accepted_price": 145.2615121770496,
+            "resources": {
+                "Biofuel": {
+                    "total_offers": 168,
+                    "accepted_offers": 121,
+                    "acceptance_rate": 72.02380952380952,
+                    "average_offer_price": 155.79902661698205,
+                    "average_accepted_price": 145.2615121770496
+                }
+            }
+        },
+        "Coal2": {
+            "initial_budget": 258558.93309999994,
+            "final_budget": 24890679.69,
+            "average_budget_change": 147497.72908323354,
+            "acceptance_rate": 91.66666666666666,
+            "average_offer_price": 29.227608631231956,
+            "average_accepted_price": 20.99628133452558,
+            "resources": {
+                "Coal": {
+                    "total_offers": 168,
+                    "accepted_offers": 154,
+                    "acceptance_rate": 91.66666666666666,
+                    "average_offer_price": 29.227608631231956,
+                    "average_accepted_price": 20.99628133452558
+                }
+            }
+        },
+        "CCGT2": {
+            "initial_budget": 0.0,
+            "final_budget": 82624194.38775,
+            "average_budget_change": 494755.6550164671,
+            "acceptance_rate": 62.5,
+            "average_offer_price": 149.54604313487098,
+            "average_accepted_price": 127.27746952601842,
+            "resources": {
+                "CCGT": {
+                    "total_offers": 168,
+                    "accepted_offers": 105,
+                    "acceptance_rate": 62.5,
+                    "average_offer_price": 149.54604313487098,
+                    "average_accepted_price": 127.27746952601842
+                }
+            }
+        },
+        "Biofuel 2": {
+            "initial_budget": 1103000.0,
+            "final_budget": 85061085.324,
+            "average_budget_change": 502743.02589221555,
+            "acceptance_rate": 54.166666666666664,
+            "average_offer_price": 169.26459910188402,
+            "average_accepted_price": 156.10895132756494,
+            "resources": {
+                "Biofuel": {
+                    "total_offers": 168,
+                    "accepted_offers": 91,
+                    "acceptance_rate": 54.166666666666664,
+                    "average_offer_price": 169.26459910188402,
+                    "average_accepted_price": 156.10895132756494
+                }
+            }
+        }
+    }
+}

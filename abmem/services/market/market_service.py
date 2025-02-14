@@ -29,8 +29,8 @@ def init(market: Market) -> None:
     marketData = ReaderService.readExcel(
         path='marketData.xlsx',
         columns=['Submitted Bid Order Volume(MWh)', 'Daily exchange rates(USD)', 
-                 'Natural Gas Price (USD/1000Sm3)', 'İstanbul average temperature'],
-        map=['demand', 'der', 'ngp', 'ist']
+                 'Natural Gas Price (USD/1000Sm3)', 'İstanbul average temperature', 'DEMAND'],
+        map=['old_demand', 'der', 'ngp', 'ist', 'demand']
     )
     for agent in market.agent_set.all():
         algorithm = AgentService.init(agent)

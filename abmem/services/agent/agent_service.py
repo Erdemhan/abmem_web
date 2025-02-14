@@ -13,7 +13,6 @@ from ..algorithms.algorithm_utils import State
 import random
 from decimal import Decimal
 
-PENALTY = 5000
 
 def init(agent: Agent):
     # Initialize the agent's state without creating a portfolio
@@ -91,8 +90,33 @@ def run(agent,algorithm) -> bool:
     agent.save()
 
     if agent.market.period_set.count() >= 3:
-        last_period = agent.market.period_set.order_by('-id')[2]
-        played_period = agent.market.period_set.order_by('-id')[1]
+        
+        if agent.market.period_set.order_by('-id')[2:3].exists():
+            last_period = agent.market.period_set.order_by('-id')[2]
+        if agent.market.period_set.order_by('-id')[1:2].exists():
+            played_period = agent.market.period_set.order_by('-id')[1]
+        if agent.market.period_set.order_by('-id')[23:24].exists():
+            last24_period = agent.market.period_set.order_by('-id')[23]
+            last24_period_ptf = last24_period.ptf
+        else:
+            last24_period_ptf= 0
+        if agent.market.period_set.order_by('-id')[168:169].exists():
+            last168_period = agent.market.period_set.order_by('-id')[167]
+            last168_period_ptf = last168_period.ptf
+        else:
+            last168_period_ptf = 0
+        if agent.market.period_set.order_by('-id')[24:25].exists():
+            last24_period_old = agent.market.period_set.order_by('-id')[24]
+            last24_period_old_ptf = last24_period_old.ptf
+        else:
+            last24_period_old_ptf = 0
+        if agent.market.period_set.order_by('-id')[168:169].exists():
+            last168_period_old = agent.market.period_set.order_by('-id')[168]
+            last168_period_old_ptf = last168_period_old.ptf
+        else:
+            last168_period_old_ptf = 0
+
+    
         last_offers = agent.offer_set.filter(period=played_period)
         actions = []
         reward = 0
@@ -100,14 +124,15 @@ def run(agent,algorithm) -> bool:
         for offer in last_offers:
             actions.append(offer.offerPrice)
             if offer.acceptanceAmount > 0:
-                reward += ((Decimal(offer.acceptanceAmount) * offer.acceptancePrice)) - (offer.resource.fuelCost * Decimal(offer.acceptanceAmount))
+                reward += ((Decimal(offer.acceptanceAmount) * offer.acceptancePrice)) - ((offer.resource.staticCost() * offer.amount) + (offer.resource.variableCost() * offer.acceptanceAmount))
             else:
-                reward += -(PENALTY)
+                reward += -(offer.resource.staticCost() * offer.amount)
+
 
         results = [
-            State(mcp=last_period.ptf, demand=last_period.demand),
+            State(mcp=last_period.ptf, demand=last_period.demand,mcp24=last24_period_old_ptf,mcp168= last168_period_old_ptf),
             actions,
-            State(mcp=played_period.ptf, demand=played_period.demand),
+            State(mcp=played_period.ptf, demand=played_period.demand,mcp24=last24_period_ptf,mcp168=last168_period_ptf),
             reward
         ]
 

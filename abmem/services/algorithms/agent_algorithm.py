@@ -30,14 +30,14 @@ class AgentAlgorithm:
         self.ddpg = DDPG(self.replayBuffer,learning_rate_actor=LEARNING_RATE_ACTOR,learning_rate_critic=LEARNING_RATE_CRITIC,noise=NOISE_STD,noise_decay=NOISE_DECAY,noise_min=NOISE_MIN,action_dim=action_dim)
         
     def selectAction(self, state: State) -> list:
-        state = [int(state.demand),int(state.mcp)]
+        state = [int(state.demand),int(state.mcp),int(state.mcp24),int(state.mcp168)]
         action = self.ddpg.select_action(np.array(state))
         return action
     
     def learn(self, state, action, next_state, reward, done=False):
         # Add the step to the buffer
-        state = [int(state.demand),int(state.mcp)]
-        next_state = [int(next_state.demand),int(next_state.mcp)]
+        state = [int(state.demand),int(state.mcp),int(state.mcp24),int(state.mcp168)]
+        next_state = [int(next_state.demand),int(next_state.mcp),int(next_state.mcp24),int(next_state.mcp168)]
         action = [int(act) for act in action]
         reward = int(reward)
         self.ddpg.add_to_replay_buffer(state, action, next_state, reward, done)

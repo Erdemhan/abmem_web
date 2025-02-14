@@ -20,6 +20,10 @@ class Resource(Base):
     co2Cost = models.DecimalField(decimal_places=2, max_digits=6, null=False, default=0)
     emission = models.DecimalField(decimal_places=2, max_digits=6, null=False, default=0)
 
+    def staticCost(self):
+        return self.omCost + self.investmentCost + self.co2Cost
+    def variableCost(self):
+        return self.fuelCost
 
 # PORTFOLIO
 class Portfolio(Base):

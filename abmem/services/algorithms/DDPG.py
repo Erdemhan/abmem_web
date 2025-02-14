@@ -52,7 +52,7 @@ class DDPG(object):
                  noise: float = 0.01, noise_decay: float = 0.99, noise_min: float = 0.01):
 
         action_dim = action_dim
-        state_dim = 2
+        state_dim = 4
         action_space_limits = [(0,200)]
 
         self.actor = Actor(state_dim, action_dim, action_space_limits,noise_std=noise, noise_decay=noise_decay, noise_min=noise_min).to(device)
