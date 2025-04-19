@@ -14,6 +14,7 @@ import random
 from decimal import Decimal
 
 
+
 def init(agent: Agent):
     # Initialize the agent's state without creating a portfolio
     agent.state = AgentState.INITIALIZED
@@ -24,6 +25,7 @@ def init(agent: Agent):
 
 def relearn(agent: Agent, results) -> None:
     # Set the agent's state to learning and save
+    
     agent.state = AgentState.LEARNING
     agent.save()
     # learn(self, state, action, next_state, reward, done=False):
@@ -40,24 +42,34 @@ def calculateOffers(agent: Agent) -> [Offer]:
     # Set the agent's state to calculating and save
     agent.state = AgentState.CALCULATING
     agent.save()
-    offers = []
+    new_offers = []
 
     period = agent.market.period_set.latest()
+    offers = agent.offer_set.all()
     played_period = agent.market.period_set.order_by('-id')[1]
     state = State(mcp=played_period.ptf,demand=period.demand)
-    actions = agent.algorithm.selectAction(state)
 
+
+    accepted_offers = sum(1 for offer in offers if offer.acceptance)
+    acceptance_rate = accepted_offers / len(offers) if len(offers) > 0 else 0
     counter = 0
+    actions = agent.algorithm.selectAction(state)
     for plant in agent.portfolio.plant_set.all():
+        offerPrice = actions[counter]
+        if agent.algorithm.failStack > 4:
+            if random.random() < 0.9:
+                agent.algorithm.failStack = int(agent.algorithm.failStack/2)
+                offerPrice=Decimal(random.randrange(int(played_period.ptf-10),int(played_period.ptf+10)))
         offer = OfferFactory.create(
             agent=agent,
             resource=plant.resource,
             amount=plant.capacity,
-            offerPrice=Decimal(float(actions[counter]))
+            offerPrice=Decimal(float(offerPrice))
         )
         counter +=1 
-        offers.append(offer)
-    return offers
+        new_offers.append(offer)
+
+    return new_offers
 
 def calculateRandomOffers(agent: Agent) -> [Offer]:
     # Set the agent's state to calculating and save

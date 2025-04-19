@@ -1,7 +1,6 @@
 from .ddpg import DDPG,ReplayBuffer
 from .algorithm_utils import State
 import numpy as np
-
 # BASE AGENT ALGORITHM
 
 # HYPERPARAMS
@@ -13,7 +12,7 @@ MINI_BATCH_SIZE = 64 # 0-...
 LEARNING_RATE_ACTOR = 0.0005 # 0-1
 LEARNING_RATE_CRITIC = 0.001 # 0-1
 TAU = 0.0001 # 0-1
-DISCOUNT = 0.96 # 0-1
+DISCOUNT = 0.98 # 0-1
 NOISE_STD = 0.6# 0-1
 NOISE_DECAY = 0.99# 0-1
 NOISE_MIN = 0.01 # 0-1
@@ -28,7 +27,8 @@ class AgentAlgorithm:
         self.agent_id = agent_id
         self.replayBuffer =  ReplayBuffer(10000)
         self.ddpg = DDPG(self.replayBuffer,learning_rate_actor=LEARNING_RATE_ACTOR,learning_rate_critic=LEARNING_RATE_CRITIC,noise=NOISE_STD,noise_decay=NOISE_DECAY,noise_min=NOISE_MIN,action_dim=action_dim)
-        
+        self.failStack = 0
+
     def selectAction(self, state: State) -> list:
         state = [int(state.demand),int(state.mcp),int(state.mcp24),int(state.mcp168)]
         action = self.ddpg.select_action(np.array(state))

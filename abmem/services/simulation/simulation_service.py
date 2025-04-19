@@ -88,8 +88,6 @@ def run(simulation: Simulation) -> bool:
 
             print("Market run start")
             market_result = MarketService.run(simulation.market)
-            print(f"Market result type: {type(market_result)}")
-            print(f"Market result: {market_result}")
             
             # Convert numpy array to list if necessary
             if hasattr(market_result, 'tolist'):

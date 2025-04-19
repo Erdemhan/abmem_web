@@ -16,7 +16,7 @@ class Actor(nn.Module):
         # Network layers: input state_dim, output action_dim
         # action_space_limits is needed to scale the 0-1 sigmoid output
         self.layer_1 = nn.Linear(state_dim, 128)
-        self.layer_2 = nn.Linear(128, 64)
+        self.layer_2 = nn.Linear(128,64)
         self.layer_3 = nn.Linear(64, 32)
         self.layer_4 = nn.Linear(32, action_dim)
         

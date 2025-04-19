@@ -202,7 +202,10 @@ def saveOffers(market: Market, offers: [Offer]) -> None:
     for offer in offers:
         offer.save()
         agent = offer.agent
-        agent.budget += budgetCalculation(offer)
+        reward = budgetCalculation(offer)
+        agent.budget += reward
+        if not offer.acceptance or reward < (float (offer.acceptancePrice) * float (offer.acceptanceAmount) * float (offer.period.ptf/2)):
+            agent.algorithm.failStack += 1
         agent.save()
 
 def budgetCalculation(offer: Offer):

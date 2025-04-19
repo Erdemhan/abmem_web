@@ -35,7 +35,7 @@ class Plant(Base):
     portfolio = models.ForeignKey(Portfolio, on_delete=models.CASCADE, null=False)
     resource = models.ForeignKey(Resource, on_delete=models.CASCADE, null=False)
     capacity = models.IntegerField(default=0, null=False)
-
+    
 
 # PERIOD
 class Period(Base):
