@@ -11,17 +11,22 @@ from ...services.agent import offer_factory as OfferFactory
 from ..algorithms.agent_algorithm import AgentAlgorithm
 from ..algorithms.algorithm_utils import State
 import random
+import torch
 from decimal import Decimal
-
-
+import numpy as np
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 def init(agent: Agent):
     # Initialize the agent's state without creating a portfolio
     agent.state = AgentState.INITIALIZED
     action_dim = agent.portfolio.plant_set.count()
-    agent.algorithm = AgentAlgorithm(action_dim,agent.id)
+    algorithm = AgentAlgorithm(action_dim, agent.id)
+
+
+    agent.algorithm = algorithm
     agent.save()
     return agent.algorithm
+
 
 def relearn(agent: Agent, results) -> None:
     # Set the agent's state to learning and save
@@ -56,17 +61,26 @@ def calculateOffers(agent: Agent) -> [Offer]:
     actions = agent.algorithm.selectAction(state)
     for plant in agent.portfolio.plant_set.all():
         offerPrice = actions[counter]
+
+        if isinstance(offerPrice, list):  # <--- Yeni kontrol
+            offerPrice = offerPrice[0]
+
         if agent.algorithm.failStack > 4:
             if random.random() < 0.9:
-                agent.algorithm.failStack = int(agent.algorithm.failStack/2)
-                offerPrice=Decimal(random.randrange(int(played_period.ptf-10),int(played_period.ptf+10)))
+                agent.algorithm.failStack = int(agent.algorithm.failStack / 2)
+                offerPrice = Decimal(random.randrange(int(played_period.ptf - 10), int(played_period.ptf + 10)))
+            else:
+                offerPrice = Decimal(float(offerPrice))
+        else:
+            offerPrice = Decimal(float(offerPrice))
+
         offer = OfferFactory.create(
             agent=agent,
             resource=plant.resource,
             amount=plant.capacity,
-            offerPrice=Decimal(float(offerPrice))
+            offerPrice=offerPrice
         )
-        counter +=1 
+        counter += 1
         new_offers.append(offer)
 
     return new_offers
@@ -96,12 +110,30 @@ def createPortfolio(agent: Agent, plantsData: dict) -> Portfolio:
     # Create a portfolio for the agent using the provided data
     return PortfolioFactory.create(agent, plantsData)
 
+def to_safe_history(history):
+    return [
+        [int(x.item()) if hasattr(x, "item") else int(x) for x in list(row)]
+        for row in history
+    ]
+
+
 def run(agent,algorithm) -> bool:
     agent.algorithm = algorithm
+    h = agent.algorithm.hidden[0]
+    c = agent.algorithm.hidden[1]
+    if isinstance(h, np.ndarray):
+        h = torch.tensor(h, dtype=torch.float32).to(device)
+        c = torch.tensor(c, dtype=torch.float32).to(device)
+    if h.dim() == 2:
+        h = h.unsqueeze(0)
+        c = c.unsqueeze(0)
+    agent.algorithm.hidden = (h, c)
+
+
     agent.state = AgentState.RUNNING
     agent.save()
 
-    if agent.market.period_set.count() >= 3:
+    if agent.market.period_set.count() >=  algorithm.seq_len:
         
         if agent.market.period_set.order_by('-id')[2:3].exists():
             last_period = agent.market.period_set.order_by('-id')[2]
@@ -157,5 +189,13 @@ def run(agent,algorithm) -> bool:
     agent.state = AgentState.WAITING
     agent.save()
 
+    agent.algorithm.hidden = (
+        agent.algorithm.hidden[0].detach().cpu().numpy(),
+        agent.algorithm.hidden[1].detach().cpu().numpy()
+    )
     return agent.algorithm,offers
+
+
+
+
 

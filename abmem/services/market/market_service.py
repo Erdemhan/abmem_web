@@ -10,6 +10,7 @@ from ...models import Market, Period, Offer, Agent
 from decimal import Decimal
 from ...services.algorithms import MPIP
 from ...services.agent import agent_factory as AgentFactory, agent_service as AgentService
+from ...services.algorithms.agent_algorithm import AgentAlgorithm
 from ...services.simulation import parallel_service as ParallelService
 from ...services.file_reader import reader_service as ReaderService
 from ...constants import *

@@ -1,0 +1,142 @@
+{
+    "simulation_id": "860",
+    "total_periods": 336,
+    "agents": {
+        "HYDRO": {
+            "initial_budget": 0.0,
+            "final_budget": 91754516.75,
+            "average_budget_change": 273894.07985074626,
+            "acceptance_rate": 30.654761904761905,
+            "average_offer_price": 179.20166106085483,
+            "average_accepted_price": 155.73025512695312,
+            "resources": {
+                "Hydro": {
+                    "total_offers": 336,
+                    "accepted_offers": 103,
+                    "acceptance_rate": 30.654761904761905,
+                    "average_offer_price": 179.20166106085483,
+                    "average_accepted_price": 155.73025512695312
+                }
+            }
+        },
+        "SOLAR": {
+            "initial_budget": 128368.73,
+            "final_budget": 104964316.28,
+            "average_budget_change": 312943.12701492535,
+            "acceptance_rate": 34.523809523809526,
+            "average_offer_price": 171.19274229357015,
+            "average_accepted_price": 137.83225642338127,
+            "resources": {
+                "Solar": {
+                    "total_offers": 336,
+                    "accepted_offers": 116,
+                    "acceptance_rate": 34.523809523809526,
+                    "average_offer_price": 171.19274229357015,
+                    "average_accepted_price": 137.83225642338127
+                }
+            }
+        },
+        "GEOTHERMAL": {
+            "initial_budget": 128368.73,
+            "final_budget": 96372242.5,
+            "average_budget_change": 287295.14558208955,
+            "acceptance_rate": 33.92857142857143,
+            "average_offer_price": 171.79387490412284,
+            "average_accepted_price": 137.96630773722006,
+            "resources": {
+                "Geothermal": {
+                    "total_offers": 336,
+                    "accepted_offers": 114,
+                    "acceptance_rate": 33.92857142857143,
+                    "average_offer_price": 171.79387490412284,
+                    "average_accepted_price": 137.96630773722006
+                }
+            }
+        },
+        "BİOFUEL": {
+            "initial_budget": 0.0,
+            "final_budget": 276623571.0529328,
+            "average_budget_change": 825742.003143083,
+            "acceptance_rate": 82.14285714285714,
+            "average_offer_price": 136.97883470558287,
+            "average_accepted_price": 129.48137542994127,
+            "resources": {
+                "Biofuel": {
+                    "total_offers": 336,
+                    "accepted_offers": 276,
+                    "acceptance_rate": 82.14285714285714,
+                    "average_offer_price": 136.97883470558287,
+                    "average_accepted_price": 129.48137542994127
+                }
+            }
+        },
+        "COAL": {
+            "initial_budget": 0.0,
+            "final_budget": 281954295.06968015,
+            "average_budget_change": 841654.612148299,
+            "acceptance_rate": 82.44047619047619,
+            "average_offer_price": 132.68456088735263,
+            "average_accepted_price": 125.49962926967085,
+            "resources": {
+                "Coal": {
+                    "total_offers": 336,
+                    "accepted_offers": 277,
+                    "acceptance_rate": 82.44047619047619,
+                    "average_offer_price": 132.68456088735263,
+                    "average_accepted_price": 125.49962926967085
+                }
+            }
+        },
+        "CCGT": {
+            "initial_budget": 0.0,
+            "final_budget": 288031409.98267275,
+            "average_budget_change": 859795.2536796201,
+            "acceptance_rate": 85.11904761904762,
+            "average_offer_price": 128.26919142695095,
+            "average_accepted_price": 121.42476545513927,
+            "resources": {
+                "CCGT": {
+                    "total_offers": 336,
+                    "accepted_offers": 286,
+                    "acceptance_rate": 85.11904761904762,
+                    "average_offer_price": 128.26919142695095,
+                    "average_accepted_price": 121.42476545513927
+                }
+            }
+        },
+        "WİND": {
+            "initial_budget": 0.0,
+            "final_budget": 297575781.8895868,
+            "average_budget_change": 888285.9160883188,
+            "acceptance_rate": 85.11904761904762,
+            "average_offer_price": 126.9928355118415,
+            "average_accepted_price": 119.6686538632933,
+            "resources": {
+                "Wind": {
+                    "total_offers": 336,
+                    "accepted_offers": 286,
+                    "acceptance_rate": 85.11904761904762,
+                    "average_offer_price": 126.9928355118415,
+                    "average_accepted_price": 119.6686538632933
+                }
+            }
+        },
+        "NUCLEAR": {
+            "initial_budget": 0.0,
+            "final_budget": 75424586.55,
+            "average_budget_change": 225148.0195522388,
+            "acceptance_rate": 29.464285714285715,
+            "average_offer_price": 178.03495451753068,
+            "average_accepted_price": 152.17262508893253,
+            "resources": {
+                "Nuclear": {
+                    "total_offers": 336,
+                    "accepted_offers": 99,
+                    "acceptance_rate": 29.464285714285715,
+                    "average_offer_price": 178.03495451753068,
+                    "average_accepted_price": 152.17262508893253
+                }
+            }
+        }
+    }
+}

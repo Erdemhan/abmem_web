@@ -49,4 +49,3 @@ def startPool(agents, algorithms):
 
     # Return the separated lists
     return updated_algorithms, offers
-
