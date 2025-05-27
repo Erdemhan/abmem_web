@@ -1,6 +1,14 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import hashlib
+
+import hashlib
+
+def deterministic_noise_seed(agent_name: str, period: int) -> int:
+    key = f"{agent_name}-{period}"
+    return int(hashlib.sha256(key.encode()).hexdigest(), 16) % (2**32)
+
 
 # Decision-making actor network.
 class Actor(nn.Module):
@@ -54,9 +62,10 @@ class Critic(nn.Module):
         x = F.relu(self.layer_3(x))
         return self.layer_4(x)
 
-
 # RNN tabanlı actor
 class RNNActor(nn.Module):
+
+    
     def __init__(self, state_dim, action_dim, action_space_limits, noise_std=0.05, noise_decay=0.99, noise_min=0.01):
         super(RNNActor, self).__init__()
 
@@ -73,23 +82,26 @@ class RNNActor(nn.Module):
         self.layer_3 = nn.Linear(64, 32)
         self.layer_4 = nn.Linear(32, action_dim)
 
-    def forward(self, x, hidden):
+    def forward(self, x, hidden, agent_name=None, period=None):
         if x.dim() == 2:
             x = x.unsqueeze(0)
 
         x, hidden = self.lstm(x, hidden)
-        x = x[:, -1, :]  # son adım
+        x = x[:, -1, :]  # son zaman adımı
 
         x = (x - x.mean()) / (x.std() + 1e-6)
         x = F.relu(self.layer_1(x))
         x = F.relu(self.layer_2(x))
         x = F.relu(self.layer_3(x))
         x = torch.sigmoid(self.layer_4(x))
-        #print(f"[Actor] Sigmoid output (before noise): {x.detach().cpu().numpy()}")
 
-        noise = torch.normal(mean=0, std=self.noise_scale, size=x.size()).to(x.device)
-        x = x + noise
-        #print(f"[Actor] Output + noise: {x.detach().cpu().numpy()}")
+        # 🧂 Gürültü ekle (deterministik ve izole edilmiş)
+        if self.noise_scale > 0 and agent_name is not None and period is not None:
+            seed_val = deterministic_noise_seed(agent_name, period)
+            with torch.random.fork_rng(devices=[x.device]):
+                torch.manual_seed(seed_val)
+                noise = torch.normal(mean=0, std=self.noise_scale, size=x.size()).to(x.device)
+                x = x + noise
 
         lower_bound = torch.tensor([0 for limit in self.action_space_limits], device=x.device)
         upper_bound = torch.tensor([limit[1] for limit in self.action_space_limits], device=x.device)
@@ -97,6 +109,7 @@ class RNNActor(nn.Module):
         x = torch.clamp(x, lower_bound, upper_bound)
 
         return x.unsqueeze(1), hidden
+
 
     def update_noise(self):
         self.noise_scale *= self.noise_decay

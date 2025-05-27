@@ -3,6 +3,8 @@ from .algorithm_utils import State
 import numpy as np
 import torch
 from collections import deque
+import hashlib
+
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -23,14 +25,18 @@ PENALTY_DECAY = 1
 PENALTY = 1500
 ITERATION = 100
 
-
 STATE_DIM = 4
 SEQ_LEN = 24
 
+def get_step_seed(agent_name: str, step: int) -> int:
+    key = f"{agent_name}-{step}"
+    return int(hashlib.sha256(key.encode()).hexdigest(), 16) % (2**32)
+
+
 class AgentAlgorithm:
 
-    def __init__(self, action_dim, agent_id):
-        self.agent_id = agent_id
+    def __init__(self, action_dim, agent_name):  # seed burada sadece istenirse loglamada kullanılabilir
+        self.agent_name = agent_name
         self.replayBuffer = ReplayBuffer(10000)
         self.ddpg = RDPG(self.replayBuffer,
                          learning_rate_actor=LEARNING_RATE_ACTOR,
@@ -39,25 +45,23 @@ class AgentAlgorithm:
                          noise_min=NOISE_MIN, action_dim=action_dim)
         self.failStack = 0
 
-        # LSTM gizli durumu
         self.hidden = (
             torch.zeros(1, 1, 32).to(device),
             torch.zeros(1, 1, 32).to(device)
         )
 
-        # Zaman dizisi için deque
         self.state_history = deque(maxlen=SEQ_LEN)
         self.next_state_history = deque(maxlen=SEQ_LEN)
         self.seq_len = SEQ_LEN
-
-
-
 
     def selectAction(self, state: State) -> list:
         current = [int(state.demand), int(state.mcp), int(state.mcp24), int(state.mcp168)]
         self.state_history.append(current)
 
         if len(self.state_history) < SEQ_LEN:
+            # 🔐 Deterministik random action
+            step_seed = get_step_seed(self.agent_name, len(self.state_history))
+            np.random.seed(step_seed)
             random_action = np.random.uniform(0, 200, self.ddpg.action_dim)
             return random_action.tolist()
 
@@ -65,12 +69,10 @@ class AgentAlgorithm:
         action, self.hidden = self.ddpg.select_action(state_seq, self.hidden)
         return action.tolist()
 
-
-
     def learn(self, state, action, next_state, reward, done=False):
         s = [int(state.demand), int(state.mcp), int(state.mcp24), int(state.mcp168)]
         ns = [int(next_state.demand), int(next_state.mcp), int(next_state.mcp24), int(next_state.mcp168)]
-        
+
         self.state_history.append(s)
         self.next_state_history.append(ns)
 
@@ -93,4 +95,3 @@ class AgentAlgorithm:
             )
             self.state_history.clear()
             self.next_state_history.clear()
-

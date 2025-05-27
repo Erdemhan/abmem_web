@@ -23,10 +23,33 @@ from django.db.models import Q
 marketData = []
 
 algorithms = []
+agents= []
+
+SEED = 38
+import hashlib
+# utils.py
+import random
+import numpy as np
+import torch
+import os
+
+def set_seed(seed: int):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    torch.use_deterministic_algorithms(True)
+
+def deterministic_hash(text: str) -> int:
+    return int(hashlib.sha256(text.encode()).hexdigest(), 16) % (10**8)
 
 def init(market: Market) -> None:
     global marketData
     # Read market data from an Excel file and map the columns
+    set_seed(SEED)
     marketData = ReaderService.readExcel(
         path='marketData.xlsx',
         columns=['Submitted Bid Order Volume(MWh)', 'Daily exchange rates(USD)', 
@@ -34,8 +57,12 @@ def init(market: Market) -> None:
         map=['old_demand', 'der', 'ngp', 'ist', 'demand']
     )
     for agent in market.agent_set.all():
+        name_hash = deterministic_hash(agent.name)
+        agent.seed = SEED + name_hash 
+        agent.save()
         algorithm = AgentService.init(agent)
         algorithms.append(algorithm)
+
 
     # Set the market state to INITIALIZED and save
     market.state = MarketState.INITIALIZED

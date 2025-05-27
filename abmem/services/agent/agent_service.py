@@ -16,11 +16,13 @@ from decimal import Decimal
 import numpy as np
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+
+
 def init(agent: Agent):
     # Initialize the agent's state without creating a portfolio
     agent.state = AgentState.INITIALIZED
     action_dim = agent.portfolio.plant_set.count()
-    algorithm = AgentAlgorithm(action_dim, agent.id)
+    algorithm = AgentAlgorithm(action_dim, agent.name)
 
 
     agent.algorithm = algorithm
@@ -65,8 +67,8 @@ def calculateOffers(agent: Agent) -> [Offer]:
         if isinstance(offerPrice, list):  # <--- Yeni kontrol
             offerPrice = offerPrice[0]
 
-        if agent.algorithm.failStack > 4:
-            if random.random() < 0.9:
+        if agent.algorithm.failStack > 6:
+            if random.random() < 0.7:
                 agent.algorithm.failStack = int(agent.algorithm.failStack / 2)
                 offerPrice = Decimal(random.randrange(int(played_period.ptf - 10), int(played_period.ptf + 10)))
             else:
@@ -116,9 +118,64 @@ def to_safe_history(history):
         for row in history
     ]
 
+def compute_composite_reward(last_offers, market_price, max_capacity, price_cap=200):
+    if not last_offers:
+        return 0.0
+
+    offer = last_offers[0]
+    offer_price = float(offer.offerPrice)
+    offer_amount = float(offer.amount)
+    acceptance_amount = float(offer.acceptanceAmount)
+    acceptance_price = float(offer.acceptancePrice)
+    resource = offer.resource
+
+    static_cost = float(resource.staticCost()) * offer_amount
+    variable_cost = float(resource.variableCost()) * acceptance_amount
+
+    if acceptance_amount > 0:
+        budget_growth = (acceptance_amount * acceptance_price) - (static_cost + variable_cost)
+    else:
+        budget_growth = -static_cost
+
+    max_possible_growth = price_cap * max_capacity
+    normalized_growth = budget_growth / max_possible_growth  # ŞİMDİ -1 ila +1 arasında
+
+    # MCP similarity (her zaman 0–1)
+    offer_mcp_similarity = 1 - abs(float(offer_price)- float(market_price)) / float(price_cap)
+    offer_mcp_similarity = max(min(offer_mcp_similarity, 1), 0)
+
+    reward = 0.5 * normalized_growth + 0.5 * offer_mcp_similarity
+    print((normalized_growth, offer_mcp_similarity))
+    return reward
+
+
+
+# utils.py
+import hashlib
+import random
+import numpy as np
+import torch
+
+
+def get_agent_step_seed(agent_name: str, period: int) -> int:
+    """
+    Ajan ismi + periyot bilgisine göre benzersiz ve tekrar edilebilir seed üret.
+    """
+    key = f"{agent_name}-{period}"
+    return int(hashlib.sha256(key.encode()).hexdigest(), 16) % (2**32)
+
 
 def run(agent,algorithm) -> bool:
     agent.algorithm = algorithm
+
+    # 🔐 Her dönem, her ajan için deterministik RNG kurulumu
+    period = agent.market.period_set.count()
+    step_seed = get_agent_step_seed(agent.name, period)
+
+    random.seed(step_seed)
+    np.random.seed(step_seed)
+    torch.manual_seed(step_seed)
+
     h = agent.algorithm.hidden[0]
     c = agent.algorithm.hidden[1]
     if isinstance(h, np.ndarray):
@@ -128,6 +185,7 @@ def run(agent,algorithm) -> bool:
         h = h.unsqueeze(0)
         c = c.unsqueeze(0)
     agent.algorithm.hidden = (h, c)
+    
 
 
     agent.state = AgentState.RUNNING
@@ -163,14 +221,16 @@ def run(agent,algorithm) -> bool:
     
         last_offers = agent.offer_set.filter(period=played_period)
         actions = []
-        reward = 0
 
         for offer in last_offers:
             actions.append(offer.offerPrice)
-            if offer.acceptanceAmount > 0:
-                reward += ((Decimal(offer.acceptanceAmount) * offer.acceptancePrice)) - ((offer.resource.staticCost() * offer.amount) + (offer.resource.variableCost() * offer.acceptanceAmount))
-            else:
-                reward += -(offer.resource.staticCost() * offer.amount)
+
+        reward = compute_composite_reward(
+            last_offers,
+            played_period.ptf,
+            offer.amount,
+            price_cap=200
+        )
 
 
         results = [

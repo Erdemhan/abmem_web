@@ -1,51 +1,46 @@
-from ...models import  Agent
+# parallel_service.py
+
+import os
+import random
+import numpy as np
+import torch
+import multiprocessing
+
+# ✅ Django ayarları en başta yüklenmeli
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", "web_project.settings")  # <--- projenin settings dosyasını buraya yaz
+import django
+django.setup()
+
+
+# ✅ Worker başlatıldığında seed'leri ayarla
+def init_worker():
+    seed = 38  # sabit seed
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    torch.use_deterministic_algorithms(True)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
+# ✅ Django importları artık güvenli
+from ...models import Agent
 from ...services.agent import agent_service as AgentService
 from ...constants import *
-import multiprocessing
-import django
 
-def init_worker():
-    """
-    Initialize Django in the child process.
-    This function is called in each child process before running tasks.
-    It's necessary to ensure Django is properly set up within child processes.
-    """
-    if not django.apps.apps.ready:  # Django'nun zaten başlatılıp başlatılmadığını kontrol et
-        django.setup()
-
-import multiprocessing
 
 def startPool(agents, algorithms):
-    """
-    Start a multiprocessing pool to execute the AgentService.run function for each agent.
+    # 🔁 Artık agent_name ile eşleştiriyoruz
+    algorithm_map = {alg.agent_name: alg for alg in algorithms}
 
-    Args:
-        agents ([Agent]): A list of Agent objects to be processed.
-        algorithms ([Algorithm]): A list of Algorithm objects with agent_id attributes.
+    # 💡 agent.name üzerinden algoritmayı bul
+    tasks = [(agent, algorithm_map.get(agent.name)) for agent in agents]
 
-    Returns:
-        ([Algorithm], [Offer]): A tuple containing:
-            - A list of updated algorithms.
-            - A list of offers produced by the agents.
-    """
-    import multiprocessing
-
-    # Create a dictionary to map agent IDs to their algorithms
-    algorithm_map = {alg.agent_id: alg for alg in algorithms}
-
-    # Prepare the input data for multiprocessing
-    tasks = [(agent, algorithm_map.get(agent.id)) for agent in agents]
-
-    # Create a multiprocessing pool and map the AgentService.run function to the tasks
-    with multiprocessing.Pool() as pool:
+    with multiprocessing.Pool(initializer=init_worker) as pool:
         results = pool.starmap(AgentService.run, tasks)
 
-    # Separate the algorithms and offers from the results
-    updated_algorithms, offers = zip(*results)  # Unpack the tuple into two lists
+    updated_algorithms, offers = zip(*results)
+    return list(updated_algorithms), list(offers)
 
-    # Convert back to lists (optional, since zip returns tuples)
-    updated_algorithms = list(updated_algorithms)
-    offers = list(offers)
-
-    # Return the separated lists
-    return updated_algorithms, offers

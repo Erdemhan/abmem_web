@@ -234,6 +234,7 @@ def analyze_simulation(file_path: str):
                 bbox_inches='tight', dpi=300, pad_inches=0.5)
     plt.close()
     
+    
     # İstatistikleri JSON'a kaydet
     save_statistics_to_json(df, sim_id)
 
@@ -270,12 +271,86 @@ def analyze_simulation(file_path: str):
         total_offers = len(agent_data)
         acceptance_rate = (accepted_offers / total_offers) * 100
         
-        print(f"\n{agent}:")
-        print(f"  Initial Budget: {initial_budget:.2f}")
-        print(f"  Final Budget: {final_budget:.2f}")
-        print(f"  Total Budget Change: {budget_change:.2f}")
-        print(f"  Acceptance Rate: {acceptance_rate:.1f}%")
-        print(f"  Average Offer Price: {agent_data['offer_price'].mean():.2f}")
+
+        # === 3. Composite Agent Score ve Market Learning Score Hesaplama ve Görselleştirme ===
+    print("\nCalculating Composite Agent Scores and Market Learning Score...")
+
+    # --- Agent Composite Scores ---
+    agent_scores = {}
+    price_cap = 200  # teklif fiyat tavanı sabit
+
+    agents = df['agent'].unique()
+
+    # Budget normalization için tüm ajanların budget değişimlerini topla
+    budget_changes = {}
+    for agent in agents:
+        agent_data = df[df['agent'] == agent]
+        initial_budget = agent_data.iloc[0]['budget']
+        final_budget = agent_data.iloc[-1]['budget']
+        budget_changes[agent] = final_budget - initial_budget
+
+    min_budget = min(budget_changes.values())
+    max_budget = max(budget_changes.values())
+
+    for agent in agents:
+        agent_data = df[df['agent'] == agent]
+        
+        # Acceptance Rate
+        total_offers = len(agent_data)
+        accepted_offers = len(agent_data[agent_data['accepted']])
+        acceptance_rate = accepted_offers / total_offers if total_offers > 0 else 0
+        
+        # Offer-MCP Similarity
+        agent_data['abs_diff'] = (agent_data['offer_price'] - agent_data['market_price']).abs()
+        mean_abs_diff = agent_data['abs_diff'].mean()
+        offer_mcp_similarity = 1 - (mean_abs_diff / price_cap)
+        
+        # Budget Growth (normalize)
+        raw_budget_change = budget_changes[agent]
+        if max_budget - min_budget != 0:
+            budget_growth_norm = (raw_budget_change - min_budget) / (max_budget - min_budget)
+        else:
+            budget_growth_norm = 1  # Tüm ajanlar aynı budget artışı yapmışsa
+        
+        # Composite Score
+        composite_score = (
+            0.0 * acceptance_rate +
+            0.5 * offer_mcp_similarity +
+            0.5 * budget_growth_norm
+        )
+
+        agent_scores[agent] = composite_score
+
+    # --- Market Learning Score ---
+    # Market Competition Index (MCI)
+    mcp_avg = df['market_price'].mean()
+    mci = mcp_avg / price_cap
+
+    # Market Profitability Index (MPI)
+    avg_offer_price = df['offer_price'].mean()
+    mpi = mcp_avg / avg_offer_price if avg_offer_price != 0 else 0
+
+    # Market Learning Score
+    market_learning_score = 0.5 * (1 - mci) + 0.5 * mpi
+
+    print(f"\nMarket Competition Index (MCI): {mci:.3f}")
+    print(f"Market Profitability Index (MPI): {mpi:.3f}")
+    print(f"Market Learning Score: {market_learning_score:.3f}")
+
+    # --- Görselleştirme ---
+    plt.figure(figsize=(14, 8))
+    sns.barplot(x=list(agent_scores.keys()), y=list(agent_scores.values()), palette='viridis')
+    plt.ylim(0, 1)
+    plt.title(f'Composite Agent Scores (Market Learning Score: {market_learning_score:.3f})', fontsize=18)
+    plt.xlabel('Agent', fontsize=14)
+    plt.ylabel('Composite Score (0-1)', fontsize=14)
+    plt.xticks(rotation=45)
+    plt.grid(axis='y', linestyle='--', alpha=0.7)
+
+    plt.tight_layout()
+    plt.savefig(f'simulation_{sim_id}_composite_scores.png', dpi=300)
+    plt.close()
+
 
 def main():
     # Analyze all simulation files in the directory
