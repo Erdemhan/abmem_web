@@ -13,7 +13,9 @@ from ..algorithms.algorithm_utils import State
 import random
 import torch
 from decimal import Decimal
-import numpy as np
+import random
+import torch
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -23,8 +25,6 @@ def init(agent: Agent):
     agent.state = AgentState.INITIALIZED
     action_dim = agent.portfolio.plant_set.count()
     algorithm = AgentAlgorithm(action_dim, agent.name)
-
-
     agent.algorithm = algorithm
     agent.save()
     return agent.algorithm
@@ -52,13 +52,9 @@ def calculateOffers(agent: Agent) -> [Offer]:
     new_offers = []
 
     period = agent.market.period_set.latest()
-    offers = agent.offer_set.all()
     played_period = agent.market.period_set.order_by('-id')[1]
     state = State(mcp=played_period.ptf,demand=period.demand)
 
-
-    accepted_offers = sum(1 for offer in offers if offer.acceptance)
-    acceptance_rate = accepted_offers / len(offers) if len(offers) > 0 else 0
     counter = 0
     actions = agent.algorithm.selectAction(state)
     for plant in agent.portfolio.plant_set.all():
@@ -119,9 +115,6 @@ def to_safe_history(history):
     ]
 
 def compute_composite_reward(last_offers, market_price, max_capacity, price_cap=200):
-    if not last_offers:
-        return 0.0
-
     offer = last_offers[0]
     offer_price = float(offer.offerPrice)
     offer_amount = float(offer.amount)
@@ -150,49 +143,13 @@ def compute_composite_reward(last_offers, market_price, max_capacity, price_cap=
 
 
 
-# utils.py
-import hashlib
-import random
-import numpy as np
-import torch
 
-
-def get_agent_step_seed(agent_name: str, period: int) -> int:
-    """
-    Ajan ismi + periyot bilgisine göre benzersiz ve tekrar edilebilir seed üret.
-    """
-    key = f"{agent_name}-{period}"
-    return int(hashlib.sha256(key.encode()).hexdigest(), 16) % (2**32)
-
-
-def run(agent,algorithm) -> bool:
-    agent.algorithm = algorithm
-
-    # 🔐 Her dönem, her ajan için deterministik RNG kurulumu
-    period = agent.market.period_set.count()
-    step_seed = get_agent_step_seed(agent.name, period)
-
-    random.seed(step_seed)
-    np.random.seed(step_seed)
-    torch.manual_seed(step_seed)
-
-    h = agent.algorithm.hidden[0]
-    c = agent.algorithm.hidden[1]
-    if isinstance(h, np.ndarray):
-        h = torch.tensor(h, dtype=torch.float32).to(device)
-        c = torch.tensor(c, dtype=torch.float32).to(device)
-    if h.dim() == 2:
-        h = h.unsqueeze(0)
-        c = c.unsqueeze(0)
-    agent.algorithm.hidden = (h, c)
-    
-
+def run(agent) -> bool:
 
     agent.state = AgentState.RUNNING
     agent.save()
 
-    if agent.market.period_set.count() >=  algorithm.seq_len:
-        
+    if agent.market.period_set.count() >= 3:
         if agent.market.period_set.order_by('-id')[2:3].exists():
             last_period = agent.market.period_set.order_by('-id')[2]
         if agent.market.period_set.order_by('-id')[1:2].exists():
@@ -217,8 +174,7 @@ def run(agent,algorithm) -> bool:
             last168_period_old_ptf = last168_period_old.ptf
         else:
             last168_period_old_ptf = 0
-
-    
+        
         last_offers = agent.offer_set.filter(period=played_period)
         actions = []
 
@@ -242,6 +198,7 @@ def run(agent,algorithm) -> bool:
 
         relearn(agent, results)
         offers = calculateOffers(agent)
+
     else:
         offers = calculateRandomOffers(agent)
 
@@ -249,11 +206,7 @@ def run(agent,algorithm) -> bool:
     agent.state = AgentState.WAITING
     agent.save()
 
-    agent.algorithm.hidden = (
-        agent.algorithm.hidden[0].detach().cpu().numpy(),
-        agent.algorithm.hidden[1].detach().cpu().numpy()
-    )
-    return agent.algorithm,offers
+    return agent,offers
 
 
 

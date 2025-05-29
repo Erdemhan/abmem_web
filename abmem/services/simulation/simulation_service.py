@@ -77,7 +77,7 @@ def run(simulation: Simulation) -> bool:
                 # Wait for the previous period to end before proceeding
                 while simulation.market.state == MarketState.PERIODEND:
                     simulation.market.refresh_from_db()  # Refresh market state from the database
-                    time.sleep(0.5)  # Sleep briefly to avoid busy-waiting
+                    time.sleep(0.2)  # Sleep briefly to avoid busy-waiting
         
         if simulation.currentPeriod > 0 and (simulation.currentPeriod % 24) == 0:
             simulation.day += 1  # Increment the day after every 24 periods
@@ -160,4 +160,5 @@ def run(simulation: Simulation) -> bool:
 
     simulation.state = SimulationState.FINISHED
     simulation.save()
+    print(f"Simulation finished in {timeit.default_timer() - start:.2f} seconds")
     return tOffers

@@ -5,11 +5,6 @@ import hashlib
 
 import hashlib
 
-def deterministic_noise_seed(agent_name: str, period: int) -> int:
-    key = f"{agent_name}-{period}"
-    return int(hashlib.sha256(key.encode()).hexdigest(), 16) % (2**32)
-
-
 # Decision-making actor network.
 class Actor(nn.Module):
     def __init__(self, state_dim, action_dim,  action_space_limits, noise_std=0.05, noise_decay=0.99, noise_min=0.01):
@@ -95,13 +90,9 @@ class RNNActor(nn.Module):
         x = F.relu(self.layer_3(x))
         x = torch.sigmoid(self.layer_4(x))
 
-        # 🧂 Gürültü ekle (deterministik ve izole edilmiş)
-        if self.noise_scale > 0 and agent_name is not None and period is not None:
-            seed_val = deterministic_noise_seed(agent_name, period)
-            with torch.random.fork_rng(devices=[x.device]):
-                torch.manual_seed(seed_val)
-                noise = torch.normal(mean=0, std=self.noise_scale, size=x.size()).to(x.device)
-                x = x + noise
+
+        noise = torch.normal(mean=0, std=self.noise_scale, size=x.size()).to(x.device)
+        x = x + noise
 
         lower_bound = torch.tensor([0 for limit in self.action_space_limits], device=x.device)
         upper_bound = torch.tensor([limit[1] for limit in self.action_space_limits], device=x.device)

@@ -21,10 +21,7 @@ class ReplayBuffer(object):
         else:
             self.storage.append(transition)
 
-    def sample(self, batch_size, seed=None):
-        if seed is not None:
-            np.random.seed(seed)
-
+    def sample(self, batch_size):
         ind = np.random.randint(0, len(self.storage), size=batch_size)
         batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones = [], [], [], [], []
 
@@ -78,9 +75,7 @@ class RDPG:
 
     def train(self, iterations, batch_size=128, discount=0.95, tau=0.001):
         for it in range(iterations):
-            # Her iteration için sabit ama tekrar edilebilir bir seed üret
-            train_seed = int(hashlib.sha256(f"train-{it}".encode()).hexdigest(), 16) % (2**32)
-            state, next_state, action, reward, done = self.replay_buffer.sample(batch_size, seed=train_seed)
+            state, next_state, action, reward, done = self.replay_buffer.sample(batch_size)
 
             state = torch.Tensor(state).to(device)               # [batch, seq, feature]
             next_state = torch.Tensor(next_state).to(device)

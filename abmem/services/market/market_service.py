@@ -11,7 +11,7 @@ from decimal import Decimal
 from ...services.algorithms import MPIP
 from ...services.agent import agent_factory as AgentFactory, agent_service as AgentService
 from ...services.algorithms.agent_algorithm import AgentAlgorithm
-from ...services.simulation import parallel_service as ParallelService
+from ...services.simulation import serial_service as SerialService
 from ...services.file_reader import reader_service as ReaderService
 from ...constants import *
 import numpy as np
@@ -22,34 +22,20 @@ from django.db.models import Q
 # Initialize a global variable for market data
 marketData = []
 
-algorithms = []
 agents= []
 
-SEED = 38
 import hashlib
-# utils.py
-import random
-import numpy as np
-import torch
-import os
 
-def set_seed(seed: int):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    os.environ["PYTHONHASHSEED"] = str(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-    torch.use_deterministic_algorithms(True)
+import numpy as np
+
 
 def deterministic_hash(text: str) -> int:
     return int(hashlib.sha256(text.encode()).hexdigest(), 16) % (10**8)
 
 def init(market: Market) -> None:
     global marketData
+    global agents
     # Read market data from an Excel file and map the columns
-    set_seed(SEED)
     marketData = ReaderService.readExcel(
         path='marketData.xlsx',
         columns=['Submitted Bid Order Volume(MWh)', 'Daily exchange rates(USD)', 
@@ -57,11 +43,9 @@ def init(market: Market) -> None:
         map=['old_demand', 'der', 'ngp', 'ist', 'demand']
     )
     for agent in market.agent_set.all():
-        name_hash = deterministic_hash(agent.name)
-        agent.seed = SEED + name_hash 
-        agent.save()
-        algorithm = AgentService.init(agent)
-        algorithms.append(algorithm)
+        AgentService.init(agent)
+        agents.append(agent)
+
 
 
     # Set the market state to INITIALIZED and save
@@ -148,11 +132,11 @@ def estimatePTF(market: Market):
     print(ptf)
     return ptf
 
-def startPool(market: Market,algorithms) -> None:
+def startPool(market: Market,agents) -> None:
     # Set market state to WAITINGAGENTS and save
     market.state = MarketState.WAITINGAGENTS
     market.save()
-    return ParallelService.startPool(market.agent_set.all(),algorithms)
+    return SerialService.startPool(agents=agents)
 
 from collections import defaultdict
 
@@ -218,6 +202,20 @@ def priceGroupCalculation(group: [Offer], demand: int):
             ptf = offer.offerPrice
     return ptf
 
+def budgetCalculation(offer: Offer):
+    # Calculate and return the budget based on the offer's acceptance amount and price
+    resource = offer.resource
+    offer_amount = float(offer.amount)
+    acceptance_amount = float(offer.acceptanceAmount)
+    acceptance_price = float(offer.acceptancePrice)
+    static_cost = float(resource.staticCost()) * offer_amount
+    variable_cost = float(resource.variableCost()) * acceptance_amount
+    if acceptance_amount > 0:
+        budget_growth = (acceptance_amount * acceptance_price) - (static_cost + variable_cost)
+    else:
+        budget_growth = -static_cost
+    return budget_growth
+
 
 def updatePeriod(period: Period) -> Period:
     # Save the period data and return the updated period
@@ -230,15 +228,11 @@ def saveOffers(market: Market, offers: [Offer]) -> None:
     for offer in offers:
         offer.save()
         agent = offer.agent
-        reward = budgetCalculation(offer)
-        agent.budget += reward
-        if not offer.acceptance or reward < (float (offer.acceptancePrice) * float (offer.acceptanceAmount) * float (offer.period.ptf/2)):
+        budget_growth = budgetCalculation(offer)
+        agent.budget += Decimal(budget_growth)
+        if not offer.acceptance or budget_growth < (float (offer.acceptancePrice) * float (offer.acceptanceAmount) * float (offer.period.ptf/2)):
             agent.algorithm.failStack += 1
         agent.save()
-
-def budgetCalculation(offer: Offer):
-    # Calculate and return the budget based on the offer's acceptance amount and price
-    return decimal.Decimal((decimal.Decimal(offer.acceptanceAmount) * offer.acceptancePrice)) - (offer.resource.fuelCost * decimal.Decimal(offer.acceptanceAmount))
 
 def createPeriod(market: Market) -> Period:
     # Create and return a new period for the market
@@ -261,18 +255,17 @@ def payasptf(offers: [Offer], ptf: int):
     return offers
 
 
-import time
 def run(market: Market) -> bool:
     start = timeit.default_timer()
     
     if market.state == MarketState.CREATED:
         print("market inited in market service")
         init(market)
-    global algorithms
+    global agents
     # Create a new period, estimate the PTF, and start the agent pool
     period = createPeriod(market)
     #period.estimatedPtf = estimatePTF(market)
-    algorithms,offers = startPool(market,algorithms)
+    agents,offers = startPool(market,agents)
     offers = np.concatenate(offers)
 
     # Perform market clearing and adjust offers according to the market strategy

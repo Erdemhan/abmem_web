@@ -28,14 +28,10 @@ ITERATION = 100
 STATE_DIM = 4
 SEQ_LEN = 24
 
-def get_step_seed(agent_name: str, step: int) -> int:
-    key = f"{agent_name}-{step}"
-    return int(hashlib.sha256(key.encode()).hexdigest(), 16) % (2**32)
-
 
 class AgentAlgorithm:
 
-    def __init__(self, action_dim, agent_name):  # seed burada sadece istenirse loglamada kullanılabilir
+    def __init__(self, action_dim, agent_name):  
         self.agent_name = agent_name
         self.replayBuffer = ReplayBuffer(10000)
         self.ddpg = RDPG(self.replayBuffer,
@@ -59,10 +55,7 @@ class AgentAlgorithm:
         self.state_history.append(current)
 
         if len(self.state_history) < SEQ_LEN:
-            # 🔐 Deterministik random action
-            step_seed = get_step_seed(self.agent_name, len(self.state_history))
-            np.random.seed(step_seed)
-            random_action = np.random.uniform(0, 200, self.ddpg.action_dim)
+            random_action = np.random.randint(0, 200, self.ddpg.action_dim)
             return random_action.tolist()
 
         state_seq = np.array(self.state_history)
