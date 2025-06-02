@@ -293,7 +293,9 @@ def run(market: Market) -> bool:
     showPeriodDetails(period)
     print(timeit.default_timer() - start)
     
-    return offers
+    agent_budgets = {agent.name: float(agent.budget) for agent in market.agent_set.all()}
+    return offers, {period.periodNumber: agent_budgets}
+
 
 def getDemand(currentPeriod: int) -> int:
     # Retrieve and return the demand for the current period from the market data

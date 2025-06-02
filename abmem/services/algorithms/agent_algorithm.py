@@ -1,4 +1,4 @@
-from .ddpg import RDPG, ReplayBuffer
+from .DDPG import RDPG, ReplayBuffer
 from .algorithm_utils import State
 import numpy as np
 import torch

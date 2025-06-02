@@ -11,6 +11,17 @@ import timeit
 import json
 from collections import defaultdict
 import os
+import random
+import numpy as np
+import torch
+
+SEED = 17081999  # tüm sistem için ortak seed
+
+def set_seed(seed=SEED):
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+
 
 def init(simulation: Simulation):
     """
@@ -44,6 +55,8 @@ def readMarketData() -> dict:
 
 import time
 def run(simulation: Simulation) -> bool:
+    set_seed(SEED)  # Set the random seed for reproducibility
+
     """
     Run the simulation through its defined periods, handling market operations and visualization.
 
@@ -56,6 +69,7 @@ def run(simulation: Simulation) -> bool:
     isOk = True
     start = timeit.default_timer()  # Start the timer to measure execution time
     tOffers = []  # Initialize a list to store offers
+    budgets_by_period = {} 
 
     if simulation.currentPeriod == -1:
         simulation.currentPeriod += 1  # Start the simulation if it hasn't started yet
@@ -86,7 +100,8 @@ def run(simulation: Simulation) -> bool:
         simulation.save()  # Save the updated simulation state
 
         print("Market run start")
-        market_result = MarketService.run(simulation.market)
+        market_result, budget_snapshot = MarketService.run(simulation.market)
+        budgets_by_period.update(budget_snapshot)
         
         # Convert numpy array to list if necessary
         if hasattr(market_result, 'tolist'):
@@ -98,6 +113,9 @@ def run(simulation: Simulation) -> bool:
         else:
             tOffers.append(market_result)
             print("Added single offer to tOffers")
+        
+        budgets_by_period.update(budget_snapshot)
+
 
         simulation.state = SimulationState.STARTED
         simulation.save()
@@ -123,17 +141,20 @@ def run(simulation: Simulation) -> bool:
         if not offers_by_period_agent[period_num].get('market_price'):
             offers_by_period_agent[period_num]['market_price'] = str(offer.period.ptf)
         
+        agent_budget = budgets_by_period.get(period_num, {}).get(agent_name)
+
         offers_by_period_agent[period_num][agent_name].append({
             'id': offer.id,
-            'agent': offer.agent.name,
+            'agent': agent_name,
             'resource': offer.resource.name,
             'amount': offer.amount,
             'offerPrice': str(offer.offerPrice),
             'acceptance': offer.acceptance,
             'acceptancePrice': str(offer.acceptancePrice),
             'acceptanceAmount': offer.acceptanceAmount,
-            'budget': str(offer.agent.budget)
+            'budget': str(agent_budget) if agent_budget is not None else None
         })
+
     
     print(f"Periods collected: {list(offers_by_period_agent.keys())}")
     

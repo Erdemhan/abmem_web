@@ -177,10 +177,10 @@ def run(agent) -> bool:
         
         last_offers = agent.offer_set.filter(period=played_period)
         actions = []
+        reward = 0
 
         for offer in last_offers:
             actions.append(offer.offerPrice)
-
         reward = compute_composite_reward(
             last_offers,
             played_period.ptf,
