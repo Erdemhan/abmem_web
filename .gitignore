@@ -1,5 +1,7 @@
 #Custom
 __pycache__/
+abc_log/
+abc_logs/
 *.idea
 .idea
 db.sqlite3

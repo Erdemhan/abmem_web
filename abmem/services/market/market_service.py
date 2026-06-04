@@ -1,6 +1,4 @@
-import sys
-# Add the specified directory to the system path to allow imports from that location
-sys.path.append("D:/Projeler/abm/abmem_project/test")
+
 
 # Import necessary modules and services from the project
 from ...models.enums import MarketState, MarketStrategy
@@ -32,7 +30,7 @@ import numpy as np
 def deterministic_hash(text: str) -> int:
     return int(hashlib.sha256(text.encode()).hexdigest(), 16) % (10**8)
 
-def init(market: Market) -> None:
+def init(market: Market, params) -> None:
     global marketData
     global agents
     # Read market data from an Excel file and map the columns
@@ -43,7 +41,7 @@ def init(market: Market) -> None:
         map=['old_demand', 'der', 'ngp', 'ist', 'demand']
     )
     for agent in market.agent_set.all():
-        AgentService.init(agent)
+        AgentService.init(agent,params=params)
         agents.append(agent)
 
 
@@ -129,7 +127,7 @@ def estimatePTF(market: Market):
         ngp=ngp, ist=ist
     )
     
-    print(ptf)
+    #print(ptf)
     return ptf
 
 def startPool(market: Market,agents) -> None:
@@ -239,13 +237,14 @@ def createPeriod(market: Market) -> Period:
     return PeriodFactory.create(market=market, num=market.simulation.currentPeriod, demand=getDemand(market.simulation.currentPeriod))
 
 def showPeriodDetails(period: Period) -> None:
+    pass
     # Display details of the given period
-    print("PTF: ", period.ptf)
-    offers = period.offer_set.all()
-    for offer in offers:
-        print("Agent: ", offer.agent.id, "Resource: ", offer.resource.name, offer.amount, "MW/h        ",
-              offer.offerPrice, "$      ", offer.acceptance, " ", offer.acceptancePrice, "$   ", offer.acceptanceAmount, "/", offer.amount, "MW/h")
-    VisualizationService.visualizePeriod(period)
+    #print("PTF: ", period.ptf)
+    #offers = period.offer_set.all()
+    #for offer in offers:
+        #print("Agent: ", offer.agent.id, "Resource: ", offer.resource.name, offer.amount, "MW/h        ",
+              #offer.offerPrice, "$      ", offer.acceptance, " ", offer.acceptancePrice, "$   ", offer.acceptanceAmount, "/", offer.amount, "MW/h")
+    #VisualizationService.visualizePeriod(period)
 
 def payasptf(offers: [Offer], ptf: int):
     # Adjust acceptance prices of accepted offers to the PTF
@@ -259,7 +258,7 @@ def run(market: Market) -> bool:
     start = timeit.default_timer()
     
     if market.state == MarketState.CREATED:
-        print("market inited in market service")
+        #print("market inited in market service")
         init(market)
     global agents
     # Create a new period, estimate the PTF, and start the agent pool
@@ -279,7 +278,7 @@ def run(market: Market) -> bool:
     period.marketVolume = volume
     period = updatePeriod(period=period)
     saveOffers(market, offers)
-    print("funcs called and period updated")
+    #print("funcs called and period updated")
 
     # Offer nesnelerine period bilgisini ekle
     for offer in offers:
@@ -289,9 +288,9 @@ def run(market: Market) -> bool:
     # Mark the market state as PERIODEND and save
     market.state = MarketState.PERIODEND
     market.save()
-    print("period details will be shown")
+    #print("period details will be shown")
     showPeriodDetails(period)
-    print(timeit.default_timer() - start)
+    #print(timeit.default_timer() - start)
     
     agent_budgets = {agent.name: float(agent.budget) for agent in market.agent_set.all()}
     return offers, {period.periodNumber: agent_budgets}
