@@ -1,5 +1,9 @@
 #Custom
 __pycache__/
+abc_log/
+abc_logs/
+scenario_results/
+abm_ddpg/sim_data/
 *.idea
 .idea
 db.sqlite3

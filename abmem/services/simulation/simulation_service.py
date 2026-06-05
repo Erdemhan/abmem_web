@@ -54,9 +54,8 @@ def readMarketData() -> dict:
 
 
 import time
-def run(simulation: Simulation) -> bool:
-    set_seed(SEED)  # Set the random seed for reproducibility
-
+def run(simulation: Simulation, hyperparams=None, seed=None) -> bool:
+    set_seed(seed if seed is not None else SEED)  # Set the random seed for reproducibility (per-run override allowed)
     """
     Run the simulation through its defined periods, handling market operations and visualization.
 
@@ -75,8 +74,8 @@ def run(simulation: Simulation) -> bool:
         simulation.currentPeriod += 1  # Start the simulation if it hasn't started yet
 
     if simulation.market.state == MarketState.CREATED:
-        MarketService.init(simulation.market)  # Initialize the market if it's in the CREATED state
-        print("Market initialized")
+        MarketService.init(simulation.market,params=hyperparams)  # Initialize the market if it's in the CREATED state
+        #print("Market initialized")
     
     simulation.save()  # Save the updated simulation state
 
@@ -85,7 +84,7 @@ def run(simulation: Simulation) -> bool:
         if simulation.currentPeriod >= 1:
             if simulation.mode == SimulationMode.ONLYRESULT:
                 # Placeholder for handling ONLYRESULT mode
-                print("Mode ONLYRESULT", simulation.mode)
+                #print("Mode ONLYRESULT", simulation.mode)
                 pass
             elif simulation.mode == SimulationMode.PERIODBYPERIOD:
                 # Wait for the previous period to end before proceeding
@@ -99,7 +98,7 @@ def run(simulation: Simulation) -> bool:
         simulation.currentPeriod += 1  # Move to the next period
         simulation.save()  # Save the updated simulation state
 
-        print("Market run start")
+        #print("Market run start")
         market_result, budget_snapshot = MarketService.run(simulation.market)
         budgets_by_period.update(budget_snapshot)
         
@@ -109,10 +108,10 @@ def run(simulation: Simulation) -> bool:
         
         if isinstance(market_result, list):
             tOffers.extend(market_result)
-            print(f"Added {len(market_result)} offers to tOffers")
+            #print(f"Added {len(market_result)} offers to tOffers")
         else:
             tOffers.append(market_result)
-            print("Added single offer to tOffers")
+            #print("Added single offer to tOffers")
         
         budgets_by_period.update(budget_snapshot)
 
@@ -120,16 +119,16 @@ def run(simulation: Simulation) -> bool:
         simulation.state = SimulationState.STARTED
         simulation.save()
 
-    print("Simulation visualization")
-    print(f"Total offers collected: {len(tOffers)}")
-    print(f"First offer type: {type(tOffers[0]) if tOffers else 'No offers'}")
+    #print("Simulation visualization")
+    #print(f"Total offers collected: {len(tOffers)}")
+    #print(f"First offer type: {type(tOffers[0]) if tOffers else 'No offers'}")
     
     # Sadece geçerli Offer nesnelerini filtrele
     valid_offers = [offer for offer in tOffers if hasattr(offer, 'period')]
-    print(f"Valid offers found: {len(valid_offers)}")
+    #f"Valid offers found: {len(valid_offers)}")
     
-    if len(valid_offers) == 0 and len(tOffers) > 0:
-        print(f"Sample offer attributes: {dir(tOffers[0])}")
+    #if len(valid_offers) == 0 and len(tOffers) > 0:
+        #print(f"Sample offer attributes: {dir(tOffers[0])}")
     
     # Organize offers by period and agent
     offers_by_period_agent = defaultdict(lambda: defaultdict(list))
@@ -156,7 +155,7 @@ def run(simulation: Simulation) -> bool:
         })
 
     
-    print(f"Periods collected: {list(offers_by_period_agent.keys())}")
+    #print(f"Periods collected: {list(offers_by_period_agent.keys())}")
     
     # Convert to regular dict for JSON serialization
     output_data = {
@@ -177,9 +176,9 @@ def run(simulation: Simulation) -> bool:
     with open(output_filename, 'w', encoding='utf-8') as f:
         json.dump(output_data, f, indent=4, ensure_ascii=False)
         
-    print(f"Offers saved to {output_filename}")
+    #print(f"Offers saved to {output_filename}")
 
     simulation.state = SimulationState.FINISHED
     simulation.save()
-    print(f"Simulation finished in {timeit.default_timer() - start:.2f} seconds")
+    #print(f"Simulation finished in {timeit.default_timer() - start:.2f} seconds")
     return tOffers
