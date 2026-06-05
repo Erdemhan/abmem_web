@@ -30,11 +30,11 @@ class ReplayBuffer(object):
 
         for i in ind:
             state, next_state, action, reward, done = self.storage[i]
-            batch_states.append(np.array(state, copy=False))
-            batch_next_states.append(np.array(next_state, copy=False))
-            batch_actions.append(np.array(action, copy=False))
-            batch_rewards.append(np.array(reward, copy=False))
-            batch_dones.append(np.array(done, copy=False))
+            batch_states.append(np.asarray(state))
+            batch_next_states.append(np.asarray(next_state))
+            batch_actions.append(np.asarray(action))
+            batch_rewards.append(np.asarray(reward))
+            batch_dones.append(np.asarray(done))
 
         return (
             np.array(batch_states),

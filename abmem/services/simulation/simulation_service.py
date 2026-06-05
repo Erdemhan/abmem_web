@@ -54,8 +54,8 @@ def readMarketData() -> dict:
 
 
 import time
-def run(simulation: Simulation, hyperparams=None) -> bool:
-    set_seed(SEED)  # Set the random seed for reproducibility
+def run(simulation: Simulation, hyperparams=None, seed=None) -> bool:
+    set_seed(seed if seed is not None else SEED)  # Set the random seed for reproducibility (per-run override allowed)
     """
     Run the simulation through its defined periods, handling market operations and visualization.
 

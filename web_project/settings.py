@@ -87,16 +87,27 @@ CHANNEL_LAYERS = {
 # Database
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases
 
-DATABASES = {
-    'default': {
-                'ENGINE': 'django.db.backends.postgresql_psycopg2',
-                'NAME': 'abmem',
-                'USER': 'postgres',
-                'PASSWORD': 'myapp',
-                'HOST': '127.0.0.1',
-                'PORT': '5432',
+import os as _os
+if _os.environ.get('USE_SQLITE') == '1':
+    # Local synthetic-demo database (no Postgres server required).
+    # Enabled only when USE_SQLITE=1 is set in the environment.
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
     }
-}
+else:
+    DATABASES = {
+        'default': {
+                    'ENGINE': 'django.db.backends.postgresql_psycopg2',
+                    'NAME': 'abmem',
+                    'USER': 'postgres',
+                    'PASSWORD': 'myapp',
+                    'HOST': '127.0.0.1',
+                    'PORT': '5432',
+        }
+    }
 
 
 # Password validation
