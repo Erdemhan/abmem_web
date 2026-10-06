@@ -18,13 +18,16 @@ import torch
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+FAILSTACK_LIMIT = 6  # Fail stack limit for the agent
 
 
-def init(agent: Agent):
+def init(agent: Agent,params: dict = None) -> AgentAlgorithm:
     # Initialize the agent's state without creating a portfolio
     agent.state = AgentState.INITIALIZED
     action_dim = agent.portfolio.plant_set.count()
-    algorithm = AgentAlgorithm(action_dim, agent.name)
+    global FAILSTACK_LIMIT
+    FAILSTACK_LIMIT = params.get("FAILSTACK") if params else FAILSTACK_LIMIT
+    algorithm = AgentAlgorithm(action_dim, agent.name, params=params)
     agent.algorithm = algorithm
     agent.save()
     return agent.algorithm
@@ -63,12 +66,9 @@ def calculateOffers(agent: Agent) -> [Offer]:
         if isinstance(offerPrice, list):  # <--- Yeni kontrol
             offerPrice = offerPrice[0]
 
-        if agent.algorithm.failStack > 6:
-            if random.random() < 0.7:
-                agent.algorithm.failStack = int(agent.algorithm.failStack / 2)
-                offerPrice = Decimal(random.randrange(int(played_period.ptf - 10), int(played_period.ptf + 10)))
-            else:
-                offerPrice = Decimal(float(offerPrice))
+        if agent.algorithm.failStack > FAILSTACK_LIMIT:
+            agent.algorithm.failStack = int(agent.algorithm.failStack / 2)
+            offerPrice = Decimal(random.randrange(int(played_period.ptf - 15), int(played_period.ptf)))
         else:
             offerPrice = Decimal(float(offerPrice))
 
@@ -114,6 +114,7 @@ def to_safe_history(history):
         for row in history
     ]
 
+import numpy as np
 def compute_composite_reward(last_offers, market_price, max_capacity, price_cap=200):
     offer = last_offers[0]
     offer_price = float(offer.offerPrice)
@@ -122,24 +123,40 @@ def compute_composite_reward(last_offers, market_price, max_capacity, price_cap=
     acceptance_price = float(offer.acceptancePrice)
     resource = offer.resource
 
+    # ✔️ Statik ve değişken maliyet
     static_cost = float(resource.staticCost()) * offer_amount
     variable_cost = float(resource.variableCost()) * acceptance_amount
 
+    # ✔️ Toplam büyüme (bütçe artışı)
     if acceptance_amount > 0:
         budget_growth = (acceptance_amount * acceptance_price) - (static_cost + variable_cost)
     else:
         budget_growth = -static_cost
 
-    max_possible_growth = price_cap * max_capacity
-    normalized_growth = budget_growth / max_possible_growth  # ŞİMDİ -1 ila +1 arasında
+    # ✔️ Normalleştirilmiş bütçe büyümesi
+    max_revenue = float(price_cap) * max_capacity
+    norm_budget = budget_growth / max_revenue if max_revenue > 0 else 0
+    norm_budget = max(-1.0, min(norm_budget, 1.0))
 
-    # MCP similarity (her zaman 0–1)
-    offer_mcp_similarity = 1 - abs(float(offer_price)- float(market_price)) / float(price_cap)
-    offer_mcp_similarity = max(min(offer_mcp_similarity, 1), 0)
+    # ✔️ Ortalama kâr/birim (accepted teklifler üzerinden)
+    if acceptance_amount > 0:
+        profit_per_unit = budget_growth / acceptance_amount
+    else:
+        profit_per_unit = 0
+    norm_profit = profit_per_unit / price_cap
+    norm_profit = max(-1.0, min(norm_profit, 1.0))
 
-    reward = 0.5 * normalized_growth + 0.5 * offer_mcp_similarity
-    print((normalized_growth, offer_mcp_similarity))
-    return reward
+    # ✔️ Fiyat-MCP benzerliği
+    rmse = np.sqrt(((offer_price - float(market_price) ) ** 2))  # Tek teklif için RMSE
+    similarity = 1 - rmse / price_cap
+    similarity = max(0, min(similarity, 1.0))
+
+    # ✔️ Ağırlıklı skor
+    score = 0.4 * norm_budget + 0.4 * norm_profit + 0.2 * similarity
+    score = max(0, min(score, 1.0))
+
+    return score
+
 
 
 

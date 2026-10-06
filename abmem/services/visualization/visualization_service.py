@@ -4,10 +4,10 @@ from ...models.models import *
 from ...models.enums import *
 
 def visualizePeriod(period) -> None:
-    print("PERIOD VISUALIZED")
+    #print("PERIOD VISUALIZED")
     pass
 
 
 def visulaizeSimulation(periods) -> None:
-    print("VISUALIZED")
+    #print("VISUALIZED")
     pass
