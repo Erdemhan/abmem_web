@@ -414,6 +414,7 @@ flowchart LR
 | B9 | B | `evaluate_result` ilk periyot bütçesini ve ilk teklif kapasitesini kullanıyor | `hyperparam_optimization.py:118-120` |
 | B10 | B | Global değiştirilebilir durum aynı süreçteki simülasyonlar arasında sızıyor | `market_service.py:21-45`, `agent_algorithm.py:52-61`, `hyperparam_optimization.py:164-170` |
 | B11 | B | Marjinal grubun kabul edilen miktarı `metDemand`'e eklenmiyor (sonradan bulundu) | `market_service.py:171-178` |
+| B12 | B | `Period.demand` tam sayı alanı, ondalıklı talep veritabanına kırpılarak yazılıyor (sonradan bulundu) | `models/models.py` (`Period.demand`) |
 | A1 | A | TD3/PPO tek aksiyon döndürüyor → çok santralli ajanlarda çökme/sıfır fiyat | `TD3.py:136-141`, `ppo.py:259-264` |
 | A2 | A | Bozuk giriş noktaları (`main.py`, `views.start`, `market_service.run → init`) | `main.py:9`, `views.py:30`, `market_service.py:262` |
 | A3 | A | Tekrarlanan fonksiyon tanımları birbirini eziyor | `portfolio_factory.py:29,44`, `reader_service.py:51,72` |
@@ -573,7 +574,13 @@ Marjinal teklif `acceptanceAmount = D / n` alır (`market_service.py:196`). Bu b
 - Farklı fiyatlı örnekte (A=400@50, B=300@70, C=500@90, talep 1000) kabul edilen toplam 1000 MWh iken `metDemand = 700` kaydedilir.
 - B4 örneğinde (A=100, B=10 aynı fiyat, talep 60) 30 MWh kabul edilmesine rağmen `metDemand = 0` kaydedilir.
 
-Etkisi: `Period.metDemand` marjinal grubun olduğu her periyotta, yani pratikte neredeyse her periyotta, düşük kaydedilmiştir. Ödül, bütçe ve PTF bu değeri kullanmadığı için ajan davranışını etkilemez. `metDemand`'e dayanan herhangi bir raporlama veya analiz ise yanlıştır. 1.7'deki yeni takas fonksiyonu `met_demand`'i kabul edilen miktarların toplamı olarak döndürür.
+B11 düzeltmesi 1. dalgada (`b1d641a`) yapıldı.
+
+#### B12. `Period.demand` ondalık kısmı atarak saklanıyor
+
+*1. dalgadaki takas çalışması sırasında bulundu (2026-10-06).* Talep verisi ondalıklıdır (örn. 28 929.45 MWh), ancak `Period.demand` bir `IntegerField`'dır. Takas bellekteki tam değerle yapılır, veritabanına ise kırpılmış değer yazılır. Veritabanından okunan talep (izleme ekranı, sonraki periyotlarda okunan geçmiş) takasta kullanılan değerden 1 MWh'ye kadar farklıdır. Düzeltme: alan `DecimalField`'a çevrilir (veri modeli, 2. dalga).
+
+Etkisi (B11): `Period.metDemand` marjinal grubun olduğu her periyotta, yani pratikte neredeyse her periyotta, düşük kaydedilmiştir. Ödül, bütçe ve PTF bu değeri kullanmadığı için ajan davranışını etkilemez. `metDemand`'e dayanan herhangi bir raporlama veya analiz ise yanlıştır. 1.7'deki yeni takas fonksiyonu `met_demand`'i kabul edilen miktarların toplamı olarak döndürür.
 
 ### 7.3 Type A — yazılım hataları
 

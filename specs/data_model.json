@@ -120,7 +120,7 @@
     {
       "name": "0010_simulation_fields_agentsteplog",
       "depends_on": "0009_agent_name_constraints",
-      "kind": "AddField Simulation.seed (+ constraint), Simulation.observation_lags (JSONField, default [1, 24], allowed [1, 24] or [1, 24, 168]), Simulation.evaluation_periods (PositiveIntegerField, default 0, must be < periodNumber), Simulation.error (TextField, blank). CreateModel AgentStepLog. SimulationState.FAILED is a new enum member. django_enumfield stores ints, so there is no schema change, but enums.py is edited in this wave."
+      "kind": "AddField Simulation.seed (+ constraint), Simulation.observation_lags (JSONField, default [1, 24], allowed [1, 24] or [1, 24, 168]), Simulation.evaluation_periods (PositiveIntegerField, default 0, must be < periodNumber), Simulation.error (TextField, blank). CreateModel AgentStepLog. SimulationState.FAILED is a new enum member. django_enumfield stores ints, so there is no schema change, but enums.py is edited in this wave. AlterField Period.demand to DecimalField(max_digits=12, decimal_places=3) (metDemand already became Decimal in 0004) (B12, found in wave 1: demand data has decimals and was truncated)."
     },
     {
       "name": "0011_hpo",
@@ -204,5 +204,8 @@
       "open_question": "OQ-15",
       "resolution": "K5 import deduplicates: scenario agents with identical configuration (type, budget, algorithm_type, failstack fields, plants as multiset of (resource, capacity)) map to ONE library agent. A name suffix (_2, _3, ...) is used only when the name is equal (case-insensitive) but the configuration differs."
     }
+  ],
+  "added_after_approval": [
+    "B12 (2026-10-06): Period.demand becomes DecimalField in migration 0010 (metDemand already Decimal since 0004). Found by the wave-1 market_clearing worker. Same decision class as B8, no new user decision needed."
   ]
 }
