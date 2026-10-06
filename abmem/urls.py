@@ -17,7 +17,6 @@ urlpatterns = [
     path('agent/<int:agent_id>/', views.update_agent, name='agent_update'),
     path('agent/delete/<int:agent_id>/', views.delete_agent, name='agent_delete'),
     path('blank/', views.blank, name='blank'),
-    path('start', views.start, name='start'),
     path('', views.dashboard, name='dashboard'),
     path('simulation/create/', views.create_simulation, name='create_simulation'),
     path('simulation/run/<int:simulation_id>/', views.run_simulation, name='run_simulation'),

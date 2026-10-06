@@ -135,11 +135,14 @@ def test_float_field_raises_type_error() -> None:
         (500, 500, Decimal("33.33")),
     ],
 )
-def test_parity_with_current_budget_calculation(amount, acc_amount, acc_price) -> None:
-    from abmem.services.market import market_service
-
+def test_parity_with_legacy_budget_calculation(amount, acc_amount, acc_price) -> None:
     offer = _unsaved_offer(amount, acc_amount, acc_price, acceptance=acc_amount > 0)
-    expected = market_service.budgetCalculation(offer)
+    # Float formula of the removed market_service.budgetCalculation.
+    static_cost = 4.5 * amount
+    if acc_amount > 0:
+        expected = acc_amount * float(acc_price) - (static_cost + 12.5 * acc_amount)
+    else:
+        expected = -static_cost
     actual = offer_profit(outcome_from_offer(offer))
     assert float(actual) == pytest.approx(expected, rel=1e-12, abs=1e-9)
 

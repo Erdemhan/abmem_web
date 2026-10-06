@@ -1,227 +1,159 @@
+"""Agent step of one period (ARCHITECTURE.md 6.1).
 
+``step`` builds the observation of period ``t`` once and uses it for acting
+and as ``next_obs`` of the stored transition (C2). The reward of ``t - 1`` is
+the K1 reward over all plants (C1, B2). Prices come from the normalised
+action through the market bid bounds (B6), the fail-stack rule is applied
+identically for every learning policy (K3), and the stored action is the
+normalised action of the prices actually submitted.
 
-from ...models.enums import AgentState
-from ...models import Agent, Offer, Portfolio
-from ...services.agent import portfolio_factory as PortfolioFactory
-from ...services.agent import offer_factory as OfferFactory
-from ..algorithms.agent_algorithm import AgentAlgorithm
-from ..algorithms.algorithm_utils import State
-import random
-import torch
-from decimal import Decimal
-import random
-import torch
+The module holds no mutable module-level state (B10).
+"""
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+from __future__ import annotations
 
-FAILSTACK_LIMIT = 6  # Fail stack limit for the agent
-
-
-def init(agent: Agent,params: dict = None) -> AgentAlgorithm:
-    # Initialize the agent's state without creating a portfolio
-    agent.state = AgentState.INITIALIZED
-    action_dim = agent.portfolio.plant_set.count()
-    global FAILSTACK_LIMIT
-    FAILSTACK_LIMIT = params.get("FAILSTACK") if params else FAILSTACK_LIMIT
-    algorithm = AgentAlgorithm(action_dim, agent.name, params=params)
-    agent.algorithm = algorithm
-    agent.save()
-    return agent.algorithm
-
-
-def relearn(agent: Agent, results) -> None:
-    # Set the agent's state to learning and save
-    
-    agent.state = AgentState.LEARNING
-    agent.save()
-    # learn(self, state, action, next_state, reward, done=False):
-    agent.algorithm.learn(results[0],results[1],results[2],results[3])
-
-def predict(agent: Agent, results) -> int:
-    # Set the agent's state to predicting and save
-    agent.state = AgentState.PREDICTING
-    agent.save()
-    # Prediction module placeholder, returns a random prediction
-    return random.randint(10, 1000)
-
-def calculateOffers(agent: Agent) -> [Offer]:
-    # Set the agent's state to calculating and save
-    agent.state = AgentState.CALCULATING
-    agent.save()
-    new_offers = []
-
-    period = agent.market.period_set.latest()
-    played_period = agent.market.period_set.order_by('-id')[1]
-    state = State(mcp=played_period.ptf,demand=period.demand)
-
-    counter = 0
-    actions = agent.algorithm.selectAction(state)
-    for plant in agent.portfolio.plant_set.all():
-        offerPrice = actions[counter]
-
-        if isinstance(offerPrice, list):  # <--- Yeni kontrol
-            offerPrice = offerPrice[0]
-
-        if agent.algorithm.failStack > FAILSTACK_LIMIT:
-            agent.algorithm.failStack = int(agent.algorithm.failStack / 2)
-            offerPrice = Decimal(random.randrange(int(played_period.ptf - 15), int(played_period.ptf)))
-        else:
-            offerPrice = Decimal(float(offerPrice))
-
-        offer = OfferFactory.create(
-            agent=agent,
-            resource=plant.resource,
-            amount=plant.capacity,
-            offerPrice=offerPrice
-        )
-        counter += 1
-        new_offers.append(offer)
-
-    return new_offers
-
-def calculateRandomOffers(agent: Agent) -> [Offer]:
-    # Set the agent's state to calculating and save
-    agent.state = AgentState.CALCULATING
-    agent.save()
-    offers = []
-    for plant in agent.portfolio.plant_set.all():
-        offer = OfferFactory.create(
-            agent=agent,
-            resource=plant.resource,
-            amount=plant.capacity,
-            offerPrice=random.randint(0,200)
-        )
-        offers.append(offer)
-    return offers
-
-
-def saveOffers(offers: [Offer]) -> None:
-    # Save all the generated offers to the database
-    for offer in offers:
-        offer.save()
-
-def createPortfolio(agent: Agent, plantsData: dict) -> Portfolio:
-    # Create a portfolio for the agent using the provided data
-    return PortfolioFactory.create(agent, plantsData)
-
-def to_safe_history(history):
-    return [
-        [int(x.item()) if hasattr(x, "item") else int(x) for x in list(row)]
-        for row in history
-    ]
+from typing import TYPE_CHECKING
 
 import numpy as np
-def compute_composite_reward(last_offers, market_price, max_capacity, price_cap=200):
-    offer = last_offers[0]
-    offer_price = float(offer.offerPrice)
-    offer_amount = float(offer.amount)
-    acceptance_amount = float(offer.acceptanceAmount)
-    acceptance_price = float(offer.acceptancePrice)
-    resource = offer.resource
 
-    # ✔️ Statik ve değişken maliyet
-    static_cost = float(resource.staticCost()) * offer_amount
-    variable_cost = float(resource.variableCost()) * acceptance_amount
+from abmem.models.enums import AgentState
+from abmem.models.models import Offer
+from abmem.services.agent.action_space import from_price, to_price
+from abmem.services.agent.failstack import (
+    apply_interventions,
+    is_failure,
+    update_counters,
+)
+from abmem.services.agent.observation import build_observation
+from abmem.services.agent.reward import compute_reward
+from abmem.services.algorithms.base import ActionResult, Transition
+from abmem.services.market.accounting import offer_profit
+from abmem.services.simulation.context import PendingDecision, RunPhase
 
-    # ✔️ Toplam büyüme (bütçe artışı)
-    if acceptance_amount > 0:
-        budget_growth = (acceptance_amount * acceptance_price) - (static_cost + variable_cost)
+if TYPE_CHECKING:
+    from abmem.services.algorithms.base import UpdateStats
+    from abmem.services.simulation.context import AgentRuntimeState, SimulationContext
+
+
+def step(ctx: SimulationContext, rt: AgentRuntimeState, t: int) -> list[Offer]:
+    """Run the decision of one agent for period ``t`` (before clearing of ``t``).
+
+    Args:
+        ctx: Run context. ``ctx.current_period`` is the saved period ``t``.
+        rt: Runtime state of the agent. ``rt.last_outcomes`` holds the
+            cleared outcomes of ``t - 1`` when ``t > 1``.
+        t: Period number, ``>= 1``.
+
+    Returns:
+        One unsaved ``Offer`` per plant in plant order, with
+        ``amount = plant capacity``.
+
+    Raises:
+        ValueError: If ``t > 1`` and ``rt.last_outcomes`` is empty, or any
+            component rejects its input.
+    """
+    phase = ctx.phase_for(t)
+    policy = rt.policy
+    n_plants = len(rt.plants)
+    obs = build_observation(t, ctx.demand, ctx.ptf_history, ctx.lags)
+    obs_norm = ctx.normalizer.transform(obs.raw) if obs.complete else None
+    stats: UpdateStats | None = None
+    reward: float | None = None
+
+    if t > 1:
+        reward = compute_reward(rt.last_outcomes, rt.total_capacity, ctx.price_high)
+        if rt.failstack_params is not None:
+            min_margin = rt.failstack_params.min_margin
+            update_counters(
+                rt.failstack,
+                [is_failure(o, offer_profit(o), min_margin) for o in rt.last_outcomes],
+            )
+        if (
+            rt.prev is not None
+            and obs_norm is not None
+            and phase is RunPhase.TRAIN
+            and policy.is_learning
+        ):
+            prev = rt.prev
+            policy.observe(
+                Transition(
+                    obs=prev.obs_norm,
+                    action=prev.u_applied,
+                    reward=reward,
+                    next_obs=obs_norm,
+                    behaviour_log_prob=prev.action.log_prob,
+                    behaviour_value=prev.action.value,
+                    pre_squash=prev.action.pre_squash,
+                    intervened=prev.intervened,
+                )
+            )
+            stats = policy.update()
+
+    explore = phase is RunPhase.TRAIN
+    if obs_norm is not None:
+        action = policy.select_action(obs_norm, explore=explore)
+    elif not policy.is_learning:
+        # Baselines ignore the observation, a zero vector satisfies the
+        # shape contract of select_action before all lags exist.
+        placeholder = np.zeros(policy.spec.obs_dim, dtype=np.float32)
+        action = policy.select_action(placeholder, explore=explore)
     else:
-        budget_growth = -static_cost
+        # OQ-1: pre-learning action from the agent generator, never stored.
+        u = rt.rng.uniform(-1.0, 1.0, size=n_plants).astype(np.float32)
+        action = ActionResult(u=u)
 
-    # ✔️ Normalleştirilmiş bütçe büyümesi
-    max_revenue = float(price_cap) * max_capacity
-    norm_budget = budget_growth / max_revenue if max_revenue > 0 else 0
-    norm_budget = max(-1.0, min(norm_budget, 1.0))
-
-    # ✔️ Ortalama kâr/birim (accepted teklifler üzerinden)
-    if acceptance_amount > 0:
-        profit_per_unit = budget_growth / acceptance_amount
+    prices = to_price(action.u, ctx.price_low, ctx.price_high)
+    if rt.failstack_params is not None:
+        prices, intervened = apply_interventions(
+            rt.failstack,
+            rt.failstack_params,
+            prices,
+            ctx.ptf_history.get(t - 1),
+            ctx.price_low,
+            ctx.price_high,
+            rt.rng,
+        )
     else:
-        profit_per_unit = 0
-    norm_profit = profit_per_unit / price_cap
-    norm_profit = max(-1.0, min(norm_profit, 1.0))
+        intervened = [False] * n_plants
+    u_applied = from_price(prices, ctx.price_low, ctx.price_high)
+    rt.prev = (
+        PendingDecision(
+            obs_norm=obs_norm,
+            action=action,
+            u_applied=u_applied,
+            intervened=any(intervened),
+        )
+        if obs_norm is not None
+        else None
+    )
 
-    # ✔️ Fiyat-MCP benzerliği
-    rmse = np.sqrt(((offer_price - float(market_price) ) ** 2))  # Tek teklif için RMSE
-    similarity = 1 - rmse / price_cap
-    similarity = max(0, min(similarity, 1.0))
-
-    # ✔️ Ağırlıklı skor
-    score = 0.4 * norm_budget + 0.4 * norm_profit + 0.2 * similarity
-    score = max(0, min(score, 1.0))
-
-    return score
-
-
-
-
-
-def run(agent) -> bool:
-
-    agent.state = AgentState.RUNNING
-    agent.save()
-
-    if agent.market.period_set.count() >= 3:
-        if agent.market.period_set.order_by('-id')[2:3].exists():
-            last_period = agent.market.period_set.order_by('-id')[2]
-        if agent.market.period_set.order_by('-id')[1:2].exists():
-            played_period = agent.market.period_set.order_by('-id')[1]
-        if agent.market.period_set.order_by('-id')[23:24].exists():
-            last24_period = agent.market.period_set.order_by('-id')[23]
-            last24_period_ptf = last24_period.ptf
-        else:
-            last24_period_ptf= 0
-        if agent.market.period_set.order_by('-id')[168:169].exists():
-            last168_period = agent.market.period_set.order_by('-id')[167]
-            last168_period_ptf = last168_period.ptf
-        else:
-            last168_period_ptf = 0
-        if agent.market.period_set.order_by('-id')[24:25].exists():
-            last24_period_old = agent.market.period_set.order_by('-id')[24]
-            last24_period_old_ptf = last24_period_old.ptf
-        else:
-            last24_period_old_ptf = 0
-        if agent.market.period_set.order_by('-id')[168:169].exists():
-            last168_period_old = agent.market.period_set.order_by('-id')[168]
-            last168_period_old_ptf = last168_period_old.ptf
-        else:
-            last168_period_old_ptf = 0
-        
-        last_offers = agent.offer_set.filter(period=played_period)
-        actions = []
-        reward = 0
-
-        for offer in last_offers:
-            actions.append(offer.offerPrice)
-        reward = compute_composite_reward(
-            last_offers,
-            played_period.ptf,
-            offer.amount,
-            price_cap=200
+    if t > 1:
+        learning_active = (
+            phase is RunPhase.TRAIN
+            and policy.is_learning
+            and not policy.frozen
+            and (stats is not None or policy.ready_to_learn)
+        )
+        ctx.step_logger.add(
+            rt.agent,
+            ctx.current_period,
+            reward,
+            stats,
+            policy.exploration_scale(),
+            intervened,
+            learning_active,
+            phase is RunPhase.EVALUATE,
         )
 
-
-        results = [
-            State(mcp=last_period.ptf, demand=last_period.demand,mcp24=last24_period_old_ptf,mcp168= last168_period_old_ptf),
-            actions,
-            State(mcp=played_period.ptf, demand=played_period.demand,mcp24=last24_period_ptf,mcp168=last168_period_ptf),
-            reward
-        ]
-
-        relearn(agent, results)
-        offers = calculateOffers(agent)
-
-    else:
-        offers = calculateRandomOffers(agent)
-
-    saveOffers(offers)
-    agent.state = AgentState.WAITING
-    agent.save()
-
-    return agent,offers
-
-
-
-
-
+    policy.end_period()
+    rt.agent.state = AgentState.WAITING
+    return [
+        Offer(
+            period=ctx.current_period,
+            agent=rt.agent,
+            resource=plant.resource,
+            amount=plant.capacity,
+            offerPrice=price,
+        )
+        for plant, price in zip(rt.plants, prices)
+    ]

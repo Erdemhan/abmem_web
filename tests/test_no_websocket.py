@@ -30,7 +30,6 @@ NAMED_ROUTES: list[tuple[str, dict[str, object]]] = [
     ("agent_update", {"agent_id": 1}),
     ("agent_delete", {"agent_id": 1}),
     ("blank", {}),
-    ("start", {}),
     ("dashboard", {}),
     ("create_simulation", {}),
     ("run_simulation", {"simulation_id": 1}),

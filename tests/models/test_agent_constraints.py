@@ -89,12 +89,12 @@ def test_runtime_policy_is_not_persisted() -> None:
     assert "runtime_policy" not in {f.name for f in Agent._meta.get_fields()}
 
 
-def test_algorithm_alias_maps_to_runtime_policy() -> None:
+def test_legacy_algorithm_alias_is_removed() -> None:
+    assert not hasattr(Agent, "algorithm")
     agent = Agent(name="a")
     policy = object()
-    agent.algorithm = policy
+    agent.runtime_policy = policy
     assert agent.runtime_policy is policy
-    assert agent.algorithm is policy
 
 
 def test_deleting_library_agent_keeps_copies() -> None:

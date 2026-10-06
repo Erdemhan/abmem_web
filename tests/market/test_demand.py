@@ -149,42 +149,33 @@ def test_real_market_data_has_8808_valid_rows() -> None:
         series.validate_horizon(8809)
 
 
-def test_get_demand_requires_loaded_series(monkeypatch: pytest.MonkeyPatch) -> None:
-    from abmem.services.market import market_service
-
-    monkeypatch.setattr(market_service, "demandSeries", None)
-    with pytest.raises(RuntimeError):
-        market_service.getDemand(1)
-    monkeypatch.setattr(
-        market_service,
-        "demandSeries",
-        DemandSeries(values=np.array([5.0, 6.0]), source="mem"),
-    )
-    assert market_service.getDemand(2) == Decimal("6.0")
-
-
 @pytest.mark.django_db
-def test_demand_error_leaves_simulation_created(
+def test_demand_error_fails_run_before_period_one(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     from abmem.models.enums import MarketState, SimulationState
     from abmem.services.market import market_service
     from abmem.services.simulation import simulation_service
-    from tests.factories import make_market, make_simulation
+    from abmem.services.simulation.context import SimulationValidationError
+    from tests.factories import make_agent_with_plants, make_market, make_resource
+    from tests.factories import make_simulation
 
     simulation = make_simulation(period_number=10**6)
     market = make_market(simulation=simulation)
+    make_agent_with_plants(market, plants=[(make_resource(), 100)])
     simulation.refresh_from_db()
 
-    def _fail_run(_market: object) -> None:
-        raise AssertionError("market run must not start")
+    def _fail_run(_ctx: object, _t: int) -> None:
+        raise AssertionError("market period must not start")
 
-    monkeypatch.setattr(market_service, "run", _fail_run)
+    monkeypatch.setattr(market_service, "run_period", _fail_run)
 
-    result = simulation_service.run(simulation)
+    with pytest.raises(SimulationValidationError, match="horizon"):
+        simulation_service.run(simulation, export_json=False)
 
-    assert result == []
     simulation.refresh_from_db()
     market.refresh_from_db()
-    assert simulation.state == SimulationState.CREATED
+    assert simulation.state == SimulationState.FAILED
+    assert "horizon" in simulation.error
     assert market.state == MarketState.CREATED
+    assert not market.period_set.exists()

@@ -389,8 +389,8 @@ def test_contract_helper_detects_early_update() -> None:
 
 
 def test_algorithm_package_imports_without_legacy_modules() -> None:
-    """A fresh interpreter imports the new modules and agent_algorithm without
-    loading any legacy algorithm module (transitional lazy imports)."""
+    """A fresh interpreter imports the registry and the runtime services without
+    loading any algorithm module eagerly, and the legacy modules are gone."""
     import subprocess
     import sys
     from pathlib import Path
@@ -400,10 +400,16 @@ def test_algorithm_package_imports_without_legacy_modules() -> None:
         "import django\n"
         "django.setup()\n"
         "import abmem.services.algorithms.registry\n"
-        "import abmem.services.algorithms.agent_algorithm\n"
-        "legacy = ['DDPG', 'TD3', 'SAC', 'ppo', 'RDPG', 'actor_critic', 'algorithm_utils']\n"
-        "loaded = [m for m in legacy if 'abmem.services.algorithms.' + m in sys.modules]\n"
+        "import importlib.util\n"
+        "import abmem.services.market.market_service\n"
+        "import abmem.services.simulation.simulation_service\n"
+        "lazy = ['DDPG', 'TD3', 'SAC', 'ppo', 'RDPG']\n"
+        "loaded = [m for m in lazy if 'abmem.services.algorithms.' + m in sys.modules]\n"
         "assert not loaded, loaded\n"
+        "removed = ['agent_algorithm', 'actor_critic', 'algorithm_utils', 'MPIP']\n"
+        "found = [m for m in removed\n"
+        "         if importlib.util.find_spec('abmem.services.algorithms.' + m)]\n"
+        "assert not found, found\n"
     )
     repo_root = Path(__file__).resolve().parents[2]
     completed = subprocess.run(
@@ -417,7 +423,7 @@ def test_algorithm_package_imports_without_legacy_modules() -> None:
 
 
 def test_import_views_smoke() -> None:
-    """Guards the transitional agent_algorithm.py change (requires Django settings)."""
+    """The views and the runtime services import cleanly (requires Django settings)."""
     importlib.import_module("abmem.views")
     importlib.import_module("abmem.services.agent.agent_service")
     importlib.import_module("abmem.services.market.market_service")

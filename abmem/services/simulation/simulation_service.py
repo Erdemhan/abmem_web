@@ -1,166 +1,81 @@
-# Import necessary models, enums, and services
-from ...models.simulation import Simulation
-from ...models.enums import *
-from ...services.file_reader import reader_service as ReaderService
-from ...services.market import market_service as MarketService
-from ...constants import *
-from django.conf import settings
-import timeit
+"""Run loop of a simulation (ARCHITECTURE.md 6.3).
+
+``run`` builds a :class:`SimulationContext`, runs periods ``1..periodNumber``
+through ``market_service.run_period`` and records the final state. Any
+exception sets ``SimulationState.FAILED`` and ``Simulation.error`` before it
+is re-raised (OQ-8). The module holds no mutable module-level state (B10).
+"""
+
+from __future__ import annotations
+
 import json
-from collections import defaultdict
-import os
-import random
-import numpy as np
-import torch
 import logging
-from ...services.market.demand import DemandDataError
+import pathlib
+import time
+from collections import defaultdict
+from collections.abc import Mapping
+from typing import Any, Final
+
+from django.conf import settings
+
+from abmem.models import Simulation
+from abmem.models.enums import (
+    AlgorithmType,
+    MarketState,
+    SimulationMode,
+    SimulationState,
+)
+from abmem.models.models import Offer
+from abmem.services.market import market_service
+from abmem.services.simulation.context import SimulationContext
 
 logger = logging.getLogger(__name__)
 
-SEED = 17081999  # tüm sistem için ortak seed
+POLL_INTERVAL_S: Final[float] = 0.2
+PERIODS_PER_DAY: Final[int] = 24
 
 
-def set_seed(seed=SEED):
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
+def _sim_data_dir() -> pathlib.Path:
+    """Return the directory of the JSON offer exports.
 
-
-def init(simulation: Simulation):
+    Returns:
+        ``settings.ABMEM_SIM_DATA_DIR`` if set, else
+        ``BASE_DIR / 'abm_ddpg' / 'sim_data'``.
     """
-    Initialize the simulation by setting its state to INITIALIZED and starting the first period.
+    configured = getattr(settings, "ABMEM_SIM_DATA_DIR", None)
+    if configured:
+        return pathlib.Path(configured)
+    return pathlib.Path(settings.BASE_DIR) / "abm_ddpg" / "sim_data"
+
+
+def export_offers_json(
+    simulation: Simulation, budgets_by_period: Mapping[int, Mapping[str, str]]
+) -> pathlib.Path:
+    """Write the offers of a run grouped by period and agent to a JSON file.
 
     Args:
-        simulation (Simulation): The simulation instance to be initialized.
+        simulation: Finished run.
+        budgets_by_period: Agent budgets after each period, by period number
+            and agent name.
+
+    Returns:
+        Path of the written file.
     """
-    simulation.state = SimulationState.INITIALIZED  # Set the state to INITIALIZED
-    simulation.currentPeriod = (
-        1  # Set the current period to 1 (start of the simulation)
+    offers = (
+        Offer.objects.filter(period__market=simulation.market)
+        .select_related("agent", "resource", "period")
+        .order_by("period__periodNumber", "agent_id", "id")
     )
-
-    if simulation.mode == SimulationMode.ONLYRESULT:
-        # Placeholder for handling ONLYRESULT mode in future development
-        pass
-    elif simulation.mode == SimulationMode.PERIODBYPERIOD:
-        # Placeholder for handling PERIODBYPERIOD mode in future development
-        pass
-
-    simulation.save()  # Save the updated simulation state to the database
-
-
-def readMarketData() -> dict:
-    """
-    Read and return market data from the specified file.
-
-    Returns:
-        dict: A dictionary containing market data read from the file.
-    """
-    return ReaderService.readData(path=MARKET_DATA_PATH, key=MARKET_DATA_KEY)
-
-
-import time
-
-
-def run(simulation: Simulation, hyperparams=None) -> bool:
-    set_seed(SEED)  # Set the random seed for reproducibility
-    """
-    Run the simulation through its defined periods, handling market operations and visualization.
-
-    Args:
-        simulation (Simulation): The simulation instance to be run.
-
-    Returns:
-        bool: Returns True if the simulation runs successfully, otherwise False.
-    """
-    isOk = True
-    start = timeit.default_timer()  # Start the timer to measure execution time
-    tOffers = []  # Initialize a list to store offers
-    budgets_by_period = {}
-
-    if simulation.currentPeriod == -1:
-        simulation.currentPeriod += 1  # Start the simulation if it hasn't started yet
-
-    if simulation.market.state == MarketState.CREATED:
-        try:
-            MarketService.init(
-                simulation.market, params=hyperparams
-            )  # Initialize the market if it's in the CREATED state
-        except DemandDataError as error:
-            # Invalid demand data: the run never starts and stays in CREATED.
-            logger.error("Simulation %s not started: %s", simulation.id, error)
-            simulation.state = SimulationState.CREATED
-            simulation.save()
-            return tOffers
-        # print("Market initialized")
-
-    simulation.save()  # Save the updated simulation state
-
-    # Main loop for running through all periods in the simulation
-    while simulation.currentPeriod < simulation.periodNumber:
-        if simulation.currentPeriod >= 1:
-            if simulation.mode == SimulationMode.ONLYRESULT:
-                # Placeholder for handling ONLYRESULT mode
-                # print("Mode ONLYRESULT", simulation.mode)
-                pass
-            elif simulation.mode == SimulationMode.PERIODBYPERIOD:
-                # Wait for the previous period to end before proceeding
-                while simulation.market.state == MarketState.PERIODEND:
-                    simulation.market.refresh_from_db()  # Refresh market state from the database
-                    time.sleep(0.2)  # Sleep briefly to avoid busy-waiting
-
-        if simulation.currentPeriod > 0 and (simulation.currentPeriod % 24) == 0:
-            simulation.day += 1  # Increment the day after every 24 periods
-
-        simulation.currentPeriod += 1  # Move to the next period
-        simulation.save()  # Save the updated simulation state
-
-        # print("Market run start")
-        market_result, budget_snapshot = MarketService.run(simulation.market)
-        budgets_by_period.update(budget_snapshot)
-
-        # Convert numpy array to list if necessary
-        if hasattr(market_result, "tolist"):
-            market_result = market_result.tolist()
-
-        if isinstance(market_result, list):
-            tOffers.extend(market_result)
-            # print(f"Added {len(market_result)} offers to tOffers")
-        else:
-            tOffers.append(market_result)
-            # print("Added single offer to tOffers")
-
-        budgets_by_period.update(budget_snapshot)
-
-        simulation.state = SimulationState.STARTED
-        simulation.save()
-
-    # print("Simulation visualization")
-    # print(f"Total offers collected: {len(tOffers)}")
-    # print(f"First offer type: {type(tOffers[0]) if tOffers else 'No offers'}")
-
-    # Sadece geçerli Offer nesnelerini filtrele
-    valid_offers = [offer for offer in tOffers if hasattr(offer, "period")]
-    # f"Valid offers found: {len(valid_offers)}")
-
-    # if len(valid_offers) == 0 and len(tOffers) > 0:
-    # print(f"Sample offer attributes: {dir(tOffers[0])}")
-
-    # Organize offers by period and agent
-    offers_by_period_agent = defaultdict(lambda: defaultdict(list))
-    for offer in valid_offers:
-        period_num = offer.period.periodNumber
-        agent_name = offer.agent.name
-
-        # Her periyot için MCP'yi bir kez ekleyelim
-        if not offers_by_period_agent[period_num].get("market_price"):
-            offers_by_period_agent[period_num]["market_price"] = str(offer.period.ptf)
-
-        agent_budget = budgets_by_period.get(period_num, {}).get(agent_name)
-
-        offers_by_period_agent[period_num][agent_name].append(
+    by_period: dict[int, dict[str, Any]] = defaultdict(dict)
+    for offer in offers:
+        number = offer.period.periodNumber
+        entry = by_period[number]
+        entry.setdefault("market_price", str(offer.period.ptf))
+        budget = budgets_by_period.get(number, {}).get(offer.agent.name)
+        entry.setdefault(offer.agent.name, []).append(
             {
                 "id": offer.id,
-                "agent": agent_name,
+                "agent": offer.agent.name,
                 "resource": offer.resource.name,
                 "amount": offer.amount,
                 "offerPrice": str(offer.offerPrice),
@@ -171,35 +86,122 @@ def run(simulation: Simulation, hyperparams=None) -> bool:
                     if offer.acceptanceAmount is not None
                     else None
                 ),
-                "budget": str(agent_budget) if agent_budget is not None else None,
+                "budget": budget,
             }
         )
-
-    # print(f"Periods collected: {list(offers_by_period_agent.keys())}")
-
-    # Convert to regular dict for JSON serialization
-    output_data = {
+    output = {
         "simulation_id": simulation.id,
         "total_periods": simulation.periodNumber,
-        "offers_by_period": {
-            period: dict(agents) for period, agents in offers_by_period_agent.items()
-        },
+        "offers_by_period": dict(by_period),
     }
+    directory = _sim_data_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / f"simulation_{simulation.id}_offers.json"
+    with path.open("w", encoding="utf-8") as handle:
+        json.dump(output, handle, indent=4, ensure_ascii=False)
+    return path
 
-    # Create sim_data directory if it doesn't exist
-    sim_data_dir = os.path.join(settings.BASE_DIR, "abm_ddpg", "sim_data")
-    os.makedirs(sim_data_dir, exist_ok=True)
 
-    # Save to JSON file in sim_data directory
-    output_filename = os.path.join(
-        sim_data_dir, f"simulation_{simulation.id}_offers.json"
-    )
-    with open(output_filename, "w", encoding="utf-8") as f:
-        json.dump(output_data, f, indent=4, ensure_ascii=False)
+def _wait_for_next_period(ctx: SimulationContext) -> None:
+    """Block while the market waits for the user in PERIODBYPERIOD mode.
 
-    # print(f"Offers saved to {output_filename}")
+    Args:
+        ctx: Run context.
+    """
+    ctx.market.refresh_from_db(fields=["state"])
+    while ctx.market.state == MarketState.PERIODEND:
+        time.sleep(POLL_INTERVAL_S)
+        ctx.market.refresh_from_db(fields=["state"])
 
-    simulation.state = SimulationState.FINISHED
-    simulation.save()
-    # print(f"Simulation finished in {timeit.default_timer() - start:.2f} seconds")
-    return tOffers
+
+def _mark_failed(simulation: Simulation, error: BaseException) -> None:
+    """Store the failure state and message of a run (OQ-8).
+
+    Args:
+        simulation: The run.
+        error: The exception that ended the run.
+    """
+    simulation.state = SimulationState.FAILED
+    simulation.error = f"{type(error).__name__}: {error}"
+    simulation.save(update_fields=["state", "error", "updated_at"])
+
+
+def run(
+    simulation: Simulation | int,
+    *,
+    algorithm_overrides: Mapping[str, Any] | None = None,
+    forced_algorithm: AlgorithmType | None = None,
+    export_json: bool = True,
+) -> Simulation:
+    """Run a simulation from period 1 to ``periodNumber``.
+
+    Args:
+        simulation: The run or its primary key.
+        algorithm_overrides: HPO parameter overrides for every agent.
+        forced_algorithm: Algorithm used for every agent (HPO, K7).
+        export_json: Write the JSON offer export at the end.
+
+    Returns:
+        The simulation in state FINISHED.
+
+    Raises:
+        ValueError: If the simulation or its market is not in state CREATED.
+            The simulation is left unchanged.
+        Exception: Any error of the run is re-raised after the simulation has
+            been set to FAILED with ``error`` holding the message.
+    """
+    if not isinstance(simulation, Simulation):
+        simulation = Simulation.objects.get(pk=simulation)
+    market = simulation.market
+    if (
+        simulation.state != SimulationState.CREATED
+        or market.state != MarketState.CREATED
+    ):
+        raise ValueError(
+            f"simulation {simulation.pk} cannot run: state {simulation.state.name}, "
+            f"market state {market.state.name}, both must be CREATED"
+        )
+
+    try:
+        ctx = SimulationContext.build(
+            simulation,
+            algorithm_overrides,
+            forced_algorithm=forced_algorithm,
+            export_json=export_json,
+        )
+        simulation.state = SimulationState.INITIALIZED
+        simulation.currentPeriod = 0
+        simulation.save(update_fields=["state", "currentPeriod", "updated_at"])
+        ctx.market.state = MarketState.INITIALIZED
+        ctx.market.save(update_fields=["state", "updated_at"])
+
+        first_day = int(simulation.day)
+        period_by_period = simulation.mode == SimulationMode.PERIODBYPERIOD
+        budgets_by_period: dict[int, dict[str, str]] = {}
+        for t in range(1, simulation.periodNumber + 1):
+            if period_by_period and t > 1:
+                _wait_for_next_period(ctx)
+            if t == ctx.evaluation_start:
+                for rt in ctx.agents:
+                    rt.policy.set_frozen(True)
+            simulation.currentPeriod = t
+            simulation.day = first_day + (t - 1) // PERIODS_PER_DAY
+            simulation.save(update_fields=["currentPeriod", "day", "updated_at"])
+            market_service.run_period(ctx, t)
+            if t == 1:
+                simulation.state = SimulationState.STARTED
+                simulation.save(update_fields=["state", "updated_at"])
+            if ctx.export_json:
+                budgets_by_period[t] = {
+                    rt.agent.name: str(rt.agent.budget) for rt in ctx.agents
+                }
+
+        if ctx.export_json:
+            export_offers_json(simulation, budgets_by_period)
+        simulation.state = SimulationState.FINISHED
+        simulation.save(update_fields=["state", "updated_at"])
+    except Exception as error:
+        logger.exception("Simulation %s failed", simulation.pk)
+        _mark_failed(simulation, error)
+        raise
+    return simulation

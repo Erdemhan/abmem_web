@@ -248,11 +248,6 @@ def _agent_form_errors(form: AgentForm) -> dict[str, list[str]]:
 
 
 # SYSTEM
-def start(request):
-    offers = StarterService.start()
-    return HttpResponse(offers)
-
-
 def run_simulation(request, simulation_id):
     simulation = get_object_or_404(Simulation, id=simulation_id)
     try:

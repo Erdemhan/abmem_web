@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from django.db import models
 from django.db.models import CheckConstraint, Q, UniqueConstraint
@@ -88,16 +88,3 @@ class Agent(Base):
         from abmem.services.algorithms import registry
 
         return self.algorithm_type in registry.BASELINE_TYPES
-
-    @property
-    def algorithm(self) -> Any:
-        """Backwards-compatible alias of ``runtime_policy``.
-
-        Kept until the runtime services (agent_service) are migrated to
-        ``runtime_policy`` by the runtime_core package.
-        """
-        return self.runtime_policy
-
-    @algorithm.setter
-    def algorithm(self, value: Any) -> None:
-        self.runtime_policy = value

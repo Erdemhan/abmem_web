@@ -1,313 +1,131 @@
+"""Market period of a run (ARCHITECTURE.md 6.2).
+
+``run_period`` creates the period, collects one offer per plant from every
+agent in ``Agent.id`` order, clears the market with the pure merit-order
+clearing, books profits in ``Decimal`` and writes everything with a constant
+number of bulk statements inside one transaction (A10).
+
+The module holds no mutable module-level state (B10).
+"""
+
+from __future__ import annotations
+
+from decimal import ROUND_HALF_EVEN, Decimal
+from typing import TYPE_CHECKING, Final
+
+from django.db import transaction
+
+from abmem.models import Agent
+from abmem.models.enums import MarketState, MarketStrategy
+from abmem.models.models import Offer, Period
+from abmem.services.agent import agent_service
+from abmem.services.market.accounting import offer_profit, outcome_from_offer
+from abmem.services.market.clearing import Bid, acceptance_prices, clear_market
+
+if TYPE_CHECKING:
+    from abmem.services.simulation.context import SimulationContext
+
+QUANTITY_QUANTUM: Final[Decimal] = Decimal("0.001")
+BUDGET_QUANTUM: Final[Decimal] = Decimal("0.01")
+PTF_SENTINEL: Final[int] = -1
 
 
-# Import necessary modules and services from the project
-from ...models.enums import MarketState, MarketStrategy
-from ...services.market import period_factory as PeriodFactory
-from ...services.visualization import visualization_service as VisualizationService
-from ...models import Market, Period, Offer, Agent
-from decimal import Decimal
-from ...services.algorithms import MPIP
-from ...services.agent import agent_factory as AgentFactory, agent_service as AgentService
-from ...services.algorithms.agent_algorithm import AgentAlgorithm
-from ...services.simulation import serial_service as SerialService
-from ...services.file_reader import reader_service as ReaderService
-from ...constants import *
-import numpy as np
-import decimal
-import timeit
-from django.db.models import Q
-from collections.abc import Sequence
-from ...constants.paths import DATA_DIR
-from .clearing import Bid, acceptance_prices, clear_market
-from .demand import DemandSeries
-
-MARKET_DATA_FILE = 'marketData.xlsx'
-DEMAND_COLUMN = 'DEMAND'
-
-# Demand series loaded and validated once per run by init().
-demandSeries: DemandSeries | None = None
-
-# Initialize a global variable for market data
-marketData = []
-
-agents= []
-
-import hashlib
-
-import numpy as np
-
-
-def deterministic_hash(text: str) -> int:
-    return int(hashlib.sha256(text.encode()).hexdigest(), 16) % (10**8)
-
-def init(market: Market, params) -> None:
-    """Load market data, validate the demand series and initialise the agents.
+def _set_market_state(ctx: SimulationContext, state: MarketState) -> None:
+    """Persist a market state change with a single-column update.
 
     Args:
-        market: Market to initialise. ``market.simulation.periodNumber`` is the
-            horizon the demand series must cover.
-        params: Hyperparameters passed to ``AgentService.init``.
-
-    Raises:
-        DemandDataError: If the demand series does not cover the horizon with
-            finite, strictly positive values. The market state is left unchanged.
+        ctx: Run context.
+        state: New market state.
     """
-    global marketData
-    global agents
-    global demandSeries
-    series = DemandSeries.from_excel(DATA_DIR / MARKET_DATA_FILE, column=DEMAND_COLUMN)
-    series.validate_horizon(market.simulation.periodNumber)
-    demandSeries = series
-    # Exogenous columns used by estimatePTF.
-    marketData = ReaderService.readExcel(
-        path=MARKET_DATA_FILE,
-        columns=['Submitted Bid Order Volume(MWh)', 'Daily exchange rates(USD)',
-                 'Natural Gas Price (USD/1000Sm3)', 'İstanbul average temperature'],
-        map=['old_demand', 'der', 'ngp', 'ist']
-    )
-    for agent in market.agent_set.all():
-        AgentService.init(agent,params=params)
-        agents.append(agent)
+    ctx.market.state = state
+    ctx.market.save(update_fields=["state", "updated_at"])
 
 
-
-    # Set the market state to INITIALIZED and save
-    market.state = MarketState.INITIALIZED
-    market.save()
-
-def estimatePTF(market: Market):
-    day = market.simulation.day
-    currentPeriod = market.simulation.currentPeriod
-
-    # Determine if the current day is a holiday (if day % 6 == 0)
-    holiday = 0
-    if day % 6 == 0:
-        holiday = 1
-
-    # Fetch periods for specific previous intervals (1, 24, 168, and 672 periods ago)
-    periods = market.period_set.filter(
-        Q(periodNumber=currentPeriod - 1) |
-        Q(periodNumber=currentPeriod - 24) |
-        Q(periodNumber=currentPeriod - 168) |
-        Q(periodNumber=currentPeriod - 672)
-    )
-
-    # Initialize variables for previous market clearing prices and total generation
-    mcp24 = 1
-    mcp168 = 1
-    mcp672 = 1
-    tg = 1
-
-    # Extract relevant data from previous periods
-    for period in periods:
-        if period.periodNumber == currentPeriod - 1:
-            tg = float(period.marketVolume)
-        if period.periodNumber == currentPeriod - 24:
-            mcp24 = float(period.ptf)
-        elif period.periodNumber == currentPeriod - 168:
-            mcp168 = float(period.ptf)
-        elif period.periodNumber == currentPeriod - 672:
-            mcp672 = float(period.ptf)
-
-    # Extract market data for the current period
-    der = marketData['der'][currentPeriod] # Daily Exchange Rate
-    ngp = marketData['ngp'][currentPeriod] # Natural Gas Price
-    ist = marketData['ist'][currentPeriod] # İstanbul Weather
-
-    # Initialize resource capacities
-    ng = 1
-    lig = 1
-    rhyd = 1
-    icoal = 1
-    sol = 1
-    asph = 1
-    bcoal = 1
-    imex = 1
-
-    # Sum up the capacities for each resource type based on the agents' portfolios
-    agents = market.agent_set.all()
-    for agent in agents:
-        for plant in agent.portfolio.plant_set.all():
-            if plant.resource.name == "naturalgas":
-                ng += plant.capacity
-            elif plant.resource.name == "lignite":
-                lig += plant.capacity
-            elif plant.resource.name == "hydro":
-                rhyd += plant.capacity
-            elif plant.resource.name == "importcoal":
-                icoal += plant.capacity
-            elif plant.resource.name == "solar":
-                sol += plant.capacity
-            elif plant.resource.name == "asphaltitecoal":
-                asph += plant.capacity
-            elif plant.resource.name == "blackcoal":
-                bcoal += plant.capacity
-            elif plant.resource.name == "imex":
-                imex += plant.capacity
-
-    # Calculate the PTF (Market Clearing Price) using the MPIP algorithm
-    ptf = MPIP.calculate(
-        holy=holiday, mcp24=mcp24, mcp168=mcp168, mcp672=mcp672, der=der,
-        tg=tg, ng=ng, lig=lig, rhyd=rhyd, icoal=icoal, sol=sol, asph=asph, bcoal=bcoal, imex=imex,
-        ngp=ngp, ist=ist
-    )
-    
-    #print(ptf)
-    return ptf
-
-def startPool(market: Market,agents) -> None:
-    # Set market state to WAITINGAGENTS and save
-    market.state = MarketState.WAITINGAGENTS
-    market.save()
-    return SerialService.startPool(agents=agents)
-
-def marketClearing(market: Market, offers: Sequence[Offer], demand: Decimal | int):
-    """Clear the market and write the accepted quantities back to the offers.
-
-    Delegates to :func:`clearing.clear_market`. Offers with a positive accepted
-    quantity get ``acceptance=True``, ``acceptanceAmount`` as a ``Decimal`` and
-    ``acceptancePrice`` equal to their bid price (PAYASBID, ``payasptf`` applies
-    the PTF afterwards). Rejected offers are left unchanged.
+def run_period(ctx: SimulationContext, t: int) -> Period:
+    """Run period ``t``: agent steps, clearing, accounting and persistence.
 
     Args:
-        market: Market whose state is set to CALCULATING.
-        offers: Offers of the period, the list index is the bid key.
-        demand: Demand of the period in MWh.
+        ctx: Run context.
+        t: Period number, ``1 <= t <= periodNumber``.
 
     Returns:
-        Tuple ``(offers, met_demand, ptf, volume)``. ``met_demand`` is the sum of
-        accepted quantities (B11). ``ptf`` is ``Decimal(0)`` when nothing is
-        accepted, as before. ``volume`` is the total offered quantity.
+        The saved period with ``ptf``, ``metDemand`` and ``marketVolume`` set.
+
+    Raises:
+        RuntimeError: If the clearing yields no PTF (no positive bid).
+        ValueError: If a component rejects its input. The transaction of the
+            period is rolled back.
     """
-    # Set market state to CALCULATING and save
-    market.state = MarketState.CALCULATING
-    market.save()
+    demand = ctx.demand.at(t).quantize(QUANTITY_QUANTUM, rounding=ROUND_HALF_EVEN)
+    try:
+        with transaction.atomic():
+            period = Period.objects.create(
+                market=ctx.market,
+                periodNumber=t,
+                demand=demand,
+                metDemand=PTF_SENTINEL,
+                marketVolume=PTF_SENTINEL,
+                ptf=PTF_SENTINEL,
+            )
+            ctx.current_period = period
+            _set_market_state(ctx, MarketState.WAITINGAGENTS)
 
-    bids = [
-        Bid(key=index, price=Decimal(offer.offerPrice), quantity=Decimal(offer.amount))
-        for index, offer in enumerate(offers)
-    ]
-    result = clear_market(bids, Decimal(demand))
-    prices = acceptance_prices(result, bids, MarketStrategy.PAYASBID)
-    for index, offer in enumerate(offers):
-        amount = result.accepted[index]
-        if amount > 0:
-            offer.acceptance = True
-            offer.acceptanceAmount = amount
-            offer.acceptancePrice = prices[index]
+            offers: list[Offer] = []
+            owner_index: list[int] = []
+            for index, rt in enumerate(ctx.agents):
+                agent_offers = agent_service.step(ctx, rt, t)
+                offers.extend(agent_offers)
+                owner_index.extend([index] * len(agent_offers))
 
-    ptf = result.ptf if result.ptf is not None else Decimal(0)
-    return offers, result.met_demand, ptf, result.offered_volume
+            bids = [
+                Bid(
+                    key=i,
+                    price=Decimal(offer.offerPrice),
+                    quantity=Decimal(offer.amount),
+                )
+                for i, offer in enumerate(offers)
+            ]
+            result = clear_market(bids, demand, quantum=QUANTITY_QUANTUM)
+            if result.ptf is None:
+                raise RuntimeError(f"period {t}: clearing produced no PTF")
+            prices = acceptance_prices(
+                result, bids, MarketStrategy(int(ctx.market.strategy))
+            )
 
-def budgetCalculation(offer: Offer):
-    # Calculate and return the budget based on the offer's acceptance amount and price
-    resource = offer.resource
-    offer_amount = float(offer.amount)
-    acceptance_amount = float(offer.acceptanceAmount)
-    acceptance_price = float(offer.acceptancePrice)
-    static_cost = float(resource.staticCost()) * offer_amount
-    variable_cost = float(resource.variableCost()) * acceptance_amount
-    if acceptance_amount > 0:
-        budget_growth = (acceptance_amount * acceptance_price) - (static_cost + variable_cost)
-    else:
-        budget_growth = -static_cost
-    return budget_growth
+            profits = [Decimal(0)] * len(ctx.agents)
+            outcomes: list[list] = [[] for _ in ctx.agents]
+            for i, offer in enumerate(offers):
+                accepted = result.accepted[i]
+                offer.acceptance = accepted > 0
+                offer.acceptanceAmount = accepted
+                offer.acceptancePrice = prices[i]
+                outcome = outcome_from_offer(offer)
+                owner = owner_index[i]
+                outcomes[owner].append(outcome)
+                profits[owner] += offer_profit(outcome)
 
+            agents: list[Agent] = []
+            for rt, profit in zip(ctx.agents, profits):
+                rt.agent.budget = (Decimal(rt.agent.budget) + profit).quantize(
+                    BUDGET_QUANTUM, rounding=ROUND_HALF_EVEN
+                )
+                agents.append(rt.agent)
 
-def updatePeriod(period: Period) -> Period:
-    # Save the period data and return the updated period
-    period.save()
+            Offer.objects.bulk_create(offers)
+            period.ptf = result.ptf
+            period.metDemand = result.met_demand
+            period.marketVolume = int(result.offered_volume)
+            period.save(
+                update_fields=["ptf", "metDemand", "marketVolume", "updated_at"]
+            )
+            Agent.objects.bulk_update(agents, ["budget", "state"])
+            ctx.step_logger.flush()
+            _set_market_state(ctx, MarketState.PERIODEND)
+    except BaseException:
+        ctx.step_logger.clear()
+        raise
+
+    ctx.ptf_history[t] = result.ptf
+    for rt, agent_outcomes in zip(ctx.agents, outcomes):
+        rt.last_outcomes = tuple(agent_outcomes)
     return period
-
-def saveOffers(market: Market, offers: [Offer]) -> None:
-    # Set market state to BROADCASTING and save offers
-    market.state = MarketState.BROADCASTING
-    for offer in offers:
-        offer.save()
-        agent = offer.agent
-        budget_growth = budgetCalculation(offer)
-        agent.budget += Decimal(budget_growth)
-        if not offer.acceptance or budget_growth < (float (offer.acceptancePrice) * float (offer.acceptanceAmount) * float (offer.period.ptf/2)):
-            agent.algorithm.failStack += 1
-        agent.save()
-
-def createPeriod(market: Market) -> Period:
-    # Create and return a new period for the market
-    return PeriodFactory.create(market=market, num=market.simulation.currentPeriod, demand=getDemand(market.simulation.currentPeriod))
-
-def showPeriodDetails(period: Period) -> None:
-    pass
-    # Display details of the given period
-    #print("PTF: ", period.ptf)
-    #offers = period.offer_set.all()
-    #for offer in offers:
-        #print("Agent: ", offer.agent.id, "Resource: ", offer.resource.name, offer.amount, "MW/h        ",
-              #offer.offerPrice, "$      ", offer.acceptance, " ", offer.acceptancePrice, "$   ", offer.acceptanceAmount, "/", offer.amount, "MW/h")
-    #VisualizationService.visualizePeriod(period)
-
-def payasptf(offers: [Offer], ptf: int):
-    # Adjust acceptance prices of accepted offers to the PTF
-    for offer in offers:
-        if offer.acceptance:
-            offer.acceptancePrice = ptf
-    return offers
-
-
-def run(market: Market) -> bool:
-    start = timeit.default_timer()
-    
-    if market.state == MarketState.CREATED:
-        #print("market inited in market service")
-        init(market)
-    global agents
-    # Create a new period, estimate the PTF, and start the agent pool
-    period = createPeriod(market)
-    #period.estimatedPtf = estimatePTF(market)
-    agents,offers = startPool(market,agents)
-    offers = np.concatenate(offers)
-
-    # Perform market clearing and adjust offers according to the market strategy
-    offers, metDemand, ptf, volume = marketClearing(market, offers, period.demand)
-    if market.strategy == MarketStrategy.PAYASPTF:
-        payasptf(offers, ptf)
-
-    # Update the period and save the offers
-    period.metDemand = metDemand
-    period.ptf = ptf  # MCP (PTF) değerini period'a kaydediyoruz
-    period.marketVolume = volume
-    period = updatePeriod(period=period)
-    saveOffers(market, offers)
-    #print("funcs called and period updated")
-
-    # Offer nesnelerine period bilgisini ekle
-    for offer in offers:
-        offer.period = period
-        offer.save()
-
-    # Mark the market state as PERIODEND and save
-    market.state = MarketState.PERIODEND
-    market.save()
-    #print("period details will be shown")
-    showPeriodDetails(period)
-    #print(timeit.default_timer() - start)
-    
-    agent_budgets = {agent.name: float(agent.budget) for agent in market.agent_set.all()}
-    return offers, {period.periodNumber: agent_budgets}
-
-
-def getDemand(currentPeriod: int) -> Decimal:
-    """Return the demand of a period from the validated demand series.
-
-    Args:
-        currentPeriod: Period number ``t`` (1-based).
-
-    Returns:
-        ``demandSeries.at(t)``, i.e. row ``t - 1`` of the demand column.
-
-    Raises:
-        RuntimeError: If ``init`` has not loaded the demand series.
-        IndexError: If ``t`` is outside the series.
-    """
-    if demandSeries is None:
-        raise RuntimeError("demand series not loaded, call market_service.init first")
-    return demandSeries.at(currentPeriod)
