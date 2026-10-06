@@ -41,7 +41,7 @@ class Plant(Base):
 class Period(Base):
     market = models.ForeignKey(Market, on_delete=models.CASCADE, null=False)
     periodNumber = models.IntegerField(null=False)
-    demand = models.IntegerField()
+    demand = models.DecimalField(max_digits=12, decimal_places=3)
     metDemand = models.DecimalField(max_digits=12, decimal_places=3)
     marketVolume = models.IntegerField()
     ptf = models.DecimalField(decimal_places=2, max_digits=7, null=True)

@@ -23,6 +23,7 @@ class SimulationState(enum.Enum):
     FINISHED = 7
     STOPPED = 8
     CANCELED = 9
+    FAILED = 10
 
 class SimulationMode(enum.Enum):
     PERIODBYPERIOD = 0
@@ -70,3 +71,26 @@ class AlgorithmType(enum.Enum):
     RANDOM = 5
     MARGINAL_COST = 6
     FIXED_MARKUP = 7
+
+
+class HPOStatus(enum.Enum):
+    CREATED = 0
+    RUNNING = 1
+    FINISHED = 2
+    FAILED = 3
+    CANCELED = 4
+
+
+class HPOPhase(enum.Enum):
+    INIT = 0
+    EMPLOYED = 1
+    ONLOOKER = 2
+    SCOUT = 3
+    FINAL_EVAL = 4
+
+
+class HPOTrialStatus(enum.Enum):
+    PENDING = 0
+    RUNNING = 1
+    FINISHED = 2
+    FAILED = 3
