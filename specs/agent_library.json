@@ -1,0 +1,166 @@
+{
+  "spec_id": "agent_library",
+  "title": "Proxy agent library with unique names, single copy service, library-based scenario editing",
+  "status": "approved",
+  "phase": "Faz 2",
+  "wave": "3 (package service), 5 (package ui)",
+  "plan_items": [
+    "2.3"
+  ],
+  "defects": [],
+  "decisions": [
+    "K4",
+    "K5"
+  ],
+  "purpose": "The agent page becomes the library (proxy=True, market=NULL). Scenarios get agents either by creating a new agent (added to the library first, then copied) or by selecting a library agent (copied with plants, algorithm and fail-stack settings). All agent creation and copying is done by one service module.",
+  "depends_on": [
+    "data_model (constraints, source FK, K5 import)",
+    "resource_filter (validate_agent_resources)",
+    "algorithm_selection_ui (for package ui: the agent form fields already exist)"
+  ],
+  "work_packages": [
+    {
+      "id": "agent_library.service",
+      "wave": 3,
+      "files": {
+        "create": [
+          "abmem/services/agent/library_service.py",
+          "tests/agent/test_library_service.py"
+        ],
+        "modify": [],
+        "delete": []
+      },
+      "notes": "New file only, so it runs in parallel with runtime_core. PLAN 2.3 names agent_service.copy_agent/create_library_agent. They live in library_service.py (ADR-005)."
+    },
+    {
+      "id": "agent_library.ui",
+      "wave": 5,
+      "files": {
+        "create": [
+          "tests/views/test_agent_library_views.py",
+          "tests/views/test_scenario_library_flow.py"
+        ],
+        "modify": [
+          "abmem/views.py (agent_list filter, create_agent_and_related, update_agent, delete_agent, create_simulation, update_simulation, run_simulation use library_service, new check_agent_name and library_agents_json views)",
+          "abmem/urls.py (agent/check-name, agent/library.json)",
+          "abmem/forms.py (AgentForm.clean_name uses check_name_available)",
+          "abmem/templates/pages/agent-list.html",
+          "abmem/static/assets/components/agent-form.html (live name check)",
+          "abmem/templates/pages/simulation-create.html ('New agent' and 'Select from library' paths)",
+          "abmem/templates/pages/simulation-update.html (same)",
+          "abmem/services/algorithms/optimization/hyperparam_optimization.py is NOT touched (deleted by hpo.service in wave 4)"
+        ],
+        "delete": []
+      }
+    }
+  ],
+  "files": {
+    "create": [
+      "abmem/services/agent/library_service.py",
+      "tests/agent/test_library_service.py",
+      "tests/views/test_agent_library_views.py",
+      "tests/views/test_scenario_library_flow.py"
+    ],
+    "modify": [
+      "abmem/views.py",
+      "abmem/urls.py",
+      "abmem/forms.py",
+      "abmem/templates/pages/agent-list.html",
+      "abmem/static/assets/components/agent-form.html",
+      "abmem/templates/pages/simulation-create.html",
+      "abmem/templates/pages/simulation-update.html"
+    ],
+    "delete": []
+  },
+  "public_interfaces": [
+    {
+      "module": "abmem/services/agent/library_service.py",
+      "signature": "COPIED_AGENT_FIELDS: Final[tuple[str, ...]] = ('name', 'budget', 'type', 'algorithm_type', 'failstack_enabled', 'failstack_limit', 'failstack_delta', 'failstack_min_margin')",
+      "description": "Explicit list of copied fields. A test asserts it covers every concrete Agent field except id, market, proxy, state, source, created_at, updated_at, so a future field cannot be silently dropped (PLAN 2.1 'copy carries the field automatically')."
+    },
+    {
+      "module": "abmem/services/agent/library_service.py",
+      "signature": "@dataclass(frozen=True)\nclass PlantInput:\n    resource_id: int\n    capacity: int\n\n@dataclass(frozen=True)\nclass AgentInput:\n    name: str\n    budget: Decimal\n    type: AgentType\n    algorithm_type: AlgorithmType\n    failstack_enabled: bool\n    failstack_limit: int\n    failstack_delta: Decimal\n    failstack_min_margin: Decimal\n    plants: tuple[PlantInput, ...]",
+      "description": "Validated input built by views from JSON or form data."
+    },
+    {
+      "module": "abmem/services/agent/library_service.py",
+      "signature": "def normalize_name(name: str) -> str\ndef check_name_available(name: str, *, market: Market | None = None, exclude_id: int | None = None) -> bool",
+      "description": "normalize_name strips surrounding whitespace (no other change). check_name_available: market None checks the library case-insensitively (Lower(name)), otherwise checks names inside the market case-sensitively, matching the DB constraints."
+    },
+    {
+      "module": "abmem/services/agent/library_service.py",
+      "signature": "@transaction.atomic\ndef create_library_agent(data: AgentInput) -> Agent",
+      "description": "Validates name availability, resource rule (validate_agent_resources), capacities > 0, creates Agent(proxy=True, market=None), Portfolio, Plants. Raises ValidationError with field keys."
+    },
+    {
+      "module": "abmem/services/agent/library_service.py",
+      "signature": "@transaction.atomic\ndef update_library_agent(agent: Agent, data: AgentInput) -> Agent",
+      "description": "Only for library agents (ValueError otherwise). Replaces plants. Copies in scenarios and runs are untouched."
+    },
+    {
+      "module": "abmem/services/agent/library_service.py",
+      "signature": "@transaction.atomic\ndef copy_agent(src: Agent, market: Market, *, proxy: bool, name: str | None = None) -> Agent",
+      "description": "Deep copy of COPIED_AGENT_FIELDS, Portfolio and Plants into market. source = src if src.is_library else src.source. state reset to CREATED, budget copied. name defaults to src.name, uniqueness inside market enforced (ValidationError on conflict, OQ-14)."
+    },
+    {
+      "module": "abmem/services/agent/library_service.py",
+      "signature": "@transaction.atomic\ndef add_new_agent_to_scenario(data: AgentInput, market: Market) -> Agent",
+      "description": "'New agent' path: create_library_agent(data) then copy_agent(library_agent, market, proxy=True)."
+    },
+    {
+      "module": "abmem/services/agent/library_service.py",
+      "signature": "@transaction.atomic\ndef clone_scenario_for_run(proxy_sim: Simulation, *, seed: int | None = None, forced_algorithm: AlgorithmType | None = None, algorithm_overrides: Mapping[str, Any] | None = None, fixed_agent_fields: Mapping[str, Any] | None = None) -> Simulation",
+      "description": "Replaces the deep-copy blocks in views.run_simulation and hyperparam_optimization.create_simulation_from_proxy. Copies Simulation (proxy False, state CREATED, currentPeriod -1, seed = seed or proxy_sim.seed), Market (state CREATED) and every agent with copy_agent(..., proxy=False). forced_algorithm sets algorithm_type on all copies (K7, HPO). fixed_agent_fields applies HPO fixed fail-stack settings. Requires proxy_sim.proxy True (ValueError otherwise)."
+    },
+    {
+      "module": "abmem/views.py",
+      "signature": "def check_agent_name(request: HttpRequest) -> JsonResponse\ndef library_agents_json(request: HttpRequest) -> JsonResponse",
+      "description": "GET agent/check-name?name=&exclude_id= -> {\"available\": bool, \"message\": str}. GET agent/library.json -> [{id, name, type, budget, algorithm_type, failstack: {...}, plants: [{resource_id, resource_name, energy_type, capacity}]}]."
+    }
+  ],
+  "scenario_payload_contract": {
+    "create_and_update": "agents: list of objects. {\"mode\": \"new\", name, type, budget, algorithm_type, failstack: {enabled, limit, delta, min_margin}, plants: [{resource, capacity}]} or {\"mode\": \"library\", \"library_agent_id\": int}. Legacy payload without 'mode' is treated as 'new' for backward compatibility of the existing template until it is updated in the same package.",
+    "update_semantics": "update_simulation deletes the scenario's agents and recreates them from the payload inside one transaction (current behaviour), using copy_agent for library entries.",
+    "errors": "HTTP 400 JSON {\"errors\": {\"agents[i].name\": [...], ...}}."
+  },
+  "data_model_changes": "none (data_model)",
+  "migrations": "none",
+  "invariants": [
+    "Every agent created through the UI or services satisfies the DB constraints, server validation fails before the DB raises IntegrityError.",
+    "Editing a library agent never changes any scenario or run agent (copy semantics).",
+    "copy_agent output has the same plants (resource, capacity) and COPIED_AGENT_FIELDS values as the source.",
+    "The agent list page shows only library agents."
+  ],
+  "edge_cases": [
+    "Name with leading/trailing spaces: normalised before checks.",
+    "Name differing only in case from an existing library agent: rejected.",
+    "Name longer than 20 characters: rejected by form validation.",
+    "check-name with empty name: available False with message.",
+    "Library agent deleted while referenced: copies keep working with source NULL.",
+    "Selecting the same library agent twice for one scenario: per OQ-14 (proposal: 400 and UI prevents it).",
+    "library_agent_id that does not exist or is not a library agent: 400.",
+    "Race between check-name and submit: DB constraint raises IntegrityError, converted to 400 with the same message."
+  ],
+  "test_plan": [
+    "test_library_service.py: create, duplicate name in different case rejected, copy_agent equality of fields and plants, source rules (library -> copy, copy -> run copy keeps library source), COPIED_AGENT_FIELDS coverage test, clone_scenario_for_run with forced_algorithm, editing library agent leaves copies unchanged.",
+    "test_agent_library_views.py: agent list shows only library agents, check-name endpoint, create/update/delete flows, IntegrityError race mapped to 400.",
+    "test_scenario_library_flow.py: create scenario with one 'new' and one 'library' agent, verify library now contains the new agent and scenario holds two copies with correct sources, update scenario, run scenario uses clone_scenario_for_run (copies carry algorithm_type and fail-stack fields)."
+  ],
+  "research_debug": {
+    "bug_type": "A",
+    "bug_impact_required": false
+  },
+  "acceptance_criteria": [
+    "PLAN 2.3 validation: duplicate library name rejected, library selection copies fully, library edits do not affect scenarios"
+  ],
+  "out_of_scope": [
+    "Algorithm/fail-stack form widgets (algorithm_selection_ui)",
+    "HPO evaluation cloning logic beyond clone_scenario_for_run (hpo)"
+  ],
+  "blocked_by_open_questions": [],
+  "approval_note": "Approved by the user on 2026-10-06. Open questions OQ-1..OQ-19 are resolved in ARCHITECTURE.md section 11. The entries in resolved_open_questions are binding and override any wording below that says \"proposal\", \"per OQ-x\" or \"if approved\".",
+  "resolved_open_questions": {
+    "OQ-14": "Adding the same library agent twice to one scenario returns HTTP 400, the UI also prevents it."
+  }
+}

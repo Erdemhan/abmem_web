@@ -527,7 +527,7 @@ Algoritmalar karşılaştırıldığında her ajanın davranışının bir kısm
 
 Örnek: aynı fiyatta `[A = 100, B = 10]` grubu, kalan talep 60.
 Adım 1: pay 30, A 30 alır (D = 30). B sığar, 10 alır (D = 20). D = 20 ile `[A]` üzerinde özyineleme → A 20 alır.
-Sonuç: 60'ın 30 MWh'si kabul edilir. Doğru orantılı bölüştürme B = 10, A = 50'dir.
+Sonuç: 60'ın 30 MWh'si kabul edilir. Fonksiyonun amaçladığı "eşit pay, teklif miktarıyla sınırlı" kuralına göre doğru sonuç B = 10, A = 50'dir (B payını aşamaz, artan pay A'ya geçer). Miktarla orantılı bölüştürme ise A = 54.5, B = 5.5 verirdi. Proje için (b) eşit pay kuralı seçilmiştir (OQ-18, 2026-10-06).
 
 Sürekli ağ çıktılarında tam eşitlik nadirdir, ancak ilk rastgele periyotların tam sayı fiyatlarında (`randint(0, 200)`) ve rastgele fiyat kuralında ortaya çıkar.
 

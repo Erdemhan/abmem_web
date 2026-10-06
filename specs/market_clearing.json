@@ -1,0 +1,133 @@
+{
+  "spec_id": "market_clearing",
+  "title": "Pure merit-order clearing with exact equal-price split, Decimal quantities, validated demand series",
+  "status": "approved",
+  "phase": "Faz 1",
+  "wave": 1,
+  "plan_items": [
+    "1.7"
+  ],
+  "defects": [
+    "B4",
+    "B8",
+    "A8"
+  ],
+  "decisions": [],
+  "purpose": "Replace marketClearing/priceGroupCalculation with a pure, exact, non-recursive clearing function. Store fractional accepted quantities as Decimal. Validate demand data before a run starts and index it by periodNumber - 1.",
+  "depends_on": [
+    "faz0_infra"
+  ],
+  "files": {
+    "create": [
+      "abmem/services/market/clearing.py",
+      "abmem/services/market/demand.py",
+      "abmem/migrations/0004_offer_period_decimal.py",
+      "tests/market/__init__.py",
+      "tests/market/test_clearing.py",
+      "tests/market/test_demand.py"
+    ],
+    "modify": [
+      "abmem/models/models.py (Offer.acceptanceAmount, Period.metDemand, Offer.to_dict returns str for acceptanceAmount)",
+      "abmem/services/market/market_service.py (marketClearing delegates to clearing.clear_market and writes results back to Offer objects, priceGroupCalculation deleted, getDemand/createPeriod use DemandSeries, init loads DemandSeries once and validates it against simulation.periodNumber)",
+      "abmem/services/simulation/simulation_service.py (JSON export converts Decimal to str, a DemandDataError before the loop leaves the simulation in CREATED with a logged message)",
+      "abmem/services/file_reader/reader_service.py (remove the first, shadowed readExcel definition, A3 partial)",
+      "tests/characterization/test_clearing_current.py (update B4 expectation to the corrected behaviour)",
+      "tests/characterization/test_period_creation_current.py (update indexing expectation)"
+    ],
+    "delete": []
+  },
+  "public_interfaces": [
+    {
+      "module": "abmem/services/market/clearing.py",
+      "signature": "@dataclass(frozen=True)\nclass Bid:\n    key: Hashable\n    price: Decimal\n    quantity: Decimal",
+      "description": "Input bid. key identifies the offer (index in the offers list)."
+    },
+    {
+      "module": "abmem/services/market/clearing.py",
+      "signature": "@dataclass(frozen=True)\nclass ClearingResult:\n    accepted: Mapping[Hashable, Decimal]\n    ptf: Decimal | None\n    met_demand: Decimal\n    offered_volume: Decimal\n    marginal_group: tuple[Hashable, ...]",
+      "description": "accepted has an entry for every bid (Decimal 0 for rejected). ptf is the price of the highest accepted price group, None if nothing is accepted. offered_volume keeps the current semantics of Period.marketVolume (sum of offered quantities)."
+    },
+    {
+      "module": "abmem/services/market/clearing.py",
+      "signature": "def clear_market(bids: Sequence[Bid], demand: Decimal, quantum: Decimal = Decimal('0.001')) -> ClearingResult",
+      "description": "Uniform-price merit order. Groups bids by equal price, ascending. A group whose total quantity fits the remaining demand D_rem is fully accepted. The first group whose total exceeds D_rem is split by equal share capped at bid quantity (water-filling, OQ-18) and the loop stops. Allocations are quantised to 'quantum' with the largest-remainder method so that their sum equals D_rem exactly. Pure, no ORM, no recursion."
+    },
+    {
+      "module": "abmem/services/market/clearing.py",
+      "signature": "def acceptance_prices(result: ClearingResult, bids: Sequence[Bid], strategy: MarketStrategy) -> dict[Hashable, Decimal | None]",
+      "description": "PAYASBID: bid price for accepted bids. PAYASPTF: result.ptf for accepted bids. None for rejected bids."
+    },
+    {
+      "module": "abmem/services/market/demand.py",
+      "signature": "@dataclass(frozen=True)\nclass DemandSeries:\n    values: np.ndarray\n    source: str\n\n    @classmethod\n    def from_excel(cls, path: pathlib.Path, column: str = 'DEMAND') -> 'DemandSeries'\n    def validate_horizon(self, period_count: int) -> None\n    def at(self, period_number: int) -> Decimal\n    def window(self, start: int, stop: int) -> np.ndarray",
+      "description": "values holds the leading block of valid rows of the demand column (A8: 8808 valid rows of 43848). at(t) returns values[t - 1] for t in [1, len(values)]. validate_horizon raises DemandDataError if period_count > len(values) or if any of the first period_count values is NaN, infinite or negative , and zero values are rejected as well (OQ-12)."
+    },
+    {
+      "module": "abmem/services/market/demand.py",
+      "signature": "class DemandDataError(ValueError)",
+      "description": "Message names the file, column, requested horizon and the first offending row."
+    }
+  ],
+  "data_model_changes": [
+    "Offer.acceptanceAmount: IntegerField(null=True) -> DecimalField(max_digits=12, decimal_places=3, null=True)",
+    "Period.metDemand: IntegerField() -> DecimalField(max_digits=12, decimal_places=3)"
+  ],
+  "migrations": [
+    {
+      "name": "0004_offer_period_decimal",
+      "depends_on": "0003_remove_agent_seed",
+      "kind": "AlterField x2",
+      "notes": "Lossless widening on PostgreSQL. Parallel with 0004_resource_ccgt_fossil. Merged by 0005_merge_wave1."
+    }
+  ],
+  "invariants": [
+    "sum(accepted.values()) == min(demand, offered_volume) exactly (Decimal equality).",
+    "0 <= accepted[k] <= bid.quantity for every bid.",
+    "Every bid with price < ptf is fully accepted. Every bid with price > ptf is rejected.",
+    "The result does not depend on the order of the input bids (permutation invariance).",
+    "Demand index: the Period with periodNumber t uses DemandSeries.at(t) == values[t-1]."
+  ],
+  "edge_cases": [
+    "Empty bid list: accepted = {}, ptf None, met_demand 0.",
+    "demand == 0: clear_market stays total and returns nothing accepted, ptf None. Zero demand never reaches it in a run because DemandSeries.validate_horizon rejects it (OQ-12).",
+    "Supply shortfall (offered_volume < demand): all accepted, ptf = highest bid price, met_demand = offered_volume.",
+    "Single bid larger than demand: accepted = demand, ptf = its price.",
+    "Bid with quantity 0: accepted 0 and ignored when determining ptf.",
+    "Negative, NaN or infinite price or quantity: ValueError (offers are validated earlier, so this signals a programming error).",
+    "Quantisation residual: largest remainder assigns the remaining quanta to bids with the largest fractional parts, ties broken by ascending key for determinism.",
+    "periodNumber 0 or > len(values): DemandSeries.at raises IndexError with a clear message."
+  ],
+  "test_plan": [
+    "tests/market/test_clearing.py: analiz.md 3.5 table example (400/300/300/0, PTF 90), B4 example with the confirmed oracle, supply shortfall, single bid, zero demand, empty bids, three-way tie with unequal quantities, randomised loop (fixed seed, 200 cases) checking all invariants, PAYASBID/PAYASPTF acceptance prices, exact Decimal sum.",
+    "tests/market/test_demand.py: from_excel on a temporary xlsx with trailing NaN rows, horizon too long, NaN inside the horizon, negative value, at(1) == first row, at(0) raises.",
+    "Model round-trip: Offer with acceptanceAmount Decimal('6264.320') saved and reloaded unchanged.",
+    "Tie split oracle (OQ-18): tied A=100, B=10, remaining D=60 -> B=10, A=50. Three tied bids 10/20/100 with D=60 -> 10/20/30. Sum of allocations equals D exactly after quantisation."
+  ],
+  "research_debug": {
+    "bug_type": "B (B4 and B8 change numerical results)",
+    "bug_impact_required": true,
+    "bug_impact_note": "Equal-price groups occurred in random integer-priced periods and fail-stack interventions. Stored acceptanceAmount values were truncated."
+  },
+  "acceptance_criteria": [
+    "All invariants hold in randomised tests",
+    "Characterization tests updated in a commit carrying BUG-IMPACT"
+  ],
+  "out_of_scope": [
+    "Budget accounting rewrite (runtime_core, using accounting.offer_profit from observation_reward)",
+    "Bulk persistence (runtime_core)"
+  ],
+  "blocked_by_open_questions": [],
+  "approval_note": "Approved by the user on 2026-10-06. Open questions OQ-1..OQ-19 are resolved in ARCHITECTURE.md section 11. The entries in resolved_open_questions are binding and override any wording below that says \"proposal\", \"per OQ-x\" or \"if approved\".",
+  "resolved_open_questions": {
+    "OQ-12": "Zero demand is rejected by DemandSeries.validate_horizon (DemandDataError).",
+    "OQ-18": "Equal-price split = equal share capped at offer quantity (water-filling): remaining demand is split equally among tied offers, an offer whose share exceeds its quantity is capped and the surplus is re-split among the uncapped offers until demand or tied capacity is exhausted. Oracle: tied A=100, B=10, remaining D=60 gives B=10, A=50."
+  },
+  "resolved_items": [
+    {
+      "item": "Equal-price split rule and the B4 test oracle",
+      "reason": "PLAN 1.7 describes a split proportional to bid quantities. For the B4 example (A=100, B=10, D_rem=60) that rule gives A=54.545, B=5.455. The validation example in PLAN 1.7 and analiz.md B4 expects B=10, A=50, which is an equal-share split with quantity caps (each bid receives D_rem/n, a capped bid keeps its full quantity and the rest is redistributed among the others). Both are exact and single-pass. The worker implements the split only after the user confirms which rule is meant (ARCHITECTURE.md OQ-18).",
+      "resolution": "Equal-price split = equal share capped at offer quantity (water-filling): remaining demand is split equally among tied offers, an offer whose share exceeds its quantity is capped and the surplus is re-split among the uncapped offers until demand or tied capacity is exhausted. Oracle: tied A=100, B=10, remaining D=60 gives B=10, A=50."
+    }
+  ],
+  "tie_split_rule": "Equal-price split = equal share capped at offer quantity (water-filling): remaining demand is split equally among tied offers, an offer whose share exceeds its quantity is capped and the surplus is re-split among the uncapped offers until demand or tied capacity is exhausted. Oracle: tied A=100, B=10, remaining D=60 gives B=10, A=50."
+}

@@ -1,0 +1,168 @@
+{
+  "spec_id": "rl_core",
+  "title": "Common RL abstractions: AlgorithmConfig, BaseAgentAlgorithm, ReplayBuffer, RolloutBuffer, networks, registry",
+  "status": "approved",
+  "phase": "Faz 1",
+  "wave": 1,
+  "plan_items": [
+    "1.4 (common interface, common ReplayBuffer, noise outside forward)",
+    "1.5 (common learning_starts)",
+    "1.8 (hyperparameters into AlgorithmConfig, no globals)",
+    "1.9 (params=None uses default config)"
+  ],
+  "defects": [
+    "C3",
+    "C4 (network side)",
+    "B7",
+    "B10 (algorithm globals)",
+    "A2 (params=None)",
+    "A10 (four duplicated ReplayBuffer classes)"
+  ],
+  "decisions": [],
+  "purpose": "Define the contract every policy implements and the shared components, so that the five DRL algorithms and three baselines can be ported in parallel (rl_algorithms) and the runtime (runtime_core) can be written against one interface.",
+  "depends_on": [
+    "faz0_infra"
+  ],
+  "files": {
+    "create": [
+      "abmem/services/algorithms/base.py",
+      "abmem/services/algorithms/algorithm_config.py",
+      "abmem/services/algorithms/replay_buffer.py",
+      "abmem/services/algorithms/networks.py",
+      "abmem/services/algorithms/registry.py",
+      "abmem/services/algorithms/device.py",
+      "tests/algorithms/conftest.py",
+      "tests/algorithms/contract.py",
+      "tests/algorithms/test_algorithm_config.py",
+      "tests/algorithms/test_replay_buffer.py",
+      "tests/algorithms/test_networks.py",
+      "tests/algorithms/test_registry.py"
+    ],
+    "modify": [
+      "abmem/models/enums.py (add AlgorithmType only)",
+      "abmem/services/algorithms/__init__.py (no eager imports of algorithm modules)",
+      "abmem/services/algorithms/agent_algorithm.py (transitional only: move the five 'from .X import ...' lines and the algorithm_utils import from module level into the branches of AgentAlgorithm.__init__/methods, so that importing agent_service, market_service, simulation_service, starter_service and views keeps working while wave 2 rewrites DDPG.py, TD3.py, SAC.py, ppo.py and RDPG.py. No other change. The file is deleted by runtime_core in wave 3.)"
+    ],
+    "delete": [
+      "abmem/constants/config.py (unused, verified by grep)"
+    ]
+  },
+  "public_interfaces": [
+    {
+      "module": "abmem/models/enums.py",
+      "signature": "class AlgorithmType(enum.Enum):\n    DDPG = 0\n    RDPG = 1\n    TD3 = 2\n    SAC = 3\n    PPO = 4\n    RANDOM = 5\n    MARGINAL_COST = 6\n    FIXED_MARKUP = 7",
+      "description": "django_enumfield Enum, consistent with existing enums. Used by Agent.algorithm_type (data_model) and HPOStudy.algorithm_type. The algorithm layer may import abmem.models.enums (enum definitions) but never model classes."
+    },
+    {
+      "module": "abmem/services/algorithms/algorithm_config.py",
+      "signature": "@dataclass(frozen=True)\nclass AlgorithmConfig:\n    gamma: float = 0.99\n    tau: float = 0.005\n    lr_actor: float = 3e-4\n    lr_critic: float = 3e-4\n    batch_size: int = 64\n    buffer_size: int = 100_000\n    learning_starts: int = 64\n    gradient_steps: int = 1\n    hidden_sizes: tuple[int, ...] = (256, 256)\n    exploration_sigma: float = 0.1\n    exploration_sigma_decay: float = 1.0\n    exploration_sigma_min: float = 0.0\n    max_grad_norm: float | None = None\n\n    def __post_init__(self) -> None\n    @classmethod\n    def from_dict(cls, params: Mapping[str, Any] | None) -> Self\n    def to_dict(self) -> dict[str, Any]\n    def replace(self, **changes: Any) -> Self\n    @classmethod\n    def default_search_bounds(cls) -> dict[str, tuple[float, float, Literal['linear', 'log', 'int']]]",
+      "description": "Frozen. __post_init__ validates ranges (0 < gamma < 1, 0 < tau <= 1, lr > 0, batch_size >= 1, buffer_size >= batch_size, learning_starts >= batch_size, gradient_steps >= 1, sigma >= 0, 0 < decay <= 1, all floats finite). from_dict(None) returns defaults (A2). Unknown keys raise ValueError naming the key. Integer fields accept floats with integral value from the optimizer, other floats raise. Defaults are the published defaults (Lillicrap 2016, Fujimoto 2018, Haarnoja 2018, Schulman 2017) pending OQ-3."
+    },
+    {
+      "module": "abmem/services/algorithms/algorithm_config.py",
+      "signature": "class DDPGConfig(AlgorithmConfig)\nclass TD3Config(AlgorithmConfig): policy_noise: float = 0.2, noise_clip: float = 0.5, policy_delay: int = 2\nclass SACConfig(AlgorithmConfig): lr_alpha: float = 3e-4, initial_alpha: float = 0.2, target_entropy: float | None = None\nclass PPOConfig(AlgorithmConfig): gae_lambda: float = 0.95, clip_eps: float = 0.2, epochs: int = 10, rollout_length: int = 64, minibatch_size: int = 32, entropy_coef: float = 0.0, value_coef: float = 0.5, initial_log_std: float = 0.0\nclass RDPGConfig(AlgorithmConfig): seq_len: int = 24, lstm_hidden: int = 64\nclass RandomConfig(AlgorithmConfig)\nclass MarginalCostConfig(AlgorithmConfig)\nclass FixedMarkupConfig(AlgorithmConfig): markup: float = 0.0\nCONFIG_CLASSES: Final[Mapping[AlgorithmType, type[AlgorithmConfig]]]",
+      "description": "All frozen dataclasses. PPO validation: rollout_length >= minibatch_size, 0 <= gae_lambda <= 1, clip_eps > 0. RDPG: seq_len >= 2. FixedMarkup: markup > -1. Defaults: PPO rollout_length = 64 (OQ-4), FixedMarkup markup = 0.10 on (fuelCost + staticCost) (OQ-6), gradient_steps_per_period = 1 and learning_starts = 64 (OQ-3)."
+    },
+    {
+      "module": "abmem/services/algorithms/base.py",
+      "signature": "@dataclass(frozen=True)\nclass PolicySpec:\n    obs_dim: int\n    action_dim: int\n    price_low: float\n    price_high: float\n    plant_variable_costs: tuple[float, ...]\n    plant_static_costs: tuple[float, ...]",
+      "description": "Validated in __post_init__: obs_dim >= 1, action_dim >= 1, price_high > price_low, cost tuples have length action_dim and finite values."
+    },
+    {
+      "module": "abmem/services/algorithms/base.py",
+      "signature": "@dataclass(frozen=True)\nclass ActionResult:\n    u: np.ndarray\n    log_prob: float | None = None\n    value: float | None = None\n    pre_squash: np.ndarray | None = None",
+      "description": "u is float32, shape (action_dim,), all values in [-1, 1] and finite (checked in __post_init__)."
+    },
+    {
+      "module": "abmem/services/algorithms/base.py",
+      "signature": "@dataclass(frozen=True)\nclass Transition:\n    obs: np.ndarray\n    action: np.ndarray\n    reward: float\n    next_obs: np.ndarray\n    terminated: bool = False\n    behaviour_log_prob: float | None = None\n    behaviour_value: float | None = None\n    pre_squash: np.ndarray | None = None\n    intervened: bool = False",
+      "description": "obs and next_obs are normalised float32 (obs_dim,). action is the applied normalised action. reward is a float (never int, C1). __post_init__ rejects non-finite values."
+    },
+    {
+      "module": "abmem/services/algorithms/base.py",
+      "signature": "@dataclass(frozen=True)\nclass UpdateStats:\n    critic_loss: float | None\n    actor_loss: float | None\n    mean_q: float | None\n    extra: Mapping[str, float] = field(default_factory=dict)",
+      "description": "Returned by update() when at least one gradient step was taken."
+    },
+    {
+      "module": "abmem/services/algorithms/base.py",
+      "signature": "class BaseAgentAlgorithm(abc.ABC):\n    algorithm_type: ClassVar[AlgorithmType]\n    is_learning: ClassVar[bool]\n    is_on_policy: ClassVar[bool]\n    config_class: ClassVar[type[AlgorithmConfig]]\n\n    def __init__(self, spec: PolicySpec, config: AlgorithmConfig, rng: np.random.Generator) -> None\n    @abc.abstractmethod\n    def select_action(self, obs: np.ndarray, explore: bool) -> ActionResult\n    def observe(self, transition: Transition) -> None\n    def update(self) -> UpdateStats | None\n    def end_period(self) -> None\n    def set_frozen(self, frozen: bool) -> None\n    def exploration_scale(self) -> float | None\n    @property\n    def ready_to_learn(self) -> bool\n    @property\n    def frozen(self) -> bool",
+      "description": "Template base class. __init__ checks isinstance(config, self.config_class). observe/update are no-ops when frozen. update returns None unless ready_to_learn (len(buffer) >= config.learning_starts) (B7). end_period applies exploration decay once per period (sigma = max(sigma_min, sigma * decay)). select_action is called under torch.no_grad() and adds exploration noise only when explore is True (C3). Networks are moved to device.get_device()."
+    },
+    {
+      "module": "abmem/services/algorithms/replay_buffer.py",
+      "signature": "class ReplayBuffer:\n    def __init__(self, obs_dim: int, action_dim: int, capacity: int, rng: np.random.Generator) -> None\n    def add(self, t: Transition) -> None\n    def __len__(self) -> int\n    def sample(self, batch_size: int, device: torch.device) -> 'Batch'\n    def sample_sequences(self, batch_size: int, seq_len: int, device: torch.device) -> 'SequenceBatch'",
+      "description": "Numpy ring buffer (float32 obs, actions, rewards, next_obs, terminated, intervened). sample draws indices without replacement when len >= batch_size, else raises ValueError (callers check ready_to_learn). sample_sequences returns windows of seq_len consecutive stored transitions that do not cross the ring-buffer write position, shape (B, L, dim). Single shared implementation (A10)."
+    },
+    {
+      "module": "abmem/services/algorithms/replay_buffer.py",
+      "signature": "class RolloutBuffer:\n    def __init__(self, obs_dim: int, action_dim: int, length: int) -> None\n    def add(self, t: Transition) -> None\n    def full(self) -> bool\n    def clear(self) -> None\n    def compute_gae(self, last_value: float, gamma: float, gae_lambda: float) -> tuple[np.ndarray, np.ndarray]",
+      "description": "Fixed-length on-policy storage. add requires behaviour_log_prob, behaviour_value and pre_squash (ValueError otherwise). compute_gae implements Schulman et al. 2016 eq. 16: A_t = sum_l (gamma * lambda)^l delta_{t+l}, delta_t = r_t + gamma * (1 - terminated_t) * V(s_{t+1}) - V(s_t), returns (advantages, returns = advantages + values). Masks for intervened steps are exposed for PPO."
+    },
+    {
+      "module": "abmem/services/algorithms/networks.py",
+      "signature": "def mlp(in_dim: int, out_dim: int, hidden: Sequence[int], activation: type[nn.Module] = nn.ReLU) -> nn.Sequential\nclass DeterministicActor(nn.Module): forward(obs: Tensor) -> Tensor  # tanh output in [-1, 1]\nclass QCritic(nn.Module): forward(obs: Tensor, action: Tensor) -> Tensor  # shape (B, 1)\nclass RecurrentDeterministicActor(nn.Module): forward(obs_seq: Tensor, hidden: tuple[Tensor, Tensor] | None = None) -> tuple[Tensor, tuple[Tensor, Tensor]]\nclass RecurrentQCritic(nn.Module): forward(obs_seq: Tensor, action_seq: Tensor, hidden: tuple[Tensor, Tensor] | None = None) -> Tensor  # (B, L, 1)\ndef soft_update(target: nn.Module, source: nn.Module, tau: float) -> None\ndef hard_update(target: nn.Module, source: nn.Module) -> None",
+      "description": "No noise, no clamp, no per-sample normalisation inside forward (C3, C4). Final actor layer initialised U(-3e-3, 3e-3) (Lillicrap 2016, sec. 7). RecurrentQCritic consumes the per-step action sequence (B3). hidden None means zero initial state."
+    },
+    {
+      "module": "abmem/services/algorithms/device.py",
+      "signature": "def get_device() -> torch.device",
+      "description": "cuda if torch.cuda.is_available() else cpu. Single place for device selection."
+    },
+    {
+      "module": "abmem/services/algorithms/registry.py",
+      "signature": "ALGORITHM_CLASS_PATHS: Final[Mapping[AlgorithmType, str]]\nBASELINE_TYPES: Final[frozenset[AlgorithmType]]\ndef get_algorithm_class(algorithm_type: AlgorithmType) -> type[BaseAgentAlgorithm]\ndef config_class(algorithm_type: AlgorithmType) -> type[AlgorithmConfig]\ndef default_config(algorithm_type: AlgorithmType) -> AlgorithmConfig\ndef build_policy(algorithm_type: AlgorithmType, spec: PolicySpec, params: Mapping[str, Any] | None, rng: np.random.Generator) -> BaseAgentAlgorithm",
+      "description": "ALGORITHM_CLASS_PATHS pre-declares all eight entries as 'module:Class' strings (DDPG -> 'abmem.services.algorithms.DDPG:DDPGAlgorithm', TD3 -> 'abmem.services.algorithms.TD3:TD3Algorithm', SAC -> 'abmem.services.algorithms.SAC:SACAlgorithm', PPO -> 'abmem.services.algorithms.ppo:PPOAlgorithm', RDPG -> 'abmem.services.algorithms.RDPG:RDPGAlgorithm', RANDOM, MARGINAL_COST, FIXED_MARKUP -> 'abmem.services.algorithms.baselines:RandomPolicy', ':MarginalCostPolicy', ':FixedMarkupPolicy'). Lazy import via importlib so the rl_algorithms work packages never edit this file. BASELINE_TYPES = {RANDOM, MARGINAL_COST, FIXED_MARKUP}. build_policy = cls(spec, config_class(t).from_dict(params), rng)."
+    }
+  ],
+  "test_contract_helper": {
+    "module": "tests/algorithms/contract.py",
+    "signature": "def assert_policy_contract(policy: BaseAgentAlgorithm, spec: PolicySpec, n_steps: int = 300) -> None",
+    "description": "Reusable contract test used by every rl_algorithms package: output shape == action_dim, values in [-1, 1], finite, explore=False deterministic, no update before learning_starts, update returns UpdateStats after learning_starts for learning policies, frozen policy does not change parameters, observe accepts float rewards and stores them unchanged as float32."
+  },
+  "data_model_changes": "AlgorithmType enum only (no field, no migration)",
+  "migrations": "none",
+  "invariants": [
+    "No module-level mutable state in the new modules of services/algorithms (hyperparameters exist only in config instances).",
+    "Every buffer stores normalised observations and normalised actions in float32.",
+    "Rewards are stored as float32 without rounding (C1).",
+    "Network forward passes are deterministic functions of inputs and parameters.",
+    "After this spec, 'import abmem.services.agent.agent_service' succeeds regardless of the state of DDPG.py, TD3.py, SAC.py, ppo.py, RDPG.py."
+  ],
+  "edge_cases": [
+    "from_dict with legacy uppercase keys (e.g. 'NOISE_STD'): ValueError listing accepted keys (legacy ABC logs are not imported).",
+    "from_dict with NaN or Inf values: ValueError.",
+    "ReplayBuffer.sample with fewer stored transitions than batch_size: ValueError.",
+    "ReplayBuffer wrap-around: oldest entries overwritten, sample_sequences never returns a window spanning the overwrite boundary.",
+    "sample_sequences when len < seq_len: ValueError.",
+    "RolloutBuffer.add beyond length: ValueError (caller must update and clear).",
+    "compute_gae with length 1 and with terminated flags all False.",
+    "action_dim = 1 and action_dim = 5 (multi-plant agents, A1).",
+    "Unknown AlgorithmType value: KeyError with message."
+  ],
+  "test_plan": [
+    "test_algorithm_config.py: defaults validate, from_dict(None), unknown key, integral float handling for int fields, invalid ranges, round trip to_dict/from_dict, default_search_bounds keys are fields of the class.",
+    "test_replay_buffer.py: add/sample shapes and dtypes, without-replacement sampling, wrap-around, sequence window contiguity, GAE against a hand-computed 3-step example.",
+    "test_networks.py: tanh range, actor gradient non-zero for a non-trivial loss, final layer init range, recurrent critic per-step action use (changing the action at step k changes only outputs at steps >= k).",
+    "test_registry.py: config_class/default_config for all eight types. Class resolution tests marked xfail until rl_algorithms lands (wave-2 integrator removes the markers).",
+    "Import smoke test: importing abmem.views succeeds (guards the transitional agent_algorithm.py change)."
+  ],
+  "research_debug": {
+    "bug_type": "C (C3, C4) and B (B7, B10)",
+    "bug_impact_required": false,
+    "bug_impact_note": "New code only. BUG-IMPACT is carried by the rl_algorithms and runtime_core commits that switch the runtime to these components."
+  },
+  "acceptance_criteria": [
+    "All tests green except registry class-resolution tests marked xfail until wave 2"
+  ],
+  "out_of_scope": [
+    "Algorithm update rules (rl_algorithms)",
+    "Policy checkpointing (not in PLAN)"
+  ],
+  "blocked_by_open_questions": [],
+  "approval_note": "Approved by the user on 2026-10-06. Open questions OQ-1..OQ-19 are resolved in ARCHITECTURE.md section 11. The entries in resolved_open_questions are binding and override any wording below that says \"proposal\", \"per OQ-x\" or \"if approved\".",
+  "resolved_open_questions": {
+    "OQ-3": "Defaults: 1 gradient step per period (gradient_steps_per_period = 1, HPO-searchable), learning_starts = 64.",
+    "OQ-4": "PPO rollout_length default 64.",
+    "OQ-6": "FIXED_MARKUP price = (fuelCost + staticCost) per MWh * (1 + markup), default markup 0.10, configurable."
+  }
+}

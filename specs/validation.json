@@ -1,0 +1,132 @@
+{
+  "spec_id": "validation",
+  "title": "Per-algorithm smoke tests (1.14) and end-to-end validation with multi-seed experiment (Faz 3)",
+  "status": "approved",
+  "phase": "Faz 1 (1.14) and Faz 3",
+  "wave": "4 (package smoke), 7 (package e2e)",
+  "plan_items": [
+    "1.14",
+    "Faz 3"
+  ],
+  "defects": [
+    "A9",
+    "C9"
+  ],
+  "decisions": [],
+  "purpose": "Guard every algorithm and comparison policy against NaN/Inf, empty offers and boundary prices in short scenarios, then validate the full user journey and run the multi-seed comparison that PLAN Faz 3 requires before any learning claim.",
+  "depends_on": {
+    "smoke": [
+      "runtime_core",
+      "rl_algorithms"
+    ],
+    "e2e": [
+      "algorithm_selection_ui",
+      "agent_library",
+      "hpo"
+    ]
+  },
+  "work_packages": [
+    {
+      "id": "validation.smoke",
+      "wave": 4,
+      "files": {
+        "create": [
+          "tests/smoke/__init__.py",
+          "tests/smoke/conftest.py",
+          "tests/smoke/test_algorithm_smoke.py"
+        ],
+        "modify": [],
+        "delete": []
+      },
+      "scenarios": [
+        "For each AlgorithmType: 2 agents (one with 1 plant, one with 3 plants), PAYASPTF and PAYASBID, 60 periods, default lags [1, 24] (OQ-7): checks acting, offers, logging (T - 1 AgentStepLog rows per agent) and the pre-learning random phase for t <= 24.",
+        "For each learning AlgorithmType: the same 60-period scenario with the TEST-ONLY override batch_size = 8, learning_starts = 8 (OQ-7) so that gradient updates happen: checks the learning path. Production defaults stay at OQ-3."
+      ],
+      "checks": [
+        "Simulation FINISHED.",
+        "Exactly one Offer per plant per period, offerPrice within [lowerBidBound, upperBidBound].",
+        "No NaN/Inf in offers, budgets, PTF and AgentStepLog float fields (extra['non_finite'] never present).",
+        "Learning runs: AgentStepLog.learning_active True from the expected period, critic_loss not None after it.",
+        "Fail-stack enabled run (DDPG, L = 2): interventions logged only after 2 consecutive failures.",
+        "Fail-stack disabled runs: no interventions, share of integer-valued prices close to the share expected from the price quantum (PLAN 1.5 check)."
+      ],
+      "marker": "pytest.mark.smoke, runtime target under 10 minutes on CPU for the full matrix"
+    },
+    {
+      "id": "validation.e2e",
+      "wave": 7,
+      "files": {
+        "create": [
+          "tests/e2e/__init__.py",
+          "tests/e2e/test_user_journey.py",
+          "experiments/README.md",
+          "experiments/multiseed_config.yaml",
+          "abmem/management/commands/run_experiment.py"
+        ],
+        "modify": [
+          "analiz.md (closing status of each finding, user approval required for wording)",
+          "ARCHITECTURE.md (status update of modules)"
+        ],
+        "delete": []
+      },
+      "journey": "Create a scenario from library agents -> run -> watch status -> start an HPO study -> watch -> apply best parameters (if OQ-9 resolved), all through the Django test client with synchronous process patches.",
+      "experiment": "Each learning algorithm against RANDOM, MARGINAL_COST and FIXED_MARKUP under identical scenarios, fail-stack disabled, N seeds (N set by the user under the statistical-validity and fair-comparison skills). Report mean and confidence intervals of the evaluation metrics. A learning claim is made only if the trained agent separates from the comparison conditions. The experiment design itself is planned with @experiment-runner and the empirical-rigor skill before execution."
+    }
+  ],
+  "files": {
+    "create": [
+      "tests/smoke/__init__.py",
+      "tests/smoke/conftest.py",
+      "tests/smoke/test_algorithm_smoke.py",
+      "tests/e2e/__init__.py",
+      "tests/e2e/test_user_journey.py",
+      "experiments/README.md",
+      "experiments/multiseed_config.yaml",
+      "abmem/management/commands/run_experiment.py"
+    ],
+    "modify": [
+      "analiz.md",
+      "ARCHITECTURE.md"
+    ],
+    "delete": []
+  },
+  "public_interfaces": [
+    {
+      "module": "abmem/management/commands/run_experiment.py",
+      "signature": "python manage.py run_experiment --config experiments/multiseed_config.yaml",
+      "description": "Clones the configured proxy scenario once per (algorithm, seed), runs serially or with a process pool, writes a CSV of evaluation metrics per run. No result interpretation in code."
+    }
+  ],
+  "data_model_changes": "none",
+  "migrations": "none",
+  "invariants": [
+    "Smoke tests do not depend on network or GPU",
+    "Experiment runs never reuse HPO search seeds"
+  ],
+  "edge_cases": [
+    "Agent whose variable cost exceeds upperBidBound (MARGINAL_COST clipped to the bound)",
+    "Scenario with total capacity below demand (supply shortfall every period)",
+    "lowerBidBound = 0"
+  ],
+  "test_plan": [
+    "As listed in work packages"
+  ],
+  "research_debug": {
+    "bug_type": "none (tests)",
+    "bug_impact_required": false
+  },
+  "acceptance_criteria": [
+    "Smoke matrix green",
+    "E2E journey green",
+    "Experiment report produced and reviewed by the user"
+  ],
+  "out_of_scope": [
+    "Paper writing"
+  ],
+  "blocked_by_open_questions": [],
+  "approval_note": "Approved by the user on 2026-10-06. Open questions OQ-1..OQ-19 are resolved in ARCHITECTURE.md section 11. The entries in resolved_open_questions are binding and override any wording below that says \"proposal\", \"per OQ-x\" or \"if approved\".",
+  "resolved_open_questions": {
+    "OQ-7": "Smoke tests use 60 periods with default lags [1, 24]. Expected AgentStepLog rows per agent = T - 1. Learning-path smoke runs use a TEST-ONLY config override batch_size = 8, learning_starts = 8 so that updates happen within 60 periods. Production defaults (OQ-3) are unchanged.",
+    "OQ-9": "Agent.algorithm_params (JSON) plus AlgorithmDefault model, both added by data_model (migration 0012). Effective params = AlgorithmDefault for the type, overridden by Agent.algorithm_params, overridden by HPO overrides."
+  }
+}

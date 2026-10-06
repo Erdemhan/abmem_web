@@ -1,0 +1,91 @@
+{
+  "spec_id": "algorithm_selection_ui",
+  "title": "Per-agent algorithm selection and fail-stack toggle in forms, scenario editors, agent list and watch screen",
+  "status": "approved",
+  "phase": "Faz 2",
+  "wave": 4,
+  "plan_items": [
+    "2.1 (UI and payload part, copy test)"
+  ],
+  "defects": [],
+  "decisions": [
+    "K3"
+  ],
+  "purpose": "Expose Agent.algorithm_type and the four failstack_* fields wherever an agent is created, edited, listed or watched. The runtime already builds policies from these fields (runtime_core).",
+  "depends_on": [
+    "data_model",
+    "runtime_core",
+    "resource_filter (same templates, earlier wave)"
+  ],
+  "files": {
+    "create": [
+      "tests/views/__init__.py",
+      "tests/views/test_algorithm_selection.py",
+      "abmem/templatetags/__init__.py",
+      "abmem/templatetags/abmem_choices.py"
+    ],
+    "modify": [
+      "abmem/forms.py (AgentForm fields: algorithm_type, failstack_enabled, failstack_limit, failstack_delta, failstack_min_margin, clean() disables fail-stack for baseline algorithms)",
+      "abmem/views.py (create_simulation and update_simulation parse algorithm_type and failstack object per agent, get_simulation_status returns algorithm_type name and failstack_enabled per agent, agent_list passes choices)",
+      "abmem/templates/pages/simulation-create.html (algorithm select + fail-stack switch with L, delta, m_min inputs per agent row)",
+      "abmem/templates/pages/simulation-update.html (same, prefilled)",
+      "abmem/templates/pages/agent-list.html (algorithm and fail-stack columns)",
+      "abmem/static/assets/components/agent-form.html (algorithm select + fail-stack switch)",
+      "abmem/templates/pages/watch_simulation.html (algorithm and fail-stack state per agent)"
+    ],
+    "delete": []
+  },
+  "public_interfaces": [
+    {
+      "module": "abmem/templatetags/abmem_choices.py",
+      "signature": "@register.simple_tag\ndef algorithm_choices() -> list[tuple[int, str, bool]]",
+      "description": "(value, label, is_baseline) for every AlgorithmType, rendered from registry.BASELINE_TYPES so the template does not hard-code which types disable the fail-stack switch."
+    },
+    {
+      "module": "abmem/views.py",
+      "signature": "def _parse_agent_algorithm(agent_data: Mapping[str, Any]) -> dict[str, Any]",
+      "description": "Returns validated {algorithm_type, failstack_enabled, failstack_limit, failstack_delta, failstack_min_margin}. Missing algorithm_type -> DDPG default. Missing failstack -> disabled with model defaults. Baseline + enabled -> validation error 400. Non-numeric or out-of-range values -> 400 with field errors."
+    },
+    {
+      "module": "abmem/views.py",
+      "signature": "get_simulation_status JSON agents[i] += {\"algorithm\": str, \"failstack_enabled\": bool}",
+      "description": "Additive change, existing keys unchanged."
+    }
+  ],
+  "ui_contract": {
+    "algorithm_select": "One select per agent with all AlgorithmType labels, default DDPG.",
+    "failstack_switch": "Checkbox switch next to the select. When on, inputs L (integer >= 1, default 6), delta (TL/MWh >= 0, default 15), m_min (default 0) are visible. When the selected algorithm is a baseline (RANDOM, MARGINAL_COST, FIXED_MARKUP) the switch is disabled and unchecked.",
+    "watch_screen": "Agent table shows the algorithm label and a fail-stack on/off badge."
+  },
+  "data_model_changes": "none",
+  "migrations": "none",
+  "invariants": [
+    "No path saves a baseline agent with failstack_enabled True.",
+    "Defaults in the UI equal the model defaults (rendered from the model field defaults, not duplicated in JS)."
+  ],
+  "edge_cases": [
+    "algorithm_type value outside the enum: 400.",
+    "failstack_limit 0, negative delta, NaN strings: 400.",
+    "Fail-stack disabled but values sent: values stored (they keep the user's settings for later), rule inactive.",
+    "Existing agents created before 0006: show DDPG and fail-stack off."
+  ],
+  "test_plan": [
+    "test_algorithm_selection.py: create scenario with a DDPG agent and a PPO agent (fail-stack on, L = 3), run it with the synchronous starter patch, assert each run agent's runtime_policy class (DDPGAlgorithm, PPOAlgorithm) and FailStackParams (PLAN 2.1 validation). Baseline with fail-stack enabled rejected. Status endpoint returns algorithm and fail-stack fields. Copy test: run agents carry algorithm_type and failstack_* of the scenario agents."
+  ],
+  "research_debug": {
+    "bug_type": "A",
+    "bug_impact_required": false
+  },
+  "acceptance_criteria": [
+    "PLAN 2.1 validation passes"
+  ],
+  "out_of_scope": [
+    "Library selection paths (agent_library ui)",
+    "Per-agent hyperparameters (OQ-9)"
+  ],
+  "blocked_by_open_questions": [],
+  "approval_note": "Approved by the user on 2026-10-06. Open questions OQ-1..OQ-19 are resolved in ARCHITECTURE.md section 11. The entries in resolved_open_questions are binding and override any wording below that says \"proposal\", \"per OQ-x\" or \"if approved\".",
+  "resolved_open_questions": {
+    "OQ-9": "Agent.algorithm_params (JSON) plus AlgorithmDefault model, both added by data_model (migration 0012). Effective params = AlgorithmDefault for the type, overridden by Agent.algorithm_params, overridden by HPO overrides."
+  }
+}

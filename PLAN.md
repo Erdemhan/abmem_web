@@ -1,6 +1,6 @@
 # Çalışma Planı ve TODO
 
-**Durum:** kararlar onaylandı (2026-10-06). Sadece madde 1.5'teki fail-stack formülü onay bekliyor.
+**Durum:** kararlar, fail-stack formülü, `ARCHITECTURE.md` ve `specs/` onaylandı (2026-10-06). Architect'in açık soruları (OQ-1–OQ-19) `ARCHITECTURE.md`'de "Resolved decisions" bölümünde. Uygulama sırası: `specs/EXECUTION_ORDER.md`.
 **Kaynak:** `analiz.md` bulguları (ID'ler oradaki C/B/A numaralarıdır) ve kullanıcının 4 özellik isteği.
 **Öncelik:** önce bulgular (Faz 1), sonra özellikler (Faz 2). Faz 0 ikisinin de önkoşuludur.
 **Kurallar:**
@@ -129,7 +129,7 @@ Her maddede: **ne yapılacak**, **nasıl doğrulanacak**. Type B/C maddeleri ayr
 - **Doğrulama:** algoritma başına unit test (çıktı şekli, hedef aksiyon aralığı, PPO'da ilk epoch'ta oran = 1).
 
 ### 1.7 Piyasa takası (B4, B8, A8)
-- [ ] Eşit fiyat grubunda orantılı (pro-rata) bölüştürme: kalan talep, gruptaki tekliflere miktarlarıyla orantılı dağıtılır. Özyinelemeli fonksiyon kaldırılır.
+- [ ] Eşit fiyat grubunda **eşit pay, teklif miktarıyla sınırlı** bölüştürme (OQ-18 = b): kalan talep gruptaki tekliflere eşit bölünür, payı miktarını aşan teklif miktarıyla sınırlanır ve artan talep kalan teklifler arasında yeniden eşit bölünür. Özyinelemeli fonksiyon kaldırılır.
 - [ ] `Offer.acceptanceAmount` (ve gerekirse `Period.metDemand`) `DecimalField`'a çevrilir, migration yazılır (B8).
 - [ ] Talep verisi doğrulaması: `periodNumber` veri uzunluğunu aşıyorsa veya NaN varsa simülasyon başlamadan anlaşılır bir hata verilir. İndeksleme `periodNumber - 1` ile yapılır (A8).
 - **Doğrulama:** `analiz.md` B4 örneği (A=100, B=10, D=60 → B=10, A=50), arz yetersizliği, tek teklif, sıfır talep testleri.

@@ -1,0 +1,117 @@
+{
+  "spec_id": "resource_filter",
+  "title": "Agent-type-filtered resource selection with one server-side rule and CCGT data fix",
+  "status": "approved",
+  "phase": "Faz 2 (runs in parallel with Faz 1)",
+  "wave": 1,
+  "plan_items": [
+    "2.2"
+  ],
+  "defects": [],
+  "decisions": [
+    "K6"
+  ],
+  "purpose": "An agent of type RENEWABLE, FOSSIL or NUCLEAR may only own plants whose resource has the same energy type. HYBRID may own any. The rule exists in exactly one function and is enforced by every write path and by the UI.",
+  "depends_on": [
+    "faz0_infra"
+  ],
+  "files": {
+    "create": [
+      "abmem/services/agent/resource_rules.py",
+      "abmem/migrations/0004_resource_ccgt_fossil.py",
+      "abmem/management/__init__.py",
+      "abmem/management/commands/__init__.py",
+      "abmem/management/commands/check_resource_rules.py",
+      "tests/test_resource_rules.py",
+      "tests/test_views_resource_filter.py"
+    ],
+    "modify": [
+      "abmem/forms.py (AgentForm accepts plant_resources kwarg and validates in clean())",
+      "abmem/views.py (create_simulation, update_simulation, create_agent_and_related, update_agent: call validate_agent_resources before any write, wrap writes in transaction.atomic, return 400 JSON on violation)",
+      "abmem/templates/pages/simulation-create.html (option data-energy-type, disabled resource select until type chosen, filter and clear incompatible rows with warning)",
+      "abmem/templates/pages/simulation-update.html (same)",
+      "abmem/static/assets/components/agent-form.html (same for the library agent form)",
+      "abmem/templates/pages/agent-list.html (only if it renders its own resource select, line ~206)"
+    ],
+    "delete": []
+  },
+  "public_interfaces": [
+    {
+      "module": "abmem/services/agent/resource_rules.py",
+      "signature": "def allowed_energy_types(agent_type: AgentType) -> frozenset[EnergyType]",
+      "description": "RENEWABLE -> {RENEWABLE}, FOSSIL -> {FOSSIL}, NUCLEAR -> {NUCLEAR}, HYBRID -> all EnergyType members. Raises ValueError for an unknown value."
+    },
+    {
+      "module": "abmem/services/agent/resource_rules.py",
+      "signature": "def validate_agent_resources(agent_type: AgentType, resources: Sequence[Resource]) -> None",
+      "description": "Raises django.core.exceptions.ValidationError({'plants': [...]}) listing every resource whose energyType is not allowed, with resource names and the agent type in the message. Empty sequence raises ValidationError('At least one plant is required')."
+    },
+    {
+      "module": "abmem/services/agent/resource_rules.py",
+      "signature": "def find_violations() -> list[tuple[int, str, str, list[str]]]",
+      "description": "Scans all agents and returns (agent_id, agent_name, agent_type_name, offending_resource_names). Used by the management command."
+    },
+    {
+      "module": "abmem/management/commands/check_resource_rules.py",
+      "signature": "python manage.py check_resource_rules [--fail-on-violation]",
+      "description": "Prints violations. Exit code 1 with --fail-on-violation if any exist."
+    },
+    {
+      "module": "abmem/forms.py",
+      "signature": "class AgentForm(forms.ModelForm): def __init__(self, *args: Any, plant_resources: Sequence[Resource] | None = None, **kwargs: Any) -> None",
+      "description": "clean() calls validate_agent_resources when plant_resources is given."
+    }
+  ],
+  "data_model_changes": "Data only: Resource 'CCGT' energyType RENEWABLE -> FOSSIL.",
+  "migrations": [
+    {
+      "name": "0004_resource_ccgt_fossil",
+      "depends_on": "0003_remove_agent_seed",
+      "kind": "RunPython data migration with reverse function",
+      "notes": "Uses apps.get_model. Updates Resource where name iexact 'CCGT' and energyType == 0 to 1. No-op if not found. Reverse sets it back to 0. Runs in parallel with 0004_offer_period_decimal (market_clearing). The wave-1 merge step creates 0005_merge_wave1."
+    }
+  ],
+  "ui_contract": {
+    "option_attribute": "<option value='{{ resource.id }}' data-energy-type='{{ resource.energyType.value }}'>",
+    "behaviour": [
+      "Resource selects are disabled until an agent type is selected.",
+      "On type change, options not in allowed_energy_types are hidden and disabled. Existing plant rows with an incompatible resource are removed after a visible warning listing them.",
+      "The JS mapping of agent type to allowed energy types is rendered from the server (json_script of allowed_energy_types for each AgentType) so the rule is not duplicated by hand in JavaScript."
+    ],
+    "error_response": "HTTP 400, JSON {\"errors\": {\"plants\": [\"...\"]}}. The page shows the message and keeps the user's input."
+  },
+  "invariants": [
+    "allowed_energy_types is the only place where the mapping is defined (Python), the template receives it serialised.",
+    "No agent with a violating plant can be created or updated through any view.",
+    "All writes of one request are atomic: a violation leaves no partial simulation, market, agent or portfolio."
+  ],
+  "edge_cases": [
+    "Agent type missing or not an int in JSON payload: 400 with field error.",
+    "Resource id that does not exist: 400 (Resource.DoesNotExist mapped to a field error), no 500.",
+    "Empty plant list: 400.",
+    "HYBRID with resources of all three energy types: accepted.",
+    "Duplicate resource rows in one agent: allowed by this spec (not a rule in PLAN).",
+    "Existing violating agents: listed by the management command. After 0004, scenarios 529 and 530 CCGT agents are expected to be compliant (verify, report if not)."
+  ],
+  "test_plan": [
+    "tests/test_resource_rules.py: full 4x3 matrix of AgentType x EnergyType for allowed_energy_types and validate_agent_resources, empty list, message content.",
+    "tests/test_views_resource_filter.py: POST create_simulation with a FOSSIL agent holding a RENEWABLE resource -> 400 and no Simulation row created. Same for update_simulation, create_agent_and_related, update_agent. Valid combinations -> 200/302.",
+    "Migration test: apply 0004 on a DB with CCGT RENEWABLE -> FOSSIL, reverse restores.",
+    "Management command test with call_command on a fixture containing one violation."
+  ],
+  "research_debug": {
+    "bug_type": "A (data fix K6 does not change past results because no non-proxy runs remain)",
+    "bug_impact_required": false
+  },
+  "acceptance_criteria": [
+    "View tests green",
+    "check_resource_rules reports 0 violations on the dev DB after migration"
+  ],
+  "out_of_scope": [
+    "Algorithm selection fields (algorithm_selection_ui)",
+    "Library flows (agent_library)"
+  ],
+  "blocked_by_open_questions": [],
+  "approval_note": "Approved by the user on 2026-10-06. Open questions OQ-1..OQ-19 are resolved in ARCHITECTURE.md section 11. The entries in resolved_open_questions are binding and override any wording below that says \"proposal\", \"per OQ-x\" or \"if approved\".",
+  "resolved_open_questions": {}
+}
