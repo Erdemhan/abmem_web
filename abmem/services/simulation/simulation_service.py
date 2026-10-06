@@ -12,6 +12,10 @@ import os
 import random
 import numpy as np
 import torch
+import logging
+from ...services.market.demand import DemandDataError
+
+logger = logging.getLogger(__name__)
 
 SEED = 17081999  # tüm sistem için ortak seed
 
@@ -77,9 +81,16 @@ def run(simulation: Simulation, hyperparams=None) -> bool:
         simulation.currentPeriod += 1  # Start the simulation if it hasn't started yet
 
     if simulation.market.state == MarketState.CREATED:
-        MarketService.init(
-            simulation.market, params=hyperparams
-        )  # Initialize the market if it's in the CREATED state
+        try:
+            MarketService.init(
+                simulation.market, params=hyperparams
+            )  # Initialize the market if it's in the CREATED state
+        except DemandDataError as error:
+            # Invalid demand data: the run never starts and stays in CREATED.
+            logger.error("Simulation %s not started: %s", simulation.id, error)
+            simulation.state = SimulationState.CREATED
+            simulation.save()
+            return tOffers
         # print("Market initialized")
 
     simulation.save()  # Save the updated simulation state
@@ -155,7 +166,11 @@ def run(simulation: Simulation, hyperparams=None) -> bool:
                 "offerPrice": str(offer.offerPrice),
                 "acceptance": offer.acceptance,
                 "acceptancePrice": str(offer.acceptancePrice),
-                "acceptanceAmount": offer.acceptanceAmount,
+                "acceptanceAmount": (
+                    str(offer.acceptanceAmount)
+                    if offer.acceptanceAmount is not None
+                    else None
+                ),
                 "budget": str(agent_budget) if agent_budget is not None else None,
             }
         )

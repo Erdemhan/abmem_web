@@ -42,7 +42,7 @@ class Period(Base):
     market = models.ForeignKey(Market, on_delete=models.CASCADE, null=False)
     periodNumber = models.IntegerField(null=False)
     demand = models.IntegerField()
-    metDemand = models.IntegerField()
+    metDemand = models.DecimalField(max_digits=12, decimal_places=3)
     marketVolume = models.IntegerField()
     ptf = models.DecimalField(decimal_places=2, max_digits=7, null=True)
     estimatedPtf = models.DecimalField(decimal_places=2, max_digits=7, null=True)
@@ -66,7 +66,7 @@ class Offer(Base):
     offerPrice = models.DecimalField(decimal_places=2, max_digits=7, null=False)
     acceptance = models.BooleanField(null=True)
     acceptancePrice = models.DecimalField(decimal_places=2, max_digits=7, null=True)
-    acceptanceAmount = models.IntegerField(null=True)
+    acceptanceAmount = models.DecimalField(max_digits=12, decimal_places=3, null=True)
 
     def to_dict(self):
         return {
@@ -77,7 +77,7 @@ class Offer(Base):
         'offerPrice': str(self.offerPrice),
         'acceptance': self.acceptance,
         'acceptancePrice': str(self.acceptancePrice) if self.acceptancePrice is not None else None,
-        'acceptanceAmount': self.acceptanceAmount,
+        'acceptanceAmount': str(self.acceptanceAmount) if self.acceptanceAmount is not None else None,
         }
 
     def to_json(self):

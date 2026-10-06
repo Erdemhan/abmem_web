@@ -16,6 +16,16 @@ import numpy as np
 import decimal
 import timeit
 from django.db.models import Q
+from collections.abc import Sequence
+from ...constants.paths import DATA_DIR
+from .clearing import Bid, acceptance_prices, clear_market
+from .demand import DemandSeries
+
+MARKET_DATA_FILE = 'marketData.xlsx'
+DEMAND_COLUMN = 'DEMAND'
+
+# Demand series loaded and validated once per run by init().
+demandSeries: DemandSeries | None = None
 
 # Initialize a global variable for market data
 marketData = []
@@ -31,14 +41,29 @@ def deterministic_hash(text: str) -> int:
     return int(hashlib.sha256(text.encode()).hexdigest(), 16) % (10**8)
 
 def init(market: Market, params) -> None:
+    """Load market data, validate the demand series and initialise the agents.
+
+    Args:
+        market: Market to initialise. ``market.simulation.periodNumber`` is the
+            horizon the demand series must cover.
+        params: Hyperparameters passed to ``AgentService.init``.
+
+    Raises:
+        DemandDataError: If the demand series does not cover the horizon with
+            finite, strictly positive values. The market state is left unchanged.
+    """
     global marketData
     global agents
-    # Read market data from an Excel file and map the columns
+    global demandSeries
+    series = DemandSeries.from_excel(DATA_DIR / MARKET_DATA_FILE, column=DEMAND_COLUMN)
+    series.validate_horizon(market.simulation.periodNumber)
+    demandSeries = series
+    # Exogenous columns used by estimatePTF.
     marketData = ReaderService.readExcel(
-        path='marketData.xlsx',
-        columns=['Submitted Bid Order Volume(MWh)', 'Daily exchange rates(USD)', 
-                 'Natural Gas Price (USD/1000Sm3)', 'İstanbul average temperature', 'DEMAND'],
-        map=['old_demand', 'der', 'ngp', 'ist', 'demand']
+        path=MARKET_DATA_FILE,
+        columns=['Submitted Bid Order Volume(MWh)', 'Daily exchange rates(USD)',
+                 'Natural Gas Price (USD/1000Sm3)', 'İstanbul average temperature'],
+        map=['old_demand', 'der', 'ngp', 'ist']
     )
     for agent in market.agent_set.all():
         AgentService.init(agent,params=params)
@@ -136,69 +161,43 @@ def startPool(market: Market,agents) -> None:
     market.save()
     return SerialService.startPool(agents=agents)
 
-from collections import defaultdict
+def marketClearing(market: Market, offers: Sequence[Offer], demand: Decimal | int):
+    """Clear the market and write the accepted quantities back to the offers.
 
-def marketClearing(market: Market, offers: [Offer], demand: int):
+    Delegates to :func:`clearing.clear_market`. Offers with a positive accepted
+    quantity get ``acceptance=True``, ``acceptanceAmount`` as a ``Decimal`` and
+    ``acceptancePrice`` equal to their bid price (PAYASBID, ``payasptf`` applies
+    the PTF afterwards). Rejected offers are left unchanged.
+
+    Args:
+        market: Market whose state is set to CALCULATING.
+        offers: Offers of the period, the list index is the bid key.
+        demand: Demand of the period in MWh.
+
+    Returns:
+        Tuple ``(offers, met_demand, ptf, volume)``. ``met_demand`` is the sum of
+        accepted quantities (B11). ``ptf`` is ``Decimal(0)`` when nothing is
+        accepted, as before. ``volume`` is the total offered quantity.
+    """
     # Set market state to CALCULATING and save
     market.state = MarketState.CALCULATING
     market.save()
-    
-    metDemand = demand
-    ptf = 0
-    
-    # Group offers by their prices
-    offer_groups = defaultdict(list)
-    volume = 0
-    for offer in offers:
-        offer_groups[offer.offerPrice].append(offer)
-        volume += offer.amount
-    
-    # Sort the offer groups by price in ascending order
-    sorted_groups = sorted(offer_groups.items(), key=lambda x: x[0])
 
-    # Match offers to demand based on price
-    for _, group in sorted_groups:
-        if demand > 0:
-            total_amount = sum(offer.amount for offer in group)
-            # If the group's total amount meets the demand
-            if total_amount <= demand:
-                for offer in group:
-                    offer.acceptanceAmount = offer.amount
-                    offer.acceptance = True
-                    offer.acceptancePrice = offer.offerPrice
-                    demand -= offer.acceptanceAmount
-                    ptf = offer.acceptancePrice
-            else:
-                # If the group's total amount exceeds demand, perform recursive calculation
-                ptf = priceGroupCalculation(group, demand)
-                break
-        else:
-            break
-    
-    return offers, metDemand - demand, ptf, volume
+    bids = [
+        Bid(key=index, price=Decimal(offer.offerPrice), quantity=Decimal(offer.amount))
+        for index, offer in enumerate(offers)
+    ]
+    result = clear_market(bids, Decimal(demand))
+    prices = acceptance_prices(result, bids, MarketStrategy.PAYASBID)
+    for index, offer in enumerate(offers):
+        amount = result.accepted[index]
+        if amount > 0:
+            offer.acceptance = True
+            offer.acceptanceAmount = amount
+            offer.acceptancePrice = prices[index]
 
-def priceGroupCalculation(group: [Offer], demand: int):
-    # Recursive function to calculate the PTF for the group
-    ptf = 0
-    if len(group) <= 0 or demand <= 0:
-        return 0
-    gDemand = demand / len(group)
-    for offer in group:
-        if offer.amount <= gDemand:
-            offer.acceptanceAmount = offer.amount
-            offer.acceptance = True
-            offer.acceptancePrice = offer.offerPrice
-            demand -= offer.acceptanceAmount
-            group.remove(offer)
-            ptf = priceGroupCalculation(group=group, demand=demand)
-            break
-        else:
-            offer.acceptanceAmount = gDemand
-            demand -= offer.acceptanceAmount
-            offer.acceptance = True
-            offer.acceptancePrice = offer.offerPrice
-            ptf = offer.offerPrice
-    return ptf
+    ptf = result.ptf if result.ptf is not None else Decimal(0)
+    return offers, result.met_demand, ptf, result.offered_volume
 
 def budgetCalculation(offer: Offer):
     # Calculate and return the budget based on the offer's acceptance amount and price
@@ -296,6 +295,19 @@ def run(market: Market) -> bool:
     return offers, {period.periodNumber: agent_budgets}
 
 
-def getDemand(currentPeriod: int) -> int:
-    # Retrieve and return the demand for the current period from the market data
-    return marketData['demand'][currentPeriod]
+def getDemand(currentPeriod: int) -> Decimal:
+    """Return the demand of a period from the validated demand series.
+
+    Args:
+        currentPeriod: Period number ``t`` (1-based).
+
+    Returns:
+        ``demandSeries.at(t)``, i.e. row ``t - 1`` of the demand column.
+
+    Raises:
+        RuntimeError: If ``init`` has not loaded the demand series.
+        IndexError: If ``t`` is outside the series.
+    """
+    if demandSeries is None:
+        raise RuntimeError("demand series not loaded, call market_service.init first")
+    return demandSeries.at(currentPeriod)

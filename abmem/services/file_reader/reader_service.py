@@ -51,28 +51,6 @@ def readData(path: str, key: str) -> dict:
         sys.exit(1)
 
 
-def readExcel(path: str, column: str) -> list:
-    """
-    Reads a specific column from an Excel file and returns its data as a list.
-
-    Args:
-        path (str): The relative path to the Excel file.
-        column (str): The column name to read from the Excel file.
-
-    Returns:
-        list: List of data from the specified column.
-    """
-    try:
-        df = pd.read_excel(DATA_DIR / path)
-        data = df[column].tolist()
-        return data
-    except Exception as e:
-        # Log the error and exit if any exception occurs
-        print(e)
-        logger.error(e)
-        sys.exit(1)
-
-
 def readExcel(path: str, columns: list, map: list = []) -> dict:
     """
     Reads specified columns from an Excel file and returns their data as a dictionary.

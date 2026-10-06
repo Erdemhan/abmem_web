@@ -1,14 +1,12 @@
-"""Characterization tests for the current ``marketClearing`` implementation.
+"""Characterization tests for ``marketClearing``.
 
-These tests pin what the code does today, including known defects, so that
-later refactors can be compared against it. They do not describe the intended
-market clearing rule.
-
-Observed defect pinned here: when a price group exceeds the remaining demand,
-``marketClearing`` delegates to ``priceGroupCalculation`` and breaks, but the
-local ``demand`` is never decremented by the amount accepted inside that
-group. The returned ``metDemand`` therefore excludes the partially accepted
-marginal group.
+These tests pinned the pre-1.7 behaviour. The expectations marked
+``characterization_changes_in_1_7`` and the ``met_demand`` expectation of the
+distinct-price example now pin the corrected behaviour of PLAN 1.7:
+``marketClearing`` delegates to ``clearing.clear_market``, splits an equal-price
+marginal group by equal share capped at bid quantity (B4, OQ-18) and returns
+``met_demand`` as the sum of the accepted quantities (B11). Accepted
+quantities are ``Decimal`` (B8).
 """
 
 from decimal import Decimal
@@ -63,10 +61,9 @@ def test_distinct_prices_partial_marginal_offer(clearing_context):
     assert d.acceptancePrice is None
     assert ptf == Decimal(90)
     assert volume == 1400
-    # Expected 1000 by the market rule. The current code returns 700 because
-    # the 300 MWh accepted from C inside priceGroupCalculation is not
-    # subtracted from the local demand in marketClearing.
-    assert met_demand == 700
+    # B11: met demand is the sum of the accepted quantities (400 + 300 + 300).
+    # The pre-1.7 code returned 700.
+    assert met_demand == 1000
 
 
 @pytest.mark.characterization_changes_in_1_7
@@ -76,20 +73,20 @@ def test_same_price_group_b4_example(clearing_context):
 
     offers, met_demand, ptf, volume = _clear(market, [a, b], 60)
 
-    # priceGroupCalculation: gDemand = 30. A (100 > 30) gets 30, then B
-    # (10 <= 30) gets 10 and is removed. The recursion on [A] with the
-    # remaining demand 20 overwrites A's acceptance with 20.
-    assert b.acceptanceAmount == 10
-    assert a.acceptanceAmount == 20
+    # Equal share capped at bid quantity (OQ-18): the share 30 exceeds B's 10,
+    # so B is capped at 10 and A receives the remaining 50. The pre-1.7 code
+    # accepted only B=10, A=20.
+    assert b.acceptanceAmount == Decimal("10")
+    assert a.acceptanceAmount == Decimal("50")
+    assert isinstance(a.acceptanceAmount, Decimal)
     assert a.acceptance is True and b.acceptance is True
-    assert a.acceptanceAmount + b.acceptanceAmount == 30
+    assert a.acceptanceAmount + b.acceptanceAmount == 60
     assert ptf == Decimal(60)
     assert volume == 110
     # The returned list is the input list, unchanged in order and length.
     assert offers == [a, b]
-    # Expected 30 by the accepted amounts. The current code returns 0 because
-    # the marginal group's acceptance is not subtracted from demand.
-    assert met_demand == 0
+    # B11: met demand equals the accepted total. The pre-1.7 code returned 0.
+    assert met_demand == 60
 
 
 def test_supply_shortfall_accepts_everything(clearing_context):
