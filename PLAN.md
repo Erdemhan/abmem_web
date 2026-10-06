@@ -70,13 +70,13 @@ flowchart TD
 
 ## 2. Faz 0 — Altyapı (önkoşul)
 
-- [ ] **0.1 Git düzeni** (K11). Mevcut çalışma ağacını yeni bir dalda baseline commit'i olarak sabitle (`.gitignore` kontrolüyle, `abc_log/`, `abc_logs/` hariç tutulur). Düzeltmeler bu dalın üzerinde, faz başına ayrı commit'lerle ilerler.
-- [ ] **0.2 Migration'ları takibe al.** `.gitignore`'dan `migrations` satırını kaldır, yereldeki `0001`–`0003`'ü commit'le. Model ile veritabanı uyumunu `manage.py makemigrations --check --dry-run` ile doğrula. Bu yapılmadan Faz 2'deki model değişiklikleri yeniden üretilemez (A6).
-- [ ] **0.3 Bağımlılık dosyası.** Çalışan `rlearning` ortamından sürümleri sabitlenmiş `requirements.txt` üret (torch, Django, channels, psycopg2, pandas, openpyxl, numpy, pyyaml). Kurulum adımını README'ye yaz.
-- [ ] **0.4 Ayarlar.** `SECRET_KEY`, veritabanı parolası ve `DEBUG` ortam değişkenlerinden okunsun. Örnek bir `.env.example` eklensin, `.env` git dışında kalsın (A6).
-- [ ] **0.5 Import yan etkileri.** `sys.path.append(...)` satırlarını ve import anındaki `django.setup()` çağrılarını kaldır (A5). Giriş noktaları (`manage.py`, HPO CLI) Django'yu bir kez kurar. Bu, testlerin çalışabilmesi için gereklidir.
-- [ ] **0.6 Test altyapısı.** `pytest` + `pytest-django`, ayrı bir test veritabanı. İlk iş olarak mevcut davranışı sabitleyen karakterizasyon testleri: takas (B4 örneği dahil), bütçe hesabı, periyot oluşturma.
-- [ ] **0.7 `FORMULATION.md` taslağı** (kullanıcı onayı zorunlu). İçerik: MDP (gözlem, aksiyon, ödül, geçiş zamanlaması, `done`), piyasa kuralları (merit order, PAYASBID/PAYASPTF, eşit fiyat bölüştürmesi), maliyet ve bütçe denklemleri, değerlendirme metrikleri, HPO amaç fonksiyonu, parametre kaynakları. K1, K2, K3 kararları buraya işlenir.
+- [x] **0.1 Git düzeni** (K11). Mevcut çalışma ağacını yeni bir dalda baseline commit'i olarak sabitle (`.gitignore` kontrolüyle, `abc_log/`, `abc_logs/` hariç tutulur). Düzeltmeler bu dalın üzerinde, faz başına ayrı commit'lerle ilerler.
+- [x] **0.2 Migration'ları takibe al.** `.gitignore`'dan `migrations` satırını kaldır, yereldeki `0001`–`0003`'ü commit'le. Model ile veritabanı uyumunu `manage.py makemigrations --check --dry-run` ile doğrula. Bu yapılmadan Faz 2'deki model değişiklikleri yeniden üretilemez (A6).
+- [x] **0.3 Bağımlılık dosyası.** Çalışan `rlearning` ortamından sürümleri sabitlenmiş `requirements.txt` üret (torch, Django, channels, psycopg2, pandas, openpyxl, numpy, pyyaml). Kurulum adımını README'ye yaz.
+- [x] **0.4 Ayarlar.** `SECRET_KEY`, veritabanı parolası ve `DEBUG` ortam değişkenlerinden okunsun. Örnek bir `.env.example` eklensin, `.env` git dışında kalsın (A6).
+- [x] **0.5 Import yan etkileri.** `sys.path.append(...)` satırlarını ve import anındaki `django.setup()` çağrılarını kaldır (A5). Giriş noktaları (`manage.py`, HPO CLI) Django'yu bir kez kurar. Bu, testlerin çalışabilmesi için gereklidir.
+- [x] **0.6 Test altyapısı.** `pytest` + `pytest-django`, ayrı bir test veritabanı. İlk iş olarak mevcut davranışı sabitleyen karakterizasyon testleri: takas (B4 örneği dahil), bütçe hesabı, periyot oluşturma.
+- [x] **0.7 `FORMULATION.md` taslağı** (kullanıcı onayı zorunlu). İçerik: MDP (gözlem, aksiyon, ödül, geçiş zamanlaması, `done`), piyasa kuralları (merit order, PAYASBID/PAYASPTF, eşit fiyat bölüştürmesi), maliyet ve bütçe denklemleri, değerlendirme metrikleri, HPO amaç fonksiyonu, parametre kaynakları. K1, K2, K3 kararları buraya işlenir.
 
 ---
 
