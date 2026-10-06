@@ -129,10 +129,10 @@ Her maddede: **ne yapılacak**, **nasıl doğrulanacak**. Type B/C maddeleri ayr
 - **Doğrulama:** algoritma başına unit test (çıktı şekli, hedef aksiyon aralığı, PPO'da ilk epoch'ta oran = 1).
 
 ### 1.7 Piyasa takası (B4, B8, B11, A8)
-- [ ] `metDemand` kabul edilen miktarların toplamı olarak hesaplanır (B11). Karakterizasyon testlerindeki `characterization_changes_in_1_7` işaretli beklentiler yeni davranışa göre güncellenir.
-- [ ] Eşit fiyat grubunda **eşit pay, teklif miktarıyla sınırlı** bölüştürme (OQ-18 = b): kalan talep gruptaki tekliflere eşit bölünür, payı miktarını aşan teklif miktarıyla sınırlanır ve artan talep kalan teklifler arasında yeniden eşit bölünür. Özyinelemeli fonksiyon kaldırılır.
-- [ ] `Offer.acceptanceAmount` (ve gerekirse `Period.metDemand`) `DecimalField`'a çevrilir, migration yazılır (B8).
-- [ ] Talep verisi doğrulaması: `periodNumber` veri uzunluğunu aşıyorsa veya NaN varsa simülasyon başlamadan anlaşılır bir hata verilir. İndeksleme `periodNumber - 1` ile yapılır (A8).
+- [x] `metDemand` kabul edilen miktarların toplamı olarak hesaplanır (B11). Karakterizasyon testlerindeki `characterization_changes_in_1_7` işaretli beklentiler yeni davranışa göre güncellenir.
+- [x] Eşit fiyat grubunda **eşit pay, teklif miktarıyla sınırlı** bölüştürme (OQ-18 = b): kalan talep gruptaki tekliflere eşit bölünür, payı miktarını aşan teklif miktarıyla sınırlanır ve artan talep kalan teklifler arasında yeniden eşit bölünür. Özyinelemeli fonksiyon kaldırılır.
+- [x] `Offer.acceptanceAmount` (ve gerekirse `Period.metDemand`) `DecimalField`'a çevrilir, migration yazılır (B8).
+- [x] Talep verisi doğrulaması: `periodNumber` veri uzunluğunu aşıyorsa veya NaN varsa simülasyon başlamadan anlaşılır bir hata verilir. İndeksleme `periodNumber - 1` ile yapılır (A8).
 - **Doğrulama:** `analiz.md` B4 örneği (A=100, B=10, D=60 → B=10, A=50), arz yetersizliği, tek teklif, sıfır talep testleri.
 
 ### 1.8 Global durum (B10)
@@ -166,7 +166,7 @@ Her maddede: **ne yapılacak**, **nasıl doğrulanacak**. Type B/C maddeleri ayr
 - **Doğrulama:** 8 ajan × 336 periyot çalıştırmasının süresi önce/sonra ölçülür.
 
 ### 1.13 WebSocket (A7)
-- [ ] K10 kararına göre kaldır ya da bağla.
+- [x] K10 kararına göre kaldır ya da bağla.
 
 ### 1.14 Duman testleri
 - [ ] Her algoritma ve karşılaştırma ajanı için 30 periyotluk, 2 ajanlı test senaryosu. NaN/Inf, boş teklif ve sınır değer kontrolleri.
@@ -185,10 +185,10 @@ Her maddede: **ne yapılacak**, **nasıl doğrulanacak**. Type B/C maddeleri ayr
 - **Doğrulama:** iki farklı algoritmalı ajanla senaryo oluşturulur, çalıştırılır ve her ajanın doğru algoritma sınıfıyla başlatıldığı kontrol edilir.
 
 ### 2.2 Ajan türüne göre kaynak filtresi (İstek 2)
-- [ ] **Kural tek yerde:** `allowed_energy_types(agent_type)`: `RENEWABLE → {RENEWABLE}`, `FOSSIL → {FOSSIL}`, `NUCLEAR → {NUCLEAR}`, `HYBRID → hepsi`.
-- [ ] **Sunucu doğrulaması:** `create_simulation`, `update_simulation`, `create_agent_and_related`, `update_agent` ve `AgentForm.clean()` kuralı uygular. İhlalde açıklayıcı bir hata mesajıyla 400 döner.
-- [ ] **Arayüz:** tür seçilmeden kaynak listesi pasif kalır. Seçenekler `data-energy-type` niteliğine göre filtrelenir. Tür değiştiğinde uyumsuz santral satırları uyarıyla temizlenir.
-- [ ] **Veri:** K6 kararına göre `CCGT` düzeltilir. Mevcut proxy ajanlarda ihlal taraması yapılır (şu an sadece 529 ve 530'daki CCGT ajanları ihlalde).
+- [x] **Kural tek yerde:** `allowed_energy_types(agent_type)`: `RENEWABLE → {RENEWABLE}`, `FOSSIL → {FOSSIL}`, `NUCLEAR → {NUCLEAR}`, `HYBRID → hepsi`.
+- [x] **Sunucu doğrulaması:** `create_simulation`, `update_simulation`, `create_agent_and_related`, `update_agent` ve `AgentForm.clean()` kuralı uygular. İhlalde açıklayıcı bir hata mesajıyla 400 döner.
+- [x] **Arayüz:** tür seçilmeden kaynak listesi pasif kalır. Seçenekler `data-energy-type` niteliğine göre filtrelenir. Tür değiştiğinde uyumsuz santral satırları uyarıyla temizlenir.
+- [x] **Veri:** K6 kararına göre `CCGT` düzeltilir. Mevcut proxy ajanlarda ihlal taraması yapılır (şu an sadece 529 ve 530'daki CCGT ajanları ihlalde).
 - **Doğrulama:** her tür için izin verilen/verilmeyen kaynak kombinasyonlarının view testleri.
 
 ### 2.3 Proxy ajan kütüphanesi (İstek 4)
