@@ -4,10 +4,22 @@ Lets pytest run in a fresh checkout or agent worktree without the git-ignored
 .env file: DEBUG is enabled so that no secret key is required. Database
 credentials still come from the environment or .env when present (local
 PostgreSQL with trust authentication needs none). Never use in production.
+
+Each checkout gets its own test database name, derived from its absolute path,
+so that parallel test runs in several worktrees do not drop or lock each
+other's ``test_abmem`` database.
 """
 
+import hashlib
 import os
 
 os.environ.setdefault("DJANGO_DEBUG", "true")
 
 from .settings import *  # noqa: E402,F401,F403
+from .settings import BASE_DIR, DATABASES  # noqa: E402
+
+_checkout_id = hashlib.sha1(str(BASE_DIR).encode("utf-8")).hexdigest()[:8]
+DATABASES["default"].setdefault("TEST", {})
+DATABASES["default"]["TEST"]["NAME"] = os.environ.get(
+    "DJANGO_TEST_DB_NAME", f"test_abmem_{_checkout_id}"
+)

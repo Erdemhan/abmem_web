@@ -80,6 +80,8 @@ class RandomPolicy(BaseAgentAlgorithm):
     algorithm_type = AlgorithmType.RANDOM
     is_learning = False
     is_on_policy = False
+    #: Random even when explore=False (checked by the shared policy contract).
+    stochastic_when_greedy = True
     config_class = RandomConfig
 
     def select_action(self, obs: np.ndarray, explore: bool) -> ActionResult:

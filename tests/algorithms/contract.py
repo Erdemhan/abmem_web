@@ -86,13 +86,20 @@ def assert_policy_contract(
     def random_obs() -> np.ndarray:
         return data_rng.uniform(-1.0, 1.0, size=spec.obs_dim).astype(np.float32)
 
-    # Determinism of the greedy action.
+    # Determinism of the greedy action. Non-learning policies that are random by
+    # definition (RANDOM baseline) declare `stochastic_when_greedy = True` and
+    # stay random in the evaluation window, so only validity is checked.
     probe = random_obs()
     first = policy.select_action(probe, explore=False)
     second = policy.select_action(probe.copy(), explore=False)
     _check_action(first, spec)
     _check_action(second, spec)
-    np.testing.assert_array_equal(first.u, second.u)
+    if getattr(policy, "stochastic_when_greedy", False):
+        assert (
+            not policy.is_learning
+        ), "only non-learning policies may be stochastic when greedy"
+    else:
+        np.testing.assert_array_equal(first.u, second.u)
 
     obs = random_obs()
     observed = 0
