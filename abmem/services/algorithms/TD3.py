@@ -1,212 +1,252 @@
+"""Twin Delayed Deep Deterministic policy gradient (TD3).
+
+Reference: Fujimoto, van Hoof and Meger (2018), "Addressing function
+approximation error in actor-critic methods", ICML, Algorithm 1.
+
+The implementation operates only in the normalised spaces of ADR-003:
+observations are normalised float32 vectors and actions are float32 vectors in
+``[-1, 1]``, one entry per plant. Three mechanisms distinguish TD3 from DDPG:
+
+* Clipped double Q-learning (Section 4.2): two critics, the TD target uses the
+  minimum of the two target critics.
+* Target policy smoothing (Section 5.3, eq. 14-15): clipped Gaussian noise is
+  added to the target action, which is then clamped to the action bounds
+  ``[-1, 1]`` (C5).
+* Delayed policy updates (Section 5.2): the actor and all target networks are
+  updated once every ``policy_delay`` critic updates.
+
+The fail-stack rule, action shrinking and reward multipliers live outside the
+algorithm (ADR-004, C7). Exploration noise is added only in
+:meth:`TD3Algorithm.select_action` with ``explore=True`` (C3).
+"""
+
+from __future__ import annotations
+
+import copy
+
 import numpy as np
 import torch
-import torch.optim as optim
-import torch.nn.functional as F
-import numpy as np
-from .actor_critic import Actor, Critic
+from torch import Tensor
+from torch.nn import functional as F
 
-# Force CPU usage
-device = torch.device("cpu")
+from abmem.models.enums import AlgorithmType
+
+from .algorithm_config import TD3Config
+from .base import ActionResult, BaseAgentAlgorithm, PolicySpec, UpdateStats
+from .networks import DeterministicActor, QCritic, soft_update
+from .replay_buffer import Batch, ReplayBuffer
 
 
-# Add experiences to the buffer
-class ReplayBuffer(object):
-    def __init__(self, max_size=1e6):
-        self.storage = []
-        self.max_size = max_size
-        self.ptr = 0
+class TD3Algorithm(BaseAgentAlgorithm):
+    """TD3 policy with twin critics, target policy smoothing and delayed updates.
 
-    # Add to buffer
-    def add(self, transition):
-        if len(self.storage) == self.max_size:
-            self.storage[int(self.ptr)] = transition
-            self.ptr = (self.ptr + 1) % self.max_size
-        else:
-            self.storage.append(transition)
+    Attributes:
+        actor: Online deterministic actor mu_phi.
+        actor_target: Target actor mu_phi'.
+        critic1: First online critic Q_theta1.
+        critic2: Second online critic Q_theta2.
+        critic1_target: Target of ``critic1``.
+        critic2_target: Target of ``critic2``.
+        actor_optimizer: Adam optimiser of the actor.
+        critic_optimizer: Adam optimiser of both critics.
+        critic_updates: Number of critic gradient steps taken so far.
+        actor_updates: Number of actor gradient steps taken so far.
+    """
 
-    # Sample a random number of elements from the buffer
-    def sample(self, batch_size):
-        ind = np.random.randint(0, len(self.storage), size=batch_size)
-        batch_states, batch_next_states, batch_actions, batch_rewards, batch_dones = [], [], [], [], []
+    algorithm_type = AlgorithmType.TD3
+    is_learning = True
+    is_on_policy = False
+    config_class = TD3Config
 
-        for i in ind:
-            state, next_state, action, reward, done = self.storage[i]
-            batch_states.append(np.array(state, copy=False))
-            batch_next_states.append(np.array(next_state, copy=False))
-            batch_actions.append(np.array(action, copy=False))
-            batch_rewards.append(np.array(reward, copy=False))
-            batch_dones.append(np.array(done, copy=False))
+    config: TD3Config
 
-        return (
-            np.array(batch_states),
-            np.array(batch_next_states),
-            np.array(batch_actions),
-            np.array(batch_rewards).reshape(-1, 1),
-            np.array(batch_dones).reshape(-1, 1)
+    def __init__(
+        self, spec: PolicySpec, config: TD3Config, rng: np.random.Generator
+    ) -> None:
+        """Build the networks, target networks, optimisers and replay buffer.
+
+        Target networks start as exact copies of the online networks
+        (Algorithm 1, initialisation step).
+
+        Args:
+            spec: Problem description of the agent.
+            config: TD3 hyperparameters.
+            rng: Random generator owned by this policy. It drives exploration
+                noise, minibatch sampling and (through a derived seed) the
+                target policy smoothing noise.
+
+        Raises:
+            TypeError: If an argument has the wrong type.
+        """
+        super().__init__(spec, config, rng)
+        hidden = config.hidden_sizes
+        self.actor = DeterministicActor(spec.obs_dim, spec.action_dim, hidden).to(
+            self.device
         )
-    
+        self.critic1 = QCritic(spec.obs_dim, spec.action_dim, hidden).to(self.device)
+        self.critic2 = QCritic(spec.obs_dim, spec.action_dim, hidden).to(self.device)
+        self.actor_target = copy.deepcopy(self.actor)
+        self.critic1_target = copy.deepcopy(self.critic1)
+        self.critic2_target = copy.deepcopy(self.critic2)
+        for target in (self.actor_target, self.critic1_target, self.critic2_target):
+            target.requires_grad_(False)
 
+        self.actor_optimizer = torch.optim.Adam(
+            self.actor.parameters(), lr=config.lr_actor
+        )
+        self.critic_optimizer = torch.optim.Adam(
+            [*self.critic1.parameters(), *self.critic2.parameters()],
+            lr=config.lr_critic,
+        )
 
-class TD3(object):
-    def __init__(self,replay_buffer:ReplayBuffer,action_dim:int,
-                 learning_rate_critic: float = 1e-3, learning_rate_actor: float = 1e-4,
-                 noise: float = 0.01, noise_decay: float = 0.99, noise_min: float = 0.01):
+        # Smoothing noise is drawn from a torch generator seeded from ``rng`` so
+        # that the whole policy is reproducible from its numpy generator.
+        self._noise_generator = torch.Generator(device=self.device)
+        self._noise_generator.manual_seed(int(rng.integers(0, 2**63 - 1)))
 
-        action_dim = action_dim
-        state_dim = 4
-        action_space_limits = [(0,200)]
+        self.critic_updates = 0
+        self.actor_updates = 0
 
-        # Failstack mekanizması için yeni parametreler
-        self.failstack = 0
-        self.failstack_decay = 0.95  # Başarılı işlemlerde failstack'in azalma oranı
-        self.failstack_increase = 0.1  # Başarısız işlemlerde failstack'in artma oranı
-        self.max_failstack = 1.0  # Maksimum failstack değeri
-        self.failstack_threshold = 0.5  # Failstack etkisinin başlayacağı eşik değeri
+    def select_action(self, obs: np.ndarray, explore: bool) -> ActionResult:
+        """Return ``mu(s)``, perturbed by clipped Gaussian noise if exploring.
 
-        self.actor = Actor(state_dim, action_dim, action_space_limits,noise_std=noise, noise_decay=noise_decay, noise_min=noise_min).to(device)
-        self.actor_target = Actor(state_dim, action_dim, action_space_limits,noise_std=noise, noise_decay=noise_decay, noise_min=noise_min).to(device)
-        self.actor_target.load_state_dict(self.actor.state_dict())
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=learning_rate_actor)
+        With ``explore=True`` the action is ``clip(mu(s) + N(0, sigma^2 I), -1, 1)``
+        (Algorithm 1, action selection) with the current exploration sigma.
 
-        # TD3 uses two critics
-        self.critic1 = Critic(state_dim, action_dim).to(device)
-        self.critic2 = Critic(state_dim, action_dim).to(device)
-        self.critic1_target = Critic(state_dim, action_dim).to(device)
-        self.critic2_target = Critic(state_dim, action_dim).to(device)
-        
-        self.critic1_target.load_state_dict(self.critic1.state_dict())
-        self.critic2_target.load_state_dict(self.critic2.state_dict())
-        
-        self.critic1_optimizer = optim.Adam(self.critic1.parameters(), lr=learning_rate_critic)
-        self.critic2_optimizer = optim.Adam(self.critic2.parameters(), lr=learning_rate_critic)
+        Args:
+            obs: Normalised observation, float32, shape ``(obs_dim,)``.
+            explore: Add exploration noise if True.
 
-        self.replay_buffer = replay_buffer
-        self.action_space_limits = action_space_limits
-        
-        # TD3 specific parameters
-        self.policy_noise = 0.2
-        self.noise_clip = 0.5
-        self.policy_freq = 2
-        self.total_it = 0
+        Returns:
+            The normalised action, float32, shape ``(action_dim,)``.
+        """
+        obs_t = self._as_tensor(obs).unsqueeze(0)
+        u = self.actor(obs_t).squeeze(0).cpu().numpy().astype(np.float32)
+        if explore:
+            u = self._add_exploration_noise(u)
+        return ActionResult(u=u)
 
-    def update_failstack(self, success: bool):
-        """Failstack değerini günceller"""
-        if success:
-            self.failstack = max(0, self.failstack - self.failstack_decay)
-        else:
-            self.failstack = min(self.max_failstack, self.failstack + self.failstack_increase)
+    def target_actions(self, next_obs: Tensor) -> Tensor:
+        """Return smoothed target actions (Fujimoto et al., 2018, eq. 14-15).
 
-    def get_failstack_adjustment(self, action):
-        """Failstack değerine göre aksiyonu ayarlar"""
-        try:
-            # Action'ı numpy array'e çevir
-            if isinstance(action, (list, np.ndarray)):
-                action_array = np.array(action)
-            else:
-                action_array = np.array([action])
-            
-            # İlk elemanı al ve float'a çevir
-            action_value = float(action_array[0])
+        ``a' = clip(mu'(s') + clip(eps, -c, c), -1, 1)`` with
+        ``eps ~ N(0, policy_noise^2 I)`` and ``c = noise_clip``, computed in the
+        normalised action space (C5).
 
-            # Failstack kontrolü
-            if self.failstack > self.failstack_threshold:
-                # Failstack yüksekse, aksiyonu daha düşük fiyata doğru ayarla
-                adjustment = (self.failstack - self.failstack_threshold) * (action_value - 0)
-                return max(0, action_value - adjustment)
-            return action_value
-        except Exception as e:
-            print(f"Failstack adjustment error: {e}")
-            # Hata durumunda orijinal action'ı döndür
-            if isinstance(action, (list, np.ndarray)):
-                return float(action[0])
-            elif isinstance(action, (int, float)):
-                return float(action)
-            else:
-                return 0.0  # Varsayılan değer
+        Args:
+            next_obs: Next observations, shape ``(B, obs_dim)``, on ``self.device``.
 
-    def select_action(self, state):
-        try:
-            with torch.no_grad():
-                state = torch.FloatTensor(state.reshape(1, -1)).to(device)
-                action = self.actor(state).cpu().data.numpy().flatten()
-                # Failstack'e göre aksiyonu ayarla
-                adjusted_action = self.get_failstack_adjustment(action)
-                # List olarak döndür (agent_service.py actions[counter] için)
-                if isinstance(adjusted_action, (int, float)):
-                    return [float(adjusted_action)]
-                else:
-                    return [float(adjusted_action[0])] if len(adjusted_action) > 0 else [0.0]
-        except Exception as e:
-            print(f"Select action error: {e}")
-            # Hata durumunda varsayılan bir değer döndür
-            return [0.0]
+        Returns:
+            Target actions of shape ``(B, action_dim)`` in ``[-1, 1]``.
+        """
+        with torch.no_grad():
+            mu = self.actor_target(next_obs)
+            eps = torch.randn(
+                mu.shape,
+                generator=self._noise_generator,
+                device=mu.device,
+                dtype=mu.dtype,
+            )
+            eps = (eps * self.config.policy_noise).clamp(
+                -self.config.noise_clip, self.config.noise_clip
+            )
+            return (mu + eps).clamp(-1.0, 1.0)
 
-    def train(self, iterations, batch_size=128, discount=0.95, tau=0.001):
-        for it in range(iterations):
-            self.total_it += 1
-            
-            # Buffer size kontrolü
-            if len(self.replay_buffer.storage) < batch_size:
-                return
-            
-            state, next_state, action, reward, done = self.replay_buffer.sample(batch_size)
-            state = torch.FloatTensor(state).to(device)
-            next_state = torch.FloatTensor(next_state).to(device)
-            action = torch.FloatTensor(action).to(device)
-            reward = torch.FloatTensor(reward).to(device)
-            done = torch.FloatTensor(done).to(device)
+    def td_target(
+        self, rewards: Tensor, next_obs: Tensor, terminated: Tensor
+    ) -> Tensor:
+        """Return the clipped double-Q target (Section 4.2 and Algorithm 1).
 
-            # Failstack'e göre reward'ı ayarla
-            adjusted_reward = reward * (1 - self.failstack)  # Failstack yüksekse reward düşer
+        ``y = r + gamma * (1 - terminated) * min(Q1'(s', a'), Q2'(s', a'))`` with
+        ``a'`` from :meth:`target_actions`. The reward enters unchanged.
 
-            with torch.no_grad():
-                # Select next action according to target policy with noise
-                noise = torch.randn_like(action) * self.policy_noise
-                noise = noise.clamp(-self.noise_clip, self.noise_clip)
-                
-                next_action = self.actor_target(next_state) + noise
-                next_action = next_action.clamp(-1, 1)
+        Args:
+            rewards: Shape ``(B, 1)``.
+            next_obs: Shape ``(B, obs_dim)``.
+            terminated: Shape ``(B, 1)``, 1.0 for terminal transitions.
 
-                # Compute target Q-values with adjusted reward
-                target_Q1 = self.critic1_target(next_state, next_action)
-                target_Q2 = self.critic2_target(next_state, next_action)
-                target_Q = torch.min(target_Q1, target_Q2)
-                target_Q = adjusted_reward + ((1 - done) * discount * target_Q).detach()
+        Returns:
+            TD targets of shape ``(B, 1)``, detached from the graph.
+        """
+        with torch.no_grad():
+            next_actions = self.target_actions(next_obs)
+            q1 = self.critic1_target(next_obs, next_actions)
+            q2 = self.critic2_target(next_obs, next_actions)
+            return rewards + self.config.gamma * (1.0 - terminated) * torch.min(q1, q2)
 
-            # Update critics
-            current_Q1 = self.critic1(state, action)
-            current_Q2 = self.critic2(state, action)
-            
-            critic1_loss = F.mse_loss(current_Q1, target_Q)
-            critic2_loss = F.mse_loss(current_Q2, target_Q)
+    def _critic_step(self, batch: Batch) -> tuple[float, float]:
+        """Regress both critics to the shared TD target.
 
-            self.critic1_optimizer.zero_grad()
-            critic1_loss.backward()
-            self.critic1_optimizer.step()
+        Args:
+            batch: Minibatch of transitions.
 
-            self.critic2_optimizer.zero_grad()
-            critic2_loss.backward()
-            self.critic2_optimizer.step()
+        Returns:
+            The optimised loss ``MSE(Q1, y) + MSE(Q2, y)`` and the mean of
+            ``Q1(s, a)`` over the batch.
+        """
+        y = self.td_target(batch.rewards, batch.next_obs, batch.terminated)
+        q1 = self.critic1(batch.obs, batch.actions)
+        q2 = self.critic2(batch.obs, batch.actions)
+        loss = F.mse_loss(q1, y) + F.mse_loss(q2, y)
+        self.critic_optimizer.zero_grad()
+        loss.backward()
+        self._clip_gradients([*self.critic1.parameters(), *self.critic2.parameters()])
+        self.critic_optimizer.step()
+        self.critic_updates += 1
+        return float(loss.item()), float(q1.detach().mean().item())
 
-            # Delayed policy updates
-            if self.total_it % self.policy_freq == 0:
-                # Update actor
-                actor_loss = -self.critic1(state, self.actor(state)).mean()
-                
-                self.actor_optimizer.zero_grad()
-                actor_loss.backward()
-                self.actor_optimizer.step()
+    def _actor_step(self, batch: Batch) -> float:
+        """Deterministic policy gradient step on ``-mean Q1(s, mu(s))``, then
+        Polyak update of all target networks (Algorithm 1, delayed branch).
 
-                # Update target networks
-                for param, target_param in zip(self.critic1.parameters(), self.critic1_target.parameters()):
-                    target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
-                
-                for param, target_param in zip(self.critic2.parameters(), self.critic2_target.parameters()):
-                    target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
-                
-                for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
-                    target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
+        Args:
+            batch: Minibatch of transitions.
 
-    # Add to replay buffer
-    def add_to_replay_buffer(self, state, action, next_state, reward, done):
-        self.replay_buffer.add((state, next_state, action, reward, done)) 
+        Returns:
+            The actor loss.
+        """
+        actor_loss = -self.critic1(batch.obs, self.actor(batch.obs)).mean()
+        self.actor_optimizer.zero_grad()
+        actor_loss.backward()
+        self._clip_gradients(self.actor.parameters())
+        self.actor_optimizer.step()
+        self.actor_updates += 1
+
+        tau = self.config.tau
+        soft_update(self.critic1_target, self.critic1, tau)
+        soft_update(self.critic2_target, self.critic2, tau)
+        soft_update(self.actor_target, self.actor, tau)
+        return float(actor_loss.item())
+
+    def _update(self) -> UpdateStats:
+        """Run ``config.gradient_steps`` TD3 iterations (Algorithm 1).
+
+        Each iteration samples a minibatch and updates both critics. Every
+        ``policy_delay``-th critic update (counted over the lifetime of the
+        policy) is followed by an actor update and the target updates.
+
+        Returns:
+            Mean critic loss, mean actor loss (None if no actor step was taken
+            in this call), mean Q1 of the last batch, and the cumulative update
+            counts in ``extra``.
+        """
+        buffer = self.buffer
+        assert isinstance(buffer, ReplayBuffer)
+        critic_losses: list[float] = []
+        actor_losses: list[float] = []
+        mean_q = 0.0
+        for _ in range(self.config.gradient_steps):
+            batch = buffer.sample(self.config.batch_size, self.device)
+            critic_loss, mean_q = self._critic_step(batch)
+            critic_losses.append(critic_loss)
+            if self.critic_updates % self.config.policy_delay == 0:
+                actor_losses.append(self._actor_step(batch))
+        return UpdateStats(
+            critic_loss=float(np.mean(critic_losses)),
+            actor_loss=float(np.mean(actor_losses)) if actor_losses else None,
+            mean_q=mean_q,
+            extra={
+                "critic_updates": float(self.critic_updates),
+                "actor_updates": float(self.actor_updates),
+            },
+        )
