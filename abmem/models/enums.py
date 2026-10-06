@@ -59,3 +59,14 @@ class AgentType(enum.Enum):
     FOSSIL = 1
     NUCLEAR = 2
     HYBRID = 3
+
+
+class AlgorithmType(enum.Enum):
+    DDPG = 0
+    RDPG = 1
+    TD3 = 2
+    SAC = 3
+    PPO = 4
+    RANDOM = 5
+    MARGINAL_COST = 6
+    FIXED_MARKUP = 7

@@ -1,9 +1,10 @@
-from .RDPG import RDPG, ReplayBuffer as RDPGReplayBuffer
-from .DDPG import DDPG, ReplayBuffer as DDPGReplayBuffer
-from .TD3 import TD3, ReplayBuffer as TD3ReplayBuffer
-from .ppo import PPO, RolloutBuffer as PPORolloutBuffer
-from .SAC import SAC,ReplayBuffer as SACReplayBuffer
-from .algorithm_utils import State
+# Transitional (rl_core): the legacy algorithm modules are imported lazily inside
+# AgentAlgorithm so that importing this module does not depend on them while they
+# are rewritten. This file is deleted by runtime_core.
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .algorithm_utils import State
 import numpy as np
 import torch
 from collections import deque
@@ -62,6 +63,7 @@ class AgentAlgorithm:
         self.failStack = 0
 
         if self.algorithm_type == 'RDPG':
+            from .RDPG import RDPG, ReplayBuffer as RDPGReplayBuffer
             self.replayBuffer = RDPGReplayBuffer(BUFFER_SIZE)
             self.algorithm = RDPG(self.replayBuffer,
                             learning_rate_actor=LEARNING_RATE_ACTOR,
@@ -77,10 +79,12 @@ class AgentAlgorithm:
             self.seq_len = SEQ_LEN
 
         elif self.algorithm_type == 'DDPG':
+            from .DDPG import DDPG, ReplayBuffer as DDPGReplayBuffer
             self.replayBuffer = DDPGReplayBuffer(BUFFER_SIZE)
             self.algorithm = DDPG(self.replayBuffer,learning_rate_actor=LEARNING_RATE_ACTOR,learning_rate_critic=LEARNING_RATE_CRITIC,noise=NOISE_STD,noise_decay=NOISE_DECAY,noise_min=NOISE_MIN,action_dim=action_dim)
 
         elif self.algorithm_type == 'TD3':
+            from .TD3 import TD3, ReplayBuffer as TD3ReplayBuffer
             self.replayBuffer = TD3ReplayBuffer(BUFFER_SIZE)
             self.algorithm = TD3(
                 self.replayBuffer,
@@ -101,6 +105,7 @@ class AgentAlgorithm:
 
 
 
+            from .ppo import PPO, RolloutBuffer as PPORolloutBuffer
             self.replayBuffer = PPORolloutBuffer(BUFFER_SIZE)
             self.algorithm = PPO(
                 self.replayBuffer,
@@ -120,6 +125,7 @@ class AgentAlgorithm:
             LEARNING_RATE_ALPHA = params.get("LEARNING_RATE_ALPHA")
             INITIAL_ALPHA = params.get("INITIAL_ALPHA")
 
+            from .SAC import SAC, ReplayBuffer as SACReplayBuffer
             self.replayBuffer = SACReplayBuffer(BUFFER_SIZE)
             self.algorithm = SAC(
                 self.replayBuffer,
@@ -132,7 +138,7 @@ class AgentAlgorithm:
                     gamma=DISCOUNT
             )
 
-    def selectAction(self, state: State) -> list:
+    def selectAction(self, state: "State") -> list:
         if self.algorithm_type == 'RDPG':
             current = [int(state.demand), int(state.mcp), int(state.mcp24), int(state.mcp168)]
             self.state_history.append(current)
