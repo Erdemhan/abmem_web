@@ -23,3 +23,8 @@ DATABASES["default"].setdefault("TEST", {})
 DATABASES["default"]["TEST"]["NAME"] = os.environ.get(
     "DJANGO_TEST_DB_NAME", f"test_abmem_{_checkout_id}"
 )
+# The development database is UTF8, but this server's template databases are
+# WIN1252, so a test database cloned from template1 cannot store characters
+# such as U+0130. Create it from template0 with UTF8 to match production data.
+DATABASES["default"]["TEST"]["CHARSET"] = "UTF8"
+DATABASES["default"]["TEST"]["TEMPLATE"] = "template0"
