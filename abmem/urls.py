@@ -1,6 +1,5 @@
 from django.urls import path
 from . import views
-from abmem.consumers import SimulationConsumer
 
 
 urlpatterns = [
@@ -26,6 +25,5 @@ urlpatterns = [
     path('simulation/watch/<str:simulation_id>/', views.watch_simulation, name='watch_simulation'),
     path('simulation/status/', views.get_simulation_status, name='get_simulation_status'),
     path('simulation/next/', views.nextPeriod, name='nextPeriod'),
-    path('ws/simulation/<str:simulation_id>/', SimulationConsumer.as_asgi()),
 ]
 
