@@ -1,138 +1,153 @@
+"""Networks of Soft Actor-Critic (Haarnoja et al., 2018).
+
+The policy is a diagonal Gaussian over a pre-squash variable ``z`` followed by
+``u = tanh(z)``, so every action lies in the normalised action space
+``[-1, 1]`` (ADR-003). Mapping ``u`` to prices happens outside the algorithm.
+The soft Q-functions are the shared :class:`~.networks.QCritic`.
+
+References:
+    Haarnoja, T., Zhou, A., Abbeel, P., Levine, S. (2018). Soft Actor-Critic:
+    Off-Policy Maximum Entropy Deep Reinforcement Learning with a Stochastic
+    Actor. ICML. Appendix C (enforcing action bounds).
+"""
+
+from __future__ import annotations
+
+import math
+from collections.abc import Sequence
+
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.distributions import Normal
-import numpy as np
+from torch import Tensor, nn
+from torch.nn import functional as F
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+from .networks import mlp
 
-# İlklendirme fonksiyonu - ortogonal ilklendirme
-def init_weights(layer, gain=1.0):
-    if isinstance(layer, nn.Linear):
-        nn.init.orthogonal_(layer.weight.data, gain=gain)
-        nn.init.constant_(layer.bias.data, 0)
-    return layer
+LOG_STD_MIN: float = -20.0
+LOG_STD_MAX: float = 2.0
+_LOG_2: float = math.log(2.0)
+_HALF_LOG_2PI: float = 0.5 * math.log(2.0 * math.pi)
 
-# Layer Normalization ekleyen basit bir blok
-class NormalizedLinear(nn.Module):
-    def __init__(self, in_dim, out_dim, use_ln=True):
-        super(NormalizedLinear, self).__init__()
-        self.linear = nn.Linear(in_dim, out_dim)
-        self.use_ln = use_ln
-        if use_ln:
-            self.ln = nn.LayerNorm(out_dim)
-        
-        # Ortogonal ilklendirme ile ağırlıkları ayarla
-        init_weights(self.linear)
-    
-    def forward(self, x):
-        x = self.linear(x)
-        if self.use_ln:
-            x = self.ln(x)
-        return x
 
-# SAC için Q-Network - Layer Normalization ile
-class SoftQNetwork(nn.Module):
-    def __init__(self, state_dim, action_dim, hidden_dim=256):
-        super(SoftQNetwork, self).__init__()
-        
-        # Daha büyük hidden_dim (128->256) ve layer normalization
-        self.net = nn.Sequential(
-            NormalizedLinear(state_dim + action_dim, hidden_dim),
-            nn.ReLU(),
-            NormalizedLinear(hidden_dim, hidden_dim),
-            nn.ReLU(),
-            NormalizedLinear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            NormalizedLinear(hidden_dim // 2, 1, use_ln=False)
+def tanh_log_abs_det_jacobian(z: Tensor) -> Tensor:
+    """Return ``log(1 - tanh(z)^2)`` elementwise in a numerically stable form.
+
+    Uses the identity ``log(1 - tanh(z)^2) = 2 * (log 2 - z - softplus(-2 z))``,
+    which stays finite for large ``|z|`` where ``tanh(z)`` rounds to +-1 in
+    float32.
+
+    Args:
+        z: Pre-squash values of any shape.
+
+    Returns:
+        Tensor of the same shape as ``z``.
+    """
+    return 2.0 * (_LOG_2 - z - F.softplus(-2.0 * z))
+
+
+def squashed_gaussian_log_prob(z: Tensor, mean: Tensor, log_std: Tensor) -> Tensor:
+    """Log-density of ``u = tanh(z)`` with ``z ~ N(mean, diag(exp(log_std)^2))``.
+
+    Haarnoja et al. (2018), appendix C, eq. 21:
+    ``log pi(u|s) = log N(z; mean, sigma) - sum_i log(1 - tanh(z_i)^2)``.
+
+    Args:
+        z: Pre-squash sample, shape ``(B, action_dim)``.
+        mean: Gaussian mean, same shape as ``z``.
+        log_std: Gaussian log standard deviation, same shape as ``z``.
+
+    Returns:
+        Log-probabilities of shape ``(B, 1)``.
+    """
+    gaussian = -0.5 * ((z - mean) * torch.exp(-log_std)) ** 2 - log_std - _HALF_LOG_2PI
+    log_prob = gaussian - tanh_log_abs_det_jacobian(z)
+    return log_prob.sum(dim=-1, keepdim=True)
+
+
+class SquashedGaussianActor(nn.Module):
+    """Stochastic policy ``u = tanh(z)``, ``z ~ N(mu(s), sigma(s)^2)``."""
+
+    def __init__(
+        self,
+        obs_dim: int,
+        action_dim: int,
+        hidden_sizes: Sequence[int],
+        log_std_min: float = LOG_STD_MIN,
+        log_std_max: float = LOG_STD_MAX,
+    ) -> None:
+        """Build a shared MLP trunk with a mean head and a log-std head.
+
+        Args:
+            obs_dim: Observation length.
+            action_dim: Action length.
+            hidden_sizes: Hidden layer widths of the trunk (at least one).
+            log_std_min: Lower clamp of the log standard deviation.
+            log_std_max: Upper clamp of the log standard deviation.
+
+        Raises:
+            ValueError: If ``hidden_sizes`` is empty or the clamp is not
+                increasing.
+        """
+        super().__init__()
+        if len(hidden_sizes) < 1:
+            raise ValueError("hidden_sizes must contain at least one layer")
+        if not log_std_min < log_std_max:
+            raise ValueError(
+                f"log_std_min ({log_std_min}) must be < log_std_max ({log_std_max})"
+            )
+        widths = [int(w) for w in hidden_sizes]
+        self.trunk = nn.Sequential(mlp(obs_dim, widths[-1], widths[:-1]), nn.ReLU())
+        self.mean_head = nn.Linear(widths[-1], action_dim)
+        self.log_std_head = nn.Linear(widths[-1], action_dim)
+        self.log_std_min = float(log_std_min)
+        self.log_std_max = float(log_std_max)
+
+    def forward(self, obs: Tensor) -> tuple[Tensor, Tensor]:
+        """Return the Gaussian parameters of the pre-squash variable.
+
+        Args:
+            obs: Shape ``(B, obs_dim)``.
+
+        Returns:
+            ``(mean, log_std)``, each of shape ``(B, action_dim)``, with
+            ``log_std`` clamped to ``[log_std_min, log_std_max]``.
+        """
+        features = self.trunk(obs)
+        mean = self.mean_head(features)
+        log_std = torch.clamp(
+            self.log_std_head(features), self.log_std_min, self.log_std_max
         )
-        
-    def forward(self, state, action):
-        x = torch.cat([state, action], dim=1)
-        return self.net(x)
-
-# SAC için Politika Ağı (Gaussian Policy) - Layer Normalization ile
-class SACPolicy(nn.Module):
-    def __init__(self, state_dim, action_dim, action_space_limits, hidden_dim=256, 
-                 log_std_min=-20, log_std_max=2, epsilon=1e-6):
-        super(SACPolicy, self).__init__()
-        
-        self.log_std_min = log_std_min
-        self.log_std_max = log_std_max
-        self.action_dim = action_dim
-        self.action_space_limits = action_space_limits
-        self.epsilon = epsilon
-        
-        # Daha büyük hidden_dim ve layer normalization
-        self.shared = nn.Sequential(
-            NormalizedLinear(state_dim, hidden_dim),
-            nn.ReLU(),
-            NormalizedLinear(hidden_dim, hidden_dim),
-            nn.ReLU()
-        )
-        
-        # Ortalama değer için katman
-        self.mean_net = nn.Sequential(
-            NormalizedLinear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            NormalizedLinear(hidden_dim // 2, action_dim, use_ln=False)
-        )
-        
-        # Standart sapma için katman
-        self.log_std_net = nn.Sequential(
-            NormalizedLinear(hidden_dim, hidden_dim // 2),
-            nn.ReLU(),
-            NormalizedLinear(hidden_dim // 2, action_dim, use_ln=False)
-        )
-        
-    def forward(self, state):
-        x = self.shared(state)
-        mean = self.mean_net(x)
-        log_std = self.log_std_net(x)
-        log_std = torch.clamp(log_std, self.log_std_min, self.log_std_max)
-        
         return mean, log_std
-    
-    def sample(self, state, deterministic=False):
-        mean, log_std = self.forward(state)
-        std = log_std.exp()
-        
-        if deterministic:
-            # Deterministik mod için direkt olarak ortalama değeri kullan
-            tanh_mean = torch.tanh(mean)
-            action = self._scale_action(tanh_mean)
-            log_prob = None
-            return action, log_prob
-        
-        # Normal dağılım oluştur
-        normal = Normal(mean, std + self.epsilon)  # Numerical stability için epsilon eklendi
-        
-        # Reparameterization trick kullanarak örnek al
-        x = normal.rsample()
-        
-        # Tanh squashing
-        y = torch.tanh(x)
-        
-        # Aksiyon aralığına scale et
-        action = self._scale_action(y)
-        
-        # Log olasılık hesabı (Enforced Action Bounds)
-        log_prob = normal.log_prob(x) - torch.log(1 - y.pow(2) + self.epsilon)
-        log_prob = log_prob.sum(1, keepdim=True)
-        
-        return action, log_prob
-    
-    def _scale_action(self, action_normalized):
+
+    def sample(
+        self, obs: Tensor, generator: torch.Generator | None = None
+    ) -> tuple[Tensor, Tensor]:
+        """Draw a reparameterised action and its log-probability.
+
+        ``z = mean + sigma * eps`` with ``eps ~ N(0, I)`` (Haarnoja et al.,
+        2018, eq. 11), ``u = tanh(z)``, log-probability per appendix C.
+
+        Args:
+            obs: Shape ``(B, obs_dim)``.
+            generator: Optional torch generator for ``eps``.
+
+        Returns:
+            ``(u, log_prob)`` with shapes ``(B, action_dim)`` and ``(B, 1)``.
         """
-        Tanh ile [-1, 1] aralığına sıkıştırılmış aksiyonları, 
-        gerçek aksiyon aralığına dönüştürür
+        mean, log_std = self(obs)
+        eps = torch.randn(
+            mean.shape, generator=generator, dtype=mean.dtype, device=mean.device
+        )
+        z = mean + torch.exp(log_std) * eps
+        return torch.tanh(z), squashed_gaussian_log_prob(z, mean, log_std)
+
+    def deterministic(self, obs: Tensor) -> Tensor:
+        """Return the deterministic action ``tanh(mean(obs))``.
+
+        Args:
+            obs: Shape ``(B, obs_dim)``.
+
+        Returns:
+            Actions of shape ``(B, action_dim)`` in ``[-1, 1]``.
         """
-        # Ayrı aksiyon limitleri için vektör dönüştürme
-        lower_bound = torch.tensor([limit[0] for limit in self.action_space_limits], device=action_normalized.device)
-        upper_bound = torch.tensor([limit[1] for limit in self.action_space_limits], device=action_normalized.device)
-        
-        # [-1, 1] aralığından aksiyon aralığına dönüştürme
-        action = lower_bound + (action_normalized + 1.0) * 0.5 * (upper_bound - lower_bound)
-        
-        # Aksiyon sınırlarında clipping
-        return torch.clamp(action, lower_bound, upper_bound) 
+        mean, _ = self(obs)
+        return torch.tanh(mean)
