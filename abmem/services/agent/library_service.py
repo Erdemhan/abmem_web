@@ -1,0 +1,691 @@
+"""Agent library service: library agent creation and agent copying (PLAN 2.3, ADR-005).
+
+Every creation of a library agent and every copy of an agent (library ->
+scenario, scenario -> run) goes through this module.
+
+* A library agent has ``proxy=True`` and ``market=None``. Library names are
+  unique case-insensitively, as computed by the database ``LOWER`` function
+  (constraint ``uniq_library_agent_name_ci``).
+* Inside one market names are unique case-sensitively
+  (constraint ``uniq_agent_name_per_market``).
+* A copy carries ``COPIED_AGENT_FIELDS``, the portfolio and all plants.
+  ``source`` of a copy is the library agent it descends from.
+
+Name comparison semantics: the library check delegates lower-casing to the
+database (``Lower('name') == Lower(Value(name))``) instead of Python's
+``str.lower``/``str.casefold``. The service therefore accepts and rejects
+exactly the names the database constraint accepts and rejects. On PostgreSQL
+``LOWER`` depends on the database collation/ctype. For example it does not
+map the Turkish dotted capital ``'İ'`` to ``'i'`` (Python's ``'İ'.lower()``
+is ``'i̇'``), so ``'İzmir'`` and ``'izmir'`` are two different library names
+there, both for the database and for this service. A database
+whose server encoding cannot represent ``'İ'`` (for example WIN1252)
+rejects such names with ``DataError`` before any comparison.
+
+All validation failures raise ``LibraryValidationError``, a
+``django.core.exceptions.ValidationError`` subclass whose ``message_dict`` is
+keyed by field name (``name``, ``plants``, ``type``, ...). Views map it to
+HTTP 400.
+"""
+
+from __future__ import annotations
+
+import copy
+from dataclasses import dataclass
+from decimal import Decimal
+from typing import Any, Final, Mapping
+
+from django.core.exceptions import ValidationError
+from django.db import IntegrityError, transaction
+from django.db.models import Value
+from django.db.models.functions import Lower
+
+from ...models.agent import Agent
+from ...models.enums import (
+    AgentState,
+    AgentType,
+    AlgorithmType,
+    MarketState,
+    SimulationState,
+)
+from ...models.market import Market
+from ...models.models import Plant, Portfolio, Resource
+from ...models.simulation import Simulation
+from .resource_rules import validate_agent_resources
+
+NAME_MAX_LENGTH: Final[int] = Agent._meta.get_field("name").max_length or 20
+
+COPIED_AGENT_FIELDS: Final[tuple[str, ...]] = (
+    "name",
+    "budget",
+    "type",
+    "algorithm_type",
+    "algorithm_params",
+    "failstack_enabled",
+    "failstack_limit",
+    "failstack_delta",
+    "failstack_min_margin",
+)
+"""Agent fields carried by ``copy_agent``.
+
+Every concrete ``Agent`` field except ``NOT_COPIED_AGENT_FIELDS`` must be
+listed here (enforced by a test), so a new field cannot be silently dropped.
+"""
+
+NOT_COPIED_AGENT_FIELDS: Final[frozenset[str]] = frozenset(
+    {"id", "market", "proxy", "state", "source", "created_at", "updated_at"}
+)
+
+_NOT_COPIED_ROW_FIELDS: Final[frozenset[str]] = frozenset(
+    {"id", "created_at", "updated_at"}
+)
+
+
+class LibraryValidationError(ValidationError):
+    """Deterministic, field-keyed validation error of the library service.
+
+    Subclass of ``ValidationError`` so that existing view helpers that merge
+    ``ValidationError`` messages keep working. Views map it to HTTP 400.
+    """
+
+
+@dataclass(frozen=True)
+class PlantInput:
+    """One plant of an agent input.
+
+    Attributes:
+        resource_id: Primary key of the ``Resource``.
+        capacity: Installed capacity in MW, must be positive.
+    """
+
+    resource_id: int
+    capacity: int
+
+
+@dataclass(frozen=True)
+class AgentInput:
+    """Validated agent input built by views from JSON or form data.
+
+    Attributes:
+        name: Agent name (surrounding whitespace is stripped by the service).
+        budget: Initial budget.
+        type: Agent type.
+        algorithm_type: Bidding algorithm.
+        failstack_enabled: Whether the fail-stack rule is active.
+        failstack_limit: Fail-stack limit, at least 1.
+        failstack_delta: Fail-stack price step, at least 0.
+        failstack_min_margin: Fail-stack minimum margin.
+        plants: Plants of the agent, at least one.
+        algorithm_params: Per-agent algorithm parameters. ``None`` means an
+            empty mapping on creation and "keep the stored value" on update.
+    """
+
+    name: str
+    budget: Decimal
+    type: AgentType
+    algorithm_type: AlgorithmType
+    failstack_enabled: bool
+    failstack_limit: int
+    failstack_delta: Decimal
+    failstack_min_margin: Decimal
+    plants: tuple[PlantInput, ...]
+    algorithm_params: Mapping[str, Any] | None = None
+
+
+def normalize_name(name: str) -> str:
+    """Strip surrounding whitespace from an agent name.
+
+    Args:
+        name: Raw name.
+
+    Returns:
+        The name without leading and trailing whitespace. No other change is
+        made (case is preserved).
+    """
+    return name.strip()
+
+
+def check_name_available(
+    name: str, *, market: Market | None = None, exclude_id: int | None = None
+) -> bool:
+    """Return whether ``name`` can be used without violating a name constraint.
+
+    Args:
+        name: Candidate name. It is normalised with ``normalize_name``.
+        market: ``None`` checks the library (case-insensitive, database
+            ``LOWER``), otherwise the names inside this market
+            (case-sensitive).
+        exclude_id: Agent id to ignore (the agent being edited).
+
+    Returns:
+        False for an empty name or a name that is already taken, else True.
+    """
+    normalized = normalize_name(name)
+    if not normalized:
+        return False
+    if market is None:
+        queryset = Agent.objects.annotate(_lname=Lower("name")).filter(
+            market__isnull=True, _lname=Lower(Value(normalized))
+        )
+    else:
+        queryset = Agent.objects.filter(market=market, name=normalized)
+    if exclude_id is not None:
+        queryset = queryset.exclude(id=exclude_id)
+    return not queryset.exists()
+
+
+def _error(field: str, message: str, code: str) -> LibraryValidationError:
+    """Build a single-field ``LibraryValidationError``.
+
+    Args:
+        field: Field key.
+        message: Human-readable message.
+        code: Machine-readable error code.
+
+    Returns:
+        The error instance.
+    """
+    return LibraryValidationError({field: [ValidationError(message, code=code)]})
+
+
+def _name_taken_error(name: str, market: Market | None) -> LibraryValidationError:
+    """Return the error for a name that is already in use.
+
+    Args:
+        name: The normalised name.
+        market: ``None`` for the library, else the target market.
+
+    Returns:
+        The error instance keyed by ``name``.
+    """
+    if market is None:
+        message = (
+            f"A library agent named '{name}' already exists "
+            "(names are compared case-insensitively)."
+        )
+    else:
+        message = f"An agent named '{name}' already exists in this scenario."
+    return _error("name", message, "name_taken")
+
+
+def _validate_name(name: str, *, exclude_id: int | None = None) -> str:
+    """Normalise and validate a library agent name.
+
+    Args:
+        name: Raw name.
+        exclude_id: Agent id to ignore in the uniqueness check.
+
+    Returns:
+        The normalised name.
+
+    Raises:
+        LibraryValidationError: Empty, too long or already taken.
+    """
+    if not isinstance(name, str):
+        raise _error("name", "Agent name must be a string.", "invalid")
+    normalized = normalize_name(name)
+    if not normalized:
+        raise _error("name", "Agent name is required.", "required")
+    if len(normalized) > NAME_MAX_LENGTH:
+        raise _error(
+            "name",
+            f"Agent name must have at most {NAME_MAX_LENGTH} characters "
+            f"({len(normalized)} given).",
+            "max_length",
+        )
+    if not check_name_available(normalized, market=None, exclude_id=exclude_id):
+        raise _name_taken_error(normalized, None)
+    return normalized
+
+
+def _validate_enum(value: Any, enum_cls: Any, field: str) -> Any:
+    """Return ``value`` as a member of ``enum_cls``.
+
+    Args:
+        value: Enum member or integer value.
+        enum_cls: ``django_enumfield`` enum class.
+        field: Field key used in the error.
+
+    Returns:
+        The enum member.
+
+    Raises:
+        LibraryValidationError: Value is not a valid member.
+    """
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise _error(field, f"Invalid {field}: {value!r}.", "invalid_choice")
+    try:
+        return enum_cls(value)
+    except ValueError as exc:
+        raise _error(field, f"Invalid {field}: {value!r}.", "invalid_choice") from exc
+
+
+def _validate_failstack(limit: Any, delta: Any, min_margin: Any) -> None:
+    """Check the fail-stack values against the database constraints.
+
+    Args:
+        limit: Fail-stack limit.
+        delta: Fail-stack price step.
+        min_margin: Fail-stack minimum margin.
+
+    Raises:
+        LibraryValidationError: Limit below 1, negative or non-finite delta,
+            non-finite minimum margin.
+    """
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+        raise _error(
+            "failstack_limit", "Fail-stack limit must be an integer >= 1.", "invalid"
+        )
+    if not Decimal(delta).is_finite() or Decimal(delta) < 0:
+        raise _error(
+            "failstack_delta",
+            "Fail-stack delta must be a finite number >= 0.",
+            "invalid",
+        )
+    if not Decimal(min_margin).is_finite():
+        raise _error(
+            "failstack_min_margin",
+            "Fail-stack minimum margin must be a finite number.",
+            "invalid",
+        )
+
+
+def _resolve_plants(
+    agent_type: AgentType, plants: tuple[PlantInput, ...]
+) -> list[tuple[Resource, int]]:
+    """Validate plant rows and the agent-type resource rule.
+
+    Args:
+        agent_type: Agent type of the owner.
+        plants: Plant inputs.
+
+    Returns:
+        ``(resource, capacity)`` pairs in input order.
+
+    Raises:
+        LibraryValidationError: No plants, unknown resource, capacity not a
+            positive integer, or a resource not allowed for ``agent_type``.
+    """
+    rows = tuple(plants)
+    if not rows:
+        raise _error("plants", "At least one plant is required.", "no_plants")
+    for plant in rows:
+        capacity = plant.capacity
+        if isinstance(capacity, bool) or not isinstance(capacity, int) or capacity <= 0:
+            raise _error(
+                "plants",
+                f"Plant capacity must be a positive integer, got {capacity!r}.",
+                "invalid_capacity",
+            )
+    resource_ids = {plant.resource_id for plant in rows}
+    resources = Resource.objects.in_bulk(resource_ids)
+    missing = sorted(rid for rid in resource_ids if rid not in resources)
+    if missing:
+        raise _error(
+            "plants",
+            f"Unknown resource id(s): {', '.join(str(r) for r in missing)}.",
+            "unknown_resource",
+        )
+    resolved = [(resources[plant.resource_id], plant.capacity) for plant in rows]
+    try:
+        validate_agent_resources(agent_type, [resource for resource, _ in resolved])
+    except ValidationError as exc:
+        if hasattr(exc, "error_dict"):
+            raise LibraryValidationError(exc.error_dict) from exc
+        raise LibraryValidationError({"plants": exc.error_list}) from exc
+    return resolved
+
+
+def _validated_fields(data: AgentInput, *, exclude_id: int | None) -> dict[str, Any]:
+    """Validate an ``AgentInput`` and return the agent field values.
+
+    Args:
+        data: Agent input.
+        exclude_id: Agent id ignored by the name uniqueness check.
+
+    Returns:
+        Mapping of agent field name to value (without ``algorithm_params``).
+
+    Raises:
+        LibraryValidationError: On the first invalid field.
+    """
+    name = _validate_name(data.name, exclude_id=exclude_id)
+    agent_type = _validate_enum(data.type, AgentType, "type")
+    algorithm_type = _validate_enum(
+        data.algorithm_type, AlgorithmType, "algorithm_type"
+    )
+    try:
+        budget = Decimal(data.budget)
+    except (TypeError, ValueError, ArithmeticError) as exc:
+        raise _error("budget", "Budget must be a number.", "invalid") from exc
+    if not budget.is_finite():
+        raise _error("budget", "Budget must be a finite number.", "invalid")
+    _validate_failstack(
+        data.failstack_limit, data.failstack_delta, data.failstack_min_margin
+    )
+    return {
+        "name": name,
+        "budget": budget,
+        "type": agent_type,
+        "algorithm_type": algorithm_type,
+        "failstack_enabled": bool(data.failstack_enabled),
+        "failstack_limit": data.failstack_limit,
+        "failstack_delta": Decimal(data.failstack_delta),
+        "failstack_min_margin": Decimal(data.failstack_min_margin),
+    }
+
+
+def _clean_fields(agent: Agent) -> None:
+    """Run Django field validation (lengths, decimal digits) on ``agent``.
+
+    Args:
+        agent: Unsaved or modified agent.
+
+    Raises:
+        LibraryValidationError: With the field-keyed messages of
+            ``Model.clean_fields``.
+    """
+    try:
+        agent.clean_fields(exclude={"market", "source", "state"})
+    except ValidationError as exc:
+        raise LibraryValidationError(exc.message_dict) from exc
+
+
+def _save_agent(agent: Agent, market: Market | None) -> None:
+    """Save ``agent`` and convert a name constraint race into a validation error.
+
+    Args:
+        agent: Agent to save.
+        market: Market used for the name check when converting the error.
+
+    Raises:
+        LibraryValidationError: The name was taken between the check and the
+            insert (database constraint raised ``IntegrityError``).
+        IntegrityError: Any other constraint violation.
+    """
+    try:
+        with transaction.atomic():
+            agent.save()
+    except IntegrityError:
+        if not check_name_available(agent.name, market=market, exclude_id=agent.id):
+            raise _name_taken_error(agent.name, market) from None
+        raise
+
+
+def _write_plants(agent: Agent, plants: list[tuple[Resource, int]]) -> None:
+    """Replace the plants of ``agent`` (portfolio created when missing).
+
+    Args:
+        agent: Saved agent.
+        plants: ``(resource, capacity)`` pairs.
+    """
+    portfolio, _ = Portfolio.objects.get_or_create(
+        agent=agent, defaults={"proxy": agent.proxy}
+    )
+    portfolio.plant_set.all().delete()
+    Plant.objects.bulk_create(
+        [
+            Plant(
+                portfolio=portfolio,
+                resource=resource,
+                capacity=capacity,
+                proxy=agent.proxy,
+            )
+            for resource, capacity in plants
+        ]
+    )
+
+
+@transaction.atomic
+def create_library_agent(data: AgentInput) -> Agent:
+    """Create a library agent with its portfolio and plants.
+
+    Args:
+        data: Agent input.
+
+    Returns:
+        The saved library agent (``proxy=True``, ``market=None``).
+
+    Raises:
+        LibraryValidationError: Name empty, longer than ``NAME_MAX_LENGTH``
+            or already used by a library agent (case-insensitive), invalid
+            enum, fail-stack or budget value, missing/unknown plants,
+            non-positive capacity, or a resource not allowed for the type.
+    """
+    fields = _validated_fields(data, exclude_id=None)
+    plants = _resolve_plants(fields["type"], data.plants)
+    agent = Agent(
+        market=None,
+        proxy=True,
+        state=AgentState.CREATED,
+        algorithm_params=copy.deepcopy(dict(data.algorithm_params or {})),
+        **fields,
+    )
+    _clean_fields(agent)
+    _save_agent(agent, None)
+    _write_plants(agent, plants)
+    return agent
+
+
+@transaction.atomic
+def update_library_agent(agent: Agent, data: AgentInput) -> Agent:
+    """Update a library agent and replace its plants.
+
+    Copies in scenarios and runs are separate rows and are not changed.
+
+    Args:
+        agent: The library agent to update.
+        data: New values.
+
+    Returns:
+        The updated agent.
+
+    Raises:
+        ValueError: ``agent`` is not a library agent.
+        LibraryValidationError: Same conditions as ``create_library_agent``.
+    """
+    if not agent.is_library:
+        raise ValueError(f"Agent {agent.pk} is not a library agent.")
+    fields = _validated_fields(data, exclude_id=agent.pk)
+    plants = _resolve_plants(fields["type"], data.plants)
+    for key, value in fields.items():
+        setattr(agent, key, value)
+    if data.algorithm_params is not None:
+        agent.algorithm_params = copy.deepcopy(dict(data.algorithm_params))
+    _clean_fields(agent)
+    _save_agent(agent, None)
+    _write_plants(agent, plants)
+    return agent
+
+
+@transaction.atomic
+def copy_agent(
+    src: Agent, market: Market, *, proxy: bool, name: str | None = None
+) -> Agent:
+    """Deep-copy an agent with its portfolio and plants into ``market``.
+
+    Args:
+        src: Library, scenario or run agent to copy.
+        market: Target market.
+        proxy: ``proxy`` flag of the copy (True for scenario agents, False
+            for run agents). Portfolio and plants get the same flag.
+        name: Name of the copy, defaults to ``src.name``.
+
+    Returns:
+        The saved copy. ``source`` is ``src`` when ``src`` is a library agent,
+        else ``src.source``. ``state`` is ``CREATED``.
+
+    Raises:
+        LibraryValidationError: ``src`` is a library agent already copied
+            into ``market`` (OQ-14, code ``duplicate_library_agent``), or the
+            name is empty, too long or already used in ``market``.
+    """
+    if src.is_library and Agent.objects.filter(market=market, source=src).exists():
+        raise _error(
+            "library_agent_id",
+            f"Library agent '{src.name}' is already part of this scenario.",
+            "duplicate_library_agent",
+        )
+    new_name = normalize_name(src.name if name is None else name)
+    if not new_name:
+        raise _error("name", "Agent name is required.", "required")
+    if len(new_name) > NAME_MAX_LENGTH:
+        raise _error(
+            "name",
+            f"Agent name must have at most {NAME_MAX_LENGTH} characters "
+            f"({len(new_name)} given).",
+            "max_length",
+        )
+    if not check_name_available(new_name, market=market):
+        raise _name_taken_error(new_name, market)
+
+    values = {
+        field: copy.deepcopy(getattr(src, field)) for field in COPIED_AGENT_FIELDS
+    }
+    values["name"] = new_name
+    new_agent = Agent(
+        market=market,
+        proxy=proxy,
+        state=AgentState.CREATED,
+        source=src if src.is_library else src.source,
+        **values,
+    )
+    _save_agent(new_agent, market)
+
+    try:
+        plants = [
+            (plant.resource, plant.capacity)
+            for plant in src.portfolio.plant_set.order_by("id").select_related(
+                "resource"
+            )
+        ]
+    except Agent.portfolio.RelatedObjectDoesNotExist:
+        plants = []
+    _write_plants(new_agent, plants)
+    return new_agent
+
+
+@transaction.atomic
+def add_new_agent_to_scenario(data: AgentInput, market: Market) -> Agent:
+    """'New agent' path: add the agent to the library, then copy it into ``market``.
+
+    Args:
+        data: Agent input.
+        market: Market of the proxy scenario.
+
+    Returns:
+        The scenario copy (``proxy=True``, ``source`` = the new library agent).
+
+    Raises:
+        LibraryValidationError: From ``create_library_agent`` or
+            ``copy_agent``. Nothing is saved in that case.
+    """
+    library_agent = create_library_agent(data)
+    return copy_agent(library_agent, market, proxy=True)
+
+
+def _copy_row_values(instance: Any, exclude: frozenset[str]) -> dict[str, Any]:
+    """Return the concrete field values of ``instance`` for a new row.
+
+    Args:
+        instance: Model instance.
+        exclude: Field names (``Field.name``) to leave out.
+
+    Returns:
+        Mapping of ``Field.attname`` to a deep copy of its value.
+    """
+    return {
+        field.attname: copy.deepcopy(getattr(instance, field.attname))
+        for field in instance._meta.concrete_fields
+        if field.name not in exclude
+    }
+
+
+@transaction.atomic
+def clone_scenario_for_run(
+    proxy_sim: Simulation,
+    *,
+    seed: int | None = None,
+    forced_algorithm: AlgorithmType | None = None,
+    algorithm_overrides: Mapping[str, Any] | None = None,
+    fixed_agent_fields: Mapping[str, Any] | None = None,
+) -> Simulation:
+    """Copy a proxy scenario into a new run (simulation, market, agents).
+
+    Args:
+        proxy_sim: Proxy simulation (scenario template).
+        seed: Seed of the run, ``proxy_sim.seed`` when ``None`` (0 is a valid
+            seed and is kept).
+        forced_algorithm: When given, ``algorithm_type`` of every copied agent
+            (K7, HPO).
+        algorithm_overrides: Merged into ``algorithm_params`` of every copied
+            agent (keys of the override win).
+        fixed_agent_fields: Values set on every copied agent (HPO fixed
+            fail-stack settings). Keys must be in ``COPIED_AGENT_FIELDS``
+            and must not be ``name``.
+
+    Returns:
+        The new run simulation (``proxy=False``, state ``CREATED``,
+        ``currentPeriod=-1``) with a market in state ``CREATED`` and one
+        ``proxy=False`` copy of every scenario agent.
+
+    Raises:
+        ValueError: ``proxy_sim`` is not a proxy simulation, or
+            ``fixed_agent_fields`` contains a key that cannot be set.
+        LibraryValidationError: A forced algorithm or fixed fail-stack value
+            is invalid.
+    """
+    if not proxy_sim.proxy:
+        raise ValueError(f"Simulation {proxy_sim.pk} is not a proxy simulation.")
+    fixed = dict(fixed_agent_fields or {})
+    invalid_keys = sorted(
+        key for key in fixed if key not in COPIED_AGENT_FIELDS or key == "name"
+    )
+    if invalid_keys:
+        raise ValueError(f"fixed_agent_fields keys not allowed: {invalid_keys}.")
+    if forced_algorithm is not None:
+        forced_algorithm = _validate_enum(
+            forced_algorithm, AlgorithmType, "algorithm_type"
+        )
+
+    sim_values = _copy_row_values(proxy_sim, _NOT_COPIED_ROW_FIELDS)
+    sim_values.update(
+        proxy=False,
+        state=SimulationState.CREATED,
+        currentPeriod=-1,
+        seed=proxy_sim.seed if seed is None else seed,
+        error="",
+    )
+    new_sim = Simulation.objects.create(**sim_values)
+
+    proxy_market = proxy_sim.market
+    market_values = _copy_row_values(
+        proxy_market, _NOT_COPIED_ROW_FIELDS | {"simulation"}
+    )
+    market_values.update(proxy=False, state=MarketState.CREATED, simulation=new_sim)
+    new_market = Market.objects.create(**market_values)
+
+    for agent in proxy_market.agent_set.order_by("id"):
+        new_agent = copy_agent(agent, new_market, proxy=False)
+        changed = False
+        if forced_algorithm is not None:
+            new_agent.algorithm_type = forced_algorithm
+            changed = True
+        if algorithm_overrides:
+            new_agent.algorithm_params = {
+                **new_agent.algorithm_params,
+                **copy.deepcopy(dict(algorithm_overrides)),
+            }
+            changed = True
+        for key, value in fixed.items():
+            setattr(new_agent, key, value)
+            changed = True
+        if changed:
+            _validate_failstack(
+                new_agent.failstack_limit,
+                new_agent.failstack_delta,
+                new_agent.failstack_min_margin,
+            )
+            _clean_fields(new_agent)
+            new_agent.save()
+    return new_sim
