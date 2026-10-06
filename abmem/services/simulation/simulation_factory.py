@@ -1,6 +1,4 @@
-import sys
 # Add the project path to the system path to allow for module imports
-sys.path.append("D:/Projeler/abm/abmem_project/test")
 
 # Import necessary models and enums
 from ...models.simulation import Simulation

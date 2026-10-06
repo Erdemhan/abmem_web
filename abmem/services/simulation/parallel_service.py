@@ -6,11 +6,6 @@ import numpy as np
 import torch
 import multiprocessing
 
-# ✅ Django ayarları en başta yüklenmeli
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "web_project.settings")  # <--- projenin settings dosyasını buraya yaz
-import django
-django.setup()
-
 
 # ✅ Worker başlatıldığında seed'leri ayarla
 def init_worker():
@@ -43,4 +38,3 @@ def startPool(agents, algorithms):
 
     updated_algorithms, offers = zip(*results)
     return list(updated_algorithms), list(offers)
-

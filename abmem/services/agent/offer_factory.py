@@ -1,5 +1,3 @@
-import sys
-sys.path.append("D:/Projeler/abm/abmem_project/test")
 
 from ...models.agent import Agent
 from ...models.market import Market

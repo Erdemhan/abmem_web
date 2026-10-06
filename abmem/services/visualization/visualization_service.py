@@ -1,5 +1,3 @@
-import sys
-sys.path.append("D:/Projeler/abm/abmem_project/test")
 from ...models.models import *
 from ...models.enums import *
 

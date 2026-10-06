@@ -1,8 +1,6 @@
-import sys
 import os
 
 # Adding the project directory to the system path
-sys.path.append("D:/Projeler/abm/abmem_project/test")
 
 from ...models.models import Portfolio, Plant, Resource, Agent
 from ...models.enums import *

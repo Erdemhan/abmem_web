@@ -1,8 +1,4 @@
-import sys
-sys.path.append("D:/Projeler/abm/abmem_project/test")
 
-import django
-django.setup()
 
 from ...models.enums import AgentState
 from ...models import Agent, Offer, Portfolio

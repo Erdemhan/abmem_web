@@ -1,5 +1,3 @@
-import sys
-sys.path.append("D:/Projeler/abm/abmem_project/test")
 
 from typing import Any, Iterable
 from django_enumfield import enum

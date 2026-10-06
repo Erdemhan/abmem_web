@@ -1,6 +1,4 @@
 # db/models.py
-import sys
-sys.path.append("D:/Projeler/abm/abmem_project/test")
 from django.db import models
 from django_enumfield import enum
 from .enums import SimulationMode,SimulationState,PeriodType
