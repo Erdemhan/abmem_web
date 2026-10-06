@@ -10,31 +10,71 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.0/ref/settings/
 """
 
+import os
 from pathlib import Path
+
+from django.core.exceptions import ImproperlyConfigured
 
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
+def _load_dotenv(path: Path) -> None:
+    """Load KEY=VALUE lines from a local .env file into os.environ.
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = "django-insecure-ycmz4#8l$y8&cggoqe0+8=xfyc55v_cm#r1ziio9edq69(yv7s"
+    Existing environment variables take precedence. Blank lines and lines
+    starting with '#' are ignored. Surrounding single or double quotes are
+    stripped from values. The file is optional and git-ignored.
+
+    Args:
+        path: Location of the .env file.
+    """
+    if not path.is_file():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip("'\""))
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    """Read a boolean environment variable ('1', 'true', 'yes', 'on' are true)."""
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+_load_dotenv(BASE_DIR / ".env")
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = _env_bool("DJANGO_DEBUG", default=False)
 
-ALLOWED_HOSTS = []
+# SECURITY WARNING: keep the secret key used in production secret!
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "")
+if not SECRET_KEY:
+    if not DEBUG:
+        raise ImproperlyConfigured(
+            "DJANGO_SECRET_KEY must be set when DJANGO_DEBUG is false."
+        )
+    SECRET_KEY = "django-insecure-development-only-key"
+
+ALLOWED_HOSTS = [
+    h.strip()
+    for h in os.environ.get("DJANGO_ALLOWED_HOSTS", "").split(",")
+    if h.strip()
+]
 
 
 # Application definition
 
 INSTALLED_APPS = [
-    'channels',
-    'abmem',
-    'web_project',
+    "channels",
+    "abmem",
+    "web_project",
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
@@ -58,7 +98,7 @@ ROOT_URLCONF = "web_project.urls"
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        'DIRS': [BASE_DIR / 'templates','abmem' ],
+        "DIRS": [BASE_DIR / "templates", BASE_DIR / "abmem"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -71,14 +111,14 @@ TEMPLATES = [
     },
 ]
 
-ASGI_APPLICATION = 'web_project.asgi.application'
+ASGI_APPLICATION = "web_project.asgi.application"
 
 # Channels kullanımı için Redis ayarları (Opsiyonel ama önerilir)
 CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels_redis.core.RedisChannelLayer',
-        'CONFIG': {
-            "hosts": [('127.0.0.1', 6379)],
+    "default": {
+        "BACKEND": "channels_redis.core.RedisChannelLayer",
+        "CONFIG": {
+            "hosts": [("127.0.0.1", 6379)],
         },
     },
 }
@@ -88,13 +128,13 @@ CHANNEL_LAYERS = {
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases
 
 DATABASES = {
-    'default': {
-                'ENGINE': 'django.db.backends.postgresql_psycopg2',
-                'NAME': 'abmem',
-                'USER': 'postgres',
-                'PASSWORD': 'myapp',
-                'HOST': '127.0.0.1',
-                'PORT': '5432',
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": os.environ.get("DB_NAME", "abmem"),
+        "USER": os.environ.get("DB_USER", "postgres"),
+        "PASSWORD": os.environ.get("DB_PASSWORD", ""),
+        "HOST": os.environ.get("DB_HOST", "127.0.0.1"),
+        "PORT": os.environ.get("DB_PORT", "5432"),
     }
 }
 
@@ -135,9 +175,8 @@ USE_TZ = True
 
 STATIC_URL = "static/"
 
-import os 
 STATICFILES_DIRS = [
-    os.path.join(BASE_DIR, 'abmem\static'),
+    BASE_DIR / "abmem" / "static",
 ]
 
 
