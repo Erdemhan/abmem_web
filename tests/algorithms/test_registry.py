@@ -1,7 +1,7 @@
 """Tests of the registry, the BaseAgentAlgorithm template and the contract helper.
 
-The class-resolution tests are expected to fail until the rl_algorithms
-packages land in wave 2. The wave-2 integrator removes the xfail markers.
+All eight algorithm classes are implemented (wave 2), so class resolution and
+the policy contract are checked for every AlgorithmType.
 """
 
 from __future__ import annotations
@@ -35,11 +35,6 @@ from tests.algorithms.conftest import (
     small_ddpg_config,
 )
 from tests.algorithms.contract import assert_policy_contract
-
-WAVE2_XFAIL = pytest.mark.xfail(
-    reason="algorithm classes land in wave 2 (rl_algorithms); integrator removes this marker",
-    strict=False,
-)
 
 # Registry ---------------------------------------------------------------------
 
@@ -84,7 +79,6 @@ def test_unknown_algorithm_type_raises_key_error(bad: object) -> None:
             func(bad)  # type: ignore[arg-type]
 
 
-@WAVE2_XFAIL
 @pytest.mark.parametrize("algorithm_type", list(AlgorithmType), ids=lambda t: t.name)
 def test_get_algorithm_class_resolves(algorithm_type: AlgorithmType) -> None:
     cls = registry.get_algorithm_class(algorithm_type)
@@ -94,7 +88,6 @@ def test_get_algorithm_class_resolves(algorithm_type: AlgorithmType) -> None:
     assert cls.is_learning == (algorithm_type not in registry.BASELINE_TYPES)
 
 
-@WAVE2_XFAIL
 @pytest.mark.parametrize("algorithm_type", list(AlgorithmType), ids=lambda t: t.name)
 def test_build_policy_with_none_params_satisfies_contract(
     algorithm_type: AlgorithmType,
