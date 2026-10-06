@@ -169,3 +169,6 @@ abc_log/
 abc_logs/
 abmem/services/algorithms/optimization/abc_logs/
 abm_ddpg/sim_data/*.json
+
+# Claude Code agent worktrees
+.claude/worktrees/

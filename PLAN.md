@@ -128,7 +128,8 @@ Her maddede: **ne yapılacak**, **nasıl doğrulanacak**. Type B/C maddeleri ayr
 - [ ] Tüm `select_action`'lar santral sayısı kadar aksiyon döndürür. Sessizce `[0.0]` döndüren `try/except` blokları kaldırılır (A1).
 - **Doğrulama:** algoritma başına unit test (çıktı şekli, hedef aksiyon aralığı, PPO'da ilk epoch'ta oran = 1).
 
-### 1.7 Piyasa takası (B4, B8, A8)
+### 1.7 Piyasa takası (B4, B8, B11, A8)
+- [ ] `metDemand` kabul edilen miktarların toplamı olarak hesaplanır (B11). Karakterizasyon testlerindeki `characterization_changes_in_1_7` işaretli beklentiler yeni davranışa göre güncellenir.
 - [ ] Eşit fiyat grubunda **eşit pay, teklif miktarıyla sınırlı** bölüştürme (OQ-18 = b): kalan talep gruptaki tekliflere eşit bölünür, payı miktarını aşan teklif miktarıyla sınırlanır ve artan talep kalan teklifler arasında yeniden eşit bölünür. Özyinelemeli fonksiyon kaldırılır.
 - [ ] `Offer.acceptanceAmount` (ve gerekirse `Period.metDemand`) `DecimalField`'a çevrilir, migration yazılır (B8).
 - [ ] Talep verisi doğrulaması: `periodNumber` veri uzunluğunu aşıyorsa veya NaN varsa simülasyon başlamadan anlaşılır bir hata verilir. İndeksleme `periodNumber - 1` ile yapılır (A8).

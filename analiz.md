@@ -413,6 +413,7 @@ flowchart LR
 | B8 | B | Kısmi kabul miktarı kesirli ama `IntegerField`'a kaydediliyor | `market_service.py:196`, `models/models.py:69` |
 | B9 | B | `evaluate_result` ilk periyot bütçesini ve ilk teklif kapasitesini kullanıyor | `hyperparam_optimization.py:118-120` |
 | B10 | B | Global değiştirilebilir durum aynı süreçteki simülasyonlar arasında sızıyor | `market_service.py:21-45`, `agent_algorithm.py:52-61`, `hyperparam_optimization.py:164-170` |
+| B11 | B | Marjinal grubun kabul edilen miktarı `metDemand`'e eklenmiyor (sonradan bulundu) | `market_service.py:171-178` |
 | A1 | A | TD3/PPO tek aksiyon döndürüyor → çok santralli ajanlarda çökme/sıfır fiyat | `TD3.py:136-141`, `ppo.py:259-264` |
 | A2 | A | Bozuk giriş noktaları (`main.py`, `views.start`, `market_service.run → init`) | `main.py:9`, `views.py:30`, `market_service.py:262` |
 | A3 | A | Tekrarlanan fonksiyon tanımları birbirini eziyor | `portfolio_factory.py:29,44`, `reader_service.py:51,72` |
@@ -423,6 +424,7 @@ flowchart LR
 | A8 | A | Talep verisinde 8808 geçerli satır var, uzunluk kontrolü yok | `market_service.py:299-301` |
 | A9 | A | Test yok, bağımlılık dosyası yok, model kaydetme yok | depo |
 | A10 | A | Ölü kod ve performans sorunları | bkz. 7.3 |
+| A11 | A | Migration zinciri boş veritabanında çalışmıyordu (sonradan bulundu, düzeltildi) | `migrations/0002_remove_agent_seed.py` |
 
 ---
 
@@ -565,6 +567,14 @@ Marjinal teklif `acceptanceAmount = D / n` alır (`market_service.py:196`). Bu b
 - `AgentAlgorithm.__init__` hiperparametreleri modül global'lerine yazar (`agent_algorithm.py:52-61`) ve `agent_service.init` `FAILSTACK_LIMIT`'i bir global'e yazar (`agent_service.py:28-29`). Bir süreçteki tüm ajanlar bunları paylaşır.
 - `optimize_hyperparams` modül düzeyindeki sözlükte `PARAM_BOUNDS.update(...)` çağırır (`hyperparam_optimization.py:167-170`). `optimizer.py` birden fazla algoritma üzerinde döndüğünde, SAC optimize edilirken PPO parametreleri hâlâ sınırların içindedir.
 
+#### B11. Karşılanan talep (`metDemand`) eksik kaydediliyor
+
+*İlk analizden sonra, 0.6 karakterizasyon testleri yazılırken bulundu (2026-10-06).* `marketClearing`, marjinal grubu `priceGroupCalculation`'a devrettiğinde bu fonksiyonun kabul ettiği miktarı kendi yerel `demand` değişkeninden düşmez (`market_service.py:171-174`). Dönüş değeri `metDemand - demand` olduğu için marjinal grubun kabul edilen miktarı karşılanan talebe hiç eklenmez. Karakterizasyon testlerinde (`tests/characterization/test_clearing_current.py`):
+- Farklı fiyatlı örnekte (A=400@50, B=300@70, C=500@90, talep 1000) kabul edilen toplam 1000 MWh iken `metDemand = 700` kaydedilir.
+- B4 örneğinde (A=100, B=10 aynı fiyat, talep 60) 30 MWh kabul edilmesine rağmen `metDemand = 0` kaydedilir.
+
+Etkisi: `Period.metDemand` marjinal grubun olduğu her periyotta, yani pratikte neredeyse her periyotta, düşük kaydedilmiştir. Ödül, bütçe ve PTF bu değeri kullanmadığı için ajan davranışını etkilemez. `metDemand`'e dayanan herhangi bir raporlama veya analiz ise yanlıştır. 1.7'deki yeni takas fonksiyonu `met_demand`'i kabul edilen miktarların toplamı olarak döndürür.
+
 ### 7.3 Type A — yazılım hataları
 
 - **A1. TD3/PPO ve çok santralli ajanlar.** Her iki `select_action` metodu tek elemanlı bir liste döndürür (`TD3.py:136-141`, `ppo.py:259-264`). `calculateOffers` santral başına `actions[counter]` indeksler (`agent_service.py:64`), bu da ikinci santralde `IndexError` fırlatır. Her iki metot ayrıca her şeyi `try/except` içine alır ve herhangi bir hatada `[0.0]` döndürür. Böylece hatalar, hiçbir hata fırlatılmadan sıfır fiyatlı tekliflere dönüşür.
@@ -582,6 +592,7 @@ Marjinal teklif `acceptanceAmount = D / n` alır (`market_service.py:196`). Bu b
   - `visualization_service` sadece boş fonksiyonlar içeriyor. `multi_objective_abc.py`, `moabc.py`'nin kopyası. Dört özdeş `ReplayBuffer` sınıfı var.
   - Her ajan durum değişikliği `agent.save()` tetikliyor ve her teklif periyot başına 3–4 kez kaydediliyor. 8 ajan ve 336 periyot için bu, çalıştırma başına on binlerce ek veritabanı yazması demek.
   - `holiday = day % 6 == 0` (`market_service.py:59`), 7 yerine 6 günlük bir döngü kullanıyor.
+- **A11. Migration zinciri boş veritabanında çalışmıyordu** *(0.6 sırasında bulundu, `fe22f88` ile düzeltildi).* `0001_initial` `Agent.seed` sütununu oluşturuyordu, `0002_remove_agent_seed` aynı sütunu tekrar eklemeye çalışıyordu. Boş bir veritabanında `column "seed" already exists` hatası alınıyordu. Mevcut veritabanında migration'lar farklı zamanlarda yeniden üretildiği için hata görünmüyordu. 0002 artık işlem içermiyor, 0003 sütunu kaldırmaya devam ediyor.
 
 ---
 
