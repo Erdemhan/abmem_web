@@ -13,6 +13,7 @@
                 <div class="form-group">
                     <label for="type">Energy Type</label>
                     <select class="form-control" id="type" name="type">
+                        <option value="" selected>Select Type</option>
                         <option value="0">Renewable</option>
                         <option value="1">Fossil</option>
                         <option value="2">Nuclear</option>
@@ -33,10 +34,10 @@
                                 <tr id="row_template" style="display: none;">
                                     <td>
                                         <div class="form-group">
-                                            <select class="form-control" id="resource_dd" name="resources[]">
+                                            <select class="form-control" id="resource_dd" name="resources[]" disabled>
                                                 <option value="">Select Resource</option>
                                                 {% for resource in resources %}
-                                                <option value="{{ resource.id }}">{{ resource.name }}</option>
+                                                <option value="{{ resource.id }}" data-energy-type="{{ resource.energyType.value }}">{{ resource.name }}</option>
                                                 {% endfor %}
                                             </select>
                                         </div>
@@ -78,7 +79,81 @@
     </div>
 </agent-form>
 
+{{ allowed_energy_types|json_script:"allowed-energy-types" }}
 <script>
+    // Agent type -> allowed energy types, rendered from resource_rules.allowed_energy_types (PLAN 2.2).
+    var AGENT_FORM_ALLOWED_ENERGY_TYPES = JSON.parse(document.getElementById("allowed-energy-types").textContent);
+
+    function agentFormAllowed(agentType) {
+        if (agentType === null || agentType === undefined || agentType === "") {
+            return null;
+        }
+        return AGENT_FORM_ALLOWED_ENERGY_TYPES[String(agentType)] || [];
+    }
+
+    function agentFormOptionAllowed(option, allowed) {
+        var energyType = option.getAttribute("data-energy-type");
+        return energyType === null || allowed.indexOf(Number(energyType)) !== -1;
+    }
+
+    // Plant rows of the form, without the hidden template row.
+    function agentFormPlantRows() {
+        return Array.prototype.filter.call(
+            document.querySelectorAll("#plant_table tbody tr"),
+            function (row) { return row.id !== "row_template"; }
+        );
+    }
+
+    // Disable the select without an agent type, otherwise hide and disable incompatible options.
+    // keepSelected leaves the currently selected option usable (stored plants of an edited agent).
+    function agentFormFilterSelect(select, agentType, keepSelected) {
+        var allowed = agentFormAllowed(agentType);
+        if (allowed === null) {
+            select.disabled = true;
+            return;
+        }
+        select.disabled = false;
+        Array.prototype.forEach.call(select.options, function (option) {
+            var ok = agentFormOptionAllowed(option, allowed) || (keepSelected && option.selected);
+            option.hidden = !ok;
+            option.disabled = !ok;
+        });
+    }
+
+    function agentFormFilterRows(keepSelected) {
+        var agentType = document.getElementById("type").value;
+        agentFormPlantRows().forEach(function (row) {
+            var select = row.querySelector('select[name="resources[]"]');
+            if (select) {
+                agentFormFilterSelect(select, agentType, keepSelected);
+            }
+        });
+    }
+
+    // On type change: warn about and remove incompatible plant rows, then filter the remaining selects.
+    // Bound through jQuery so that $("#type").change() triggers in agent-list.html reach it.
+    $(document).on("change", "#type", function () {
+        var allowed = agentFormAllowed(this.value);
+        var incompatible = [];
+        if (allowed !== null) {
+            agentFormPlantRows().forEach(function (row) {
+                var select = row.querySelector('select[name="resources[]"]');
+                if (select && select.value !== "") {
+                    var option = select.options[select.selectedIndex];
+                    if (!agentFormOptionAllowed(option, allowed)) {
+                        incompatible.push({ row: row, name: option.text });
+                    }
+                }
+            });
+        }
+        if (incompatible.length > 0) {
+            alert("These plants are not allowed for the selected agent type and will be removed: "
+                + incompatible.map(function (item) { return item.name; }).join(", "));
+            incompatible.forEach(function (item) { item.row.remove(); });
+        }
+        agentFormFilterRows(false);
+    });
+
     function addPlantRow() {
         var table = document.getElementById("plant_table").getElementsByTagName('tbody')[0];
         var rowTemplate = document.getElementById("row_template");
@@ -92,6 +167,7 @@
         inputElement.value = "";
 
         table.appendChild(newRow);
+        agentFormFilterSelect(selectElement, document.getElementById("type").value, false);
     }
 
     function deleteRow(button) {

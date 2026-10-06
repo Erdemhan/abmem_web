@@ -205,7 +205,7 @@
                     <td>
                         <select name="resources[]" class="form-select">
                             {% for resource in resources %}
-                            <option value="{{ resource.id }}" {% if resource.id == plant.resource.id %}selected{% endif %}>{{ resource.name }}</option>
+                            <option value="{{ resource.id }}" data-energy-type="{{ resource.energyType.value }}" {% if resource.id == plant.resource.id %}selected{% endif %}>{{ resource.name }}</option>
                             {% endfor %}
                         </select>
                     </td>
@@ -227,6 +227,8 @@
                 </tr>`;
             $("#plant_table tbody").append(newRow);
             {% endfor %}
+            // Filter resource options for the stored type without removing stored plants (PLAN 2.2).
+            agentFormFilterRows(true);
 
             $("#agent-modal").modal('show');
         });

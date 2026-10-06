@@ -140,7 +140,7 @@
                                                 <select class="form-control plant-resource" id="plant-resource" name="resources[]">
                                                     <option value="">Select Resource</option>
                                                     {% for resource in resources %}
-                                                    <option value="{{ resource.id }}" {% if plant.resource.id == resource.id %}selected{% endif %}>{{ resource.name }}</option>
+                                                    <option value="{{ resource.id }}" data-energy-type="{{ resource.energyType.value }}" {% if plant.resource.id == resource.id %}selected{% endif %}>{{ resource.name }}</option>
                                                     {% endfor %}
                                                 </select>
                                             </td>
@@ -168,6 +168,7 @@
                         <button type="button" class="btn btn-primary" onclick="createAgent()">Create Agent</button>
                     </div>
                 </row>
+                <div id="form-errors" class="alert alert-danger text-white d-none" role="alert"></div>
                 <row class="form-group row">
                     <button type="button" class="btn btn-success col-3" onclick="submitForm()">Update Simulation</button>
                 </row>
@@ -179,6 +180,82 @@
     </main>
     <!-- END MAIN -->
 
+    {{ allowed_energy_types|json_script:"allowed-energy-types" }}
+    <script>
+        // Agent type -> allowed energy types, rendered from resource_rules.allowed_energy_types (PLAN 2.2).
+        var ALLOWED_ENERGY_TYPES = JSON.parse(document.getElementById('allowed-energy-types').textContent);
+
+        function allowedEnergyTypes(agentType) {
+            if (agentType === null || agentType === undefined || agentType === '') {
+                return null;
+            }
+            return ALLOWED_ENERGY_TYPES[String(agentType)] || [];
+        }
+
+        function isResourceAllowed($option, allowed) {
+            var energyType = $option.attr('data-energy-type');
+            return energyType === undefined || allowed.indexOf(Number(energyType)) !== -1;
+        }
+
+        // Disable the select without an agent type, otherwise hide and disable incompatible options.
+        // keepSelected leaves the currently selected option usable (initial render of stored data).
+        function filterResourceSelect($select, agentType, keepSelected) {
+            var allowed = allowedEnergyTypes(agentType);
+            if (allowed === null) {
+                $select.prop('disabled', true);
+                return;
+            }
+            $select.prop('disabled', false);
+            $select.find('option').each(function () {
+                var $option = $(this);
+                var ok = isResourceAllowed($option, allowed) || (keepSelected && $option.is(':selected'));
+                $option.prop('hidden', !ok).prop('disabled', !ok);
+            });
+        }
+
+        // Remove plant rows whose resource is not allowed for the new type (after a warning), then filter the rest.
+        function applyAgentType($agentRow) {
+            var agentType = $agentRow.find('.agent-type').val();
+            var allowed = allowedEnergyTypes(agentType);
+            var incompatibleRows = [];
+            var names = [];
+            $agentRow.find('.plant').each(function () {
+                var $select = $(this).find('.plant-resource');
+                var $selected = $select.find('option:selected');
+                if (allowed !== null && $select.val() && !isResourceAllowed($selected, allowed)) {
+                    incompatibleRows.push($(this));
+                    names.push($selected.text());
+                }
+            });
+            if (incompatibleRows.length > 0) {
+                alert('These plants are not allowed for the selected agent type and will be removed: ' + names.join(', '));
+                incompatibleRows.forEach(function ($row) { $row.remove(); });
+            }
+            $agentRow.find('.plant-resource').each(function () {
+                filterResourceSelect($(this), agentType, false);
+            });
+        }
+
+        $(document).on('change', '.agent-type', function () {
+            applyAgentType($(this).closest('tr.agent'));
+        });
+
+        function showFormErrors(xhr) {
+            var $box = $('#form-errors');
+            var errors = xhr.responseJSON && xhr.responseJSON.errors;
+            var messages = [];
+            if (errors) {
+                Object.keys(errors).forEach(function (key) {
+                    errors[key].forEach(function (message) { messages.push(message); });
+                });
+            } else {
+                messages.push('The request failed (HTTP ' + xhr.status + ').');
+            }
+            $box.empty();
+            messages.forEach(function (message) { $box.append($('<div>').text(message)); });
+            $box.removeClass('d-none');
+        }
+    </script>
     <script>
         
         var agents = collectAgentsData()
@@ -194,6 +271,7 @@
                     </td>
                     <td>
                         <select class="form-control agent-type">
+                            <option value="" selected>Select Type</option>
                             <option value="0">Renewable</option>
                             <option value="1">Fossil</option>
                             <option value="2">Nuclear</option>
@@ -266,7 +344,7 @@
                         <select class="form-control plant-resource" id="plant-resource" name="resources[]">
                             <option value="">Select Resource</option>
                             {% for resource in resources %}
-                            <option value="{{ resource.id }}">{{ resource.name }}</option>
+                            <option value="{{ resource.id }}" data-energy-type="{{ resource.energyType.value }}">{{ resource.name }}</option>
                             {% endfor %}
                         </select>
                     </td>
@@ -278,8 +356,18 @@
                     </td>
                 </tr>
             `;
-            $(`.agent[data-index="${agentIndex}"] .plants-tbody`).append(plantHtml);
+            var $agentRow = $(`.agent[data-index="${agentIndex}"]`);
+            $agentRow.find('.plants-tbody').append(plantHtml);
+            filterResourceSelect($agentRow.find('.plant').last().find('.plant-resource'), $agentRow.find('.agent-type').val(), false);
         }
+
+        // Initial render: filter options of stored plants without removing them.
+        $('#agents-tbody tr.agent').each(function () {
+            var agentType = $(this).find('.agent-type').val();
+            $(this).find('.plant-resource').each(function () {
+                filterResourceSelect($(this), agentType, true);
+            });
+        });
 
         function removeAgent(agentIndex) {
             agents.splice(agentIndex, 1);
@@ -358,6 +446,7 @@
                 },
                 error: function (xhr, status, error) {
                     console.error("Error: " + error);
+                    showFormErrors(xhr);
                 }
             });
         }
