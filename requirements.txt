@@ -1,0 +1,13 @@
+# Runtime dependencies (PLAN 0.3). Versions pinned from the working conda env
+# `rlearning` (Python 3.11.9). Install torch from the PyTorch index that matches
+# the target machine (CPU or the local CUDA version), e.g.
+#   pip install torch==2.4.0 --index-url https://download.pytorch.org/whl/cpu
+Django==5.0.1
+django-enumfield==3.1
+channels==4.1.0
+psycopg2==2.9.9
+numpy==1.26.4
+pandas==2.2.2
+openpyxl==3.1.5
+PyYAML==6.0.1
+torch==2.4.0
