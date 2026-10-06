@@ -1,0 +1,230 @@
+# Çalışma Planı ve TODO
+
+**Durum:** kararlar onaylandı (2026-10-06). Sadece madde 1.5'teki fail-stack formülü onay bekliyor.
+**Kaynak:** `analiz.md` bulguları (ID'ler oradaki C/B/A numaralarıdır) ve kullanıcının 4 özellik isteği.
+**Öncelik:** önce bulgular (Faz 1), sonra özellikler (Faz 2). Faz 0 ikisinin de önkoşuludur.
+**Kurallar:**
+- Plan onaylanmadan tasarım dosyası kesinleştirilmez.
+- `FORMULATION.md` kullanıcı kilitlidir. Ben taslağı hazırlarım, içerik kullanıcı onayıyla kesinleşir.
+- Her Type B/C düzeltmesinden önce `research-debug` skill'i devreye alınır ve commit mesajında `BUG-IMPACT` belirtilir.
+- Testler geçmeden commit atılmaz. Staging öncesi `.gitignore` kontrol edilir.
+- **codebase-memory MCP** her değişiklikte aktif kullanılır (bkz. Bölüm 6).
+
+---
+
+## 0. Kararlar
+
+**Onaylandı (2026-10-06):**
+- **K1 = (a)** Ödül: ajanın tüm santralleri üzerinden periyot kârı / (toplam kapasite × fiyat tavanı), kırpılmamış float. Eski tanımlar `docs/legacy_rewards.md`'de arşivlendi.
+- **K3 = tek ve boyutsal olarak tutarlı fail-stack kuralı**, ajan başına arayüzden açılıp kapatılabilir. Kural taslağı madde 1.5'te. **Formülün kendisi onay bekliyor.**
+- **K2, K4–K11:** aşağıdaki tablodaki **kalın** öneriler kabul edildi.
+
+Orijinal karar tablosu (kayıt için):
+
+| # | Soru | Seçenekler | Etkilediği maddeler |
+|---|---|---|---|
+| K1 | Ajanın ödülü ne olsun? | **(a) periyot kârı / (kapasite × fiyat tavanı), kırpmasız float** · (b) mevcut bileşik skor, `int()` olmadan · (c) başka | 1.1, 1.3, FORMULATION |
+| K2 | Teklif anında *t* periyodunun talebi bilinir mi (gün öncesi tahmin varsayımı)? Eksik gecikmeler nasıl doldurulsun? | **talep(t) bilinir, eksik gecikme olduğunda öğrenme gecikmeler oluşana kadar başlamaz** · tarihî PTF ile ısınma · 168 saatlik gecikmeyi kısa simülasyonlarda kaldırma | 1.3 |
+| K3 | Fail-stack kuralı ve TD3/PPO'daki failstack + risk toleransı kaldırılsın mı? | **tamamen kaldır** · tek ve boyutsal olarak tutarlı bir kurala dönüştür | 1.5 |
+| K4 | Proxy ajan kütüphanesi nasıl modellensin? | **(A) mevcut `Agent` modeli: kütüphane ajanı = `proxy=True, market=NULL`, isimde koşullu unique kısıt** · (B) ayrı `AgentTemplate` + `TemplatePlant` modelleri | 2.3 |
+| K5 | İsim tekilliğinin kapsamı ve mevcut ajanlar | **kütüphane isimleri büyük/küçük harf duyarsız global unique, senaryo içindeki isimler market bazında unique. Mevcut 22 proxy ajan kütüphaneye aktarılır, çakışanlara `_2` eki verilir** · aktarma yapılmaz | 2.3 |
+| K6 | `CCGT` kaynağı `RENEWABLE` kayıtlı. Düzeltilsin mi? | **evet, `FOSSIL` yap** (aksi halde madde 2.2 sonrası mevcut CCGT ajanları geçersiz olur) · hayır | 2.2 |
+| K7 | Bir HPO çalışmasında seçilen algoritma kime uygulanır? | **senaryodaki tüm ajanlara (homojen)** · sadece o algoritmayı kullanan ajanlara | 2.4 |
+| K8 | HPO nasıl çalıştırılsın? | **mevcut desen: ayrı süreç + `multiprocessing.Pool`, durum ve iptal bayrağı veritabanında** · görev kuyruğu (Celery/RQ, Redis zaten ayarlı) | 2.4 |
+| K9 | HPO değerlendirme simülasyonları saklansın mı? (Silinen 10 GB'ın kaynağı buydu.) | **özet skorlar saklanır, değerlendirme simülasyonlarının periyot/teklifleri skorlamadan sonra silinir, sadece en iyi deneme tam saklanır** · hepsi saklanır | 2.4 |
+| K10 | WebSocket katmanı | **kaldır, HTTP sorgulama devam etsin** · `group_send` ile gerçekten bağla | 1.13 |
+| K11 | Mevcut commit edilmemiş değişiklikler | **önce mevcut hali bir "baseline" commit'i olarak yeni bir dalda sabitle, düzeltmeleri onun üstüne yap** · başka | 0.1 |
+
+---
+
+## 1. Bağımlılık görünümü
+
+```mermaid
+flowchart TD
+    F0["Faz 0: altyapı<br/>git, migration, requirements, ayarlar, test altyapısı, FORMULATION"] --> F1A
+    subgraph F1["Faz 1: bulgular"]
+        F1A["1.1 ödül (C1) + 1.2 tanılama"] --> F1B["1.3 gözlem/geçiş (C2, B1, B2)"]
+        F1B --> F1C["1.4 ağlar: gürültü, normalizasyon, aksiyon uzayı (C3, C4, B6)"]
+        F1C --> F1D["1.5 fail-stack, ısınma (C7, B5, B7)"]
+        F1D --> F1E["1.6 TD3, PPO, RDPG, çoklu aksiyon (C5, C6, B3, A1)"]
+        F1E --> F1F["1.7 piyasa takası (B4, B8, A8)"]
+        F1F --> F1G["1.8 global durum (B10) + 1.9 yazılım hataları (A2-A4)"]
+        F1G --> F1H["1.10 seed, değerlendirme modu, karşılaştırma ajanları (C9)"]
+        F1H --> F1I["1.11 ABC ve değerlendirme metriği (C8, B9)"]
+        F1G --> F1J["1.12 performans, 1.13 WebSocket"]
+        F1I --> F1K["1.14 algoritma başına duman testleri"]
+    end
+    F1G --> R1["2.1 ajan başına algoritma seçimi"]
+    F0 --> R2["2.2 türe göre kaynak filtresi"]
+    R2 --> R4["2.3 proxy ajan kütüphanesi"]
+    R1 --> R4
+    F1I --> R3["2.4 HPO arayüzü ve izleme ekranı"]
+    R4 --> R3
+    F1K --> F3["Faz 3: uçtan uca doğrulama, çok seed'li deney"]
+    R3 --> F3
+```
+
+2.2 madde (kaynak filtresi) RL koduna dokunmadığı için Faz 0'dan hemen sonra, Faz 1 ile paralel yapılabilir.
+
+---
+
+## 2. Faz 0 — Altyapı (önkoşul)
+
+- [ ] **0.1 Git düzeni** (K11). Mevcut çalışma ağacını yeni bir dalda baseline commit'i olarak sabitle (`.gitignore` kontrolüyle, `abc_log/`, `abc_logs/` hariç tutulur). Düzeltmeler bu dalın üzerinde, faz başına ayrı commit'lerle ilerler.
+- [ ] **0.2 Migration'ları takibe al.** `.gitignore`'dan `migrations` satırını kaldır, yereldeki `0001`–`0003`'ü commit'le. Model ile veritabanı uyumunu `manage.py makemigrations --check --dry-run` ile doğrula. Bu yapılmadan Faz 2'deki model değişiklikleri yeniden üretilemez (A6).
+- [ ] **0.3 Bağımlılık dosyası.** Çalışan `rlearning` ortamından sürümleri sabitlenmiş `requirements.txt` üret (torch, Django, channels, psycopg2, pandas, openpyxl, numpy, pyyaml). Kurulum adımını README'ye yaz.
+- [ ] **0.4 Ayarlar.** `SECRET_KEY`, veritabanı parolası ve `DEBUG` ortam değişkenlerinden okunsun. Örnek bir `.env.example` eklensin, `.env` git dışında kalsın (A6).
+- [ ] **0.5 Import yan etkileri.** `sys.path.append(...)` satırlarını ve import anındaki `django.setup()` çağrılarını kaldır (A5). Giriş noktaları (`manage.py`, HPO CLI) Django'yu bir kez kurar. Bu, testlerin çalışabilmesi için gereklidir.
+- [ ] **0.6 Test altyapısı.** `pytest` + `pytest-django`, ayrı bir test veritabanı. İlk iş olarak mevcut davranışı sabitleyen karakterizasyon testleri: takas (B4 örneği dahil), bütçe hesabı, periyot oluşturma.
+- [ ] **0.7 `FORMULATION.md` taslağı** (kullanıcı onayı zorunlu). İçerik: MDP (gözlem, aksiyon, ödül, geçiş zamanlaması, `done`), piyasa kuralları (merit order, PAYASBID/PAYASPTF, eşit fiyat bölüştürmesi), maliyet ve bütçe denklemleri, değerlendirme metrikleri, HPO amaç fonksiyonu, parametre kaynakları. K1, K2, K3 kararları buraya işlenir.
+
+---
+
+## 3. Faz 1 — Bulgular
+
+Her maddede: **ne yapılacak**, **nasıl doğrulanacak**. Type B/C maddeleri ayrı commit ve `BUG-IMPACT` notu taşır.
+
+### 1.1 Ödül (C1)
+- [ ] `agent_algorithm.py:170,181`'deki `int(reward)` dönüşümlerini kaldır. Ödül `float32` olarak buffer'a gitsin.
+- [ ] Ödülü K1 kararına göre yeniden yaz: `r = Σ_i g_i / (Σ_i q_i · P_max)`, `P_max` piyasanın üst teklif sınırı, kırpma yok. Bileşik skor ödül olarak kullanılmaz (arşiv: `docs/legacy_rewards.md`).
+- **Doğrulama:** unit test, `learn()`'e verilen ödülün buffer'da değişmeden durduğunu kontrol eder. Kısa bir çalıştırmada ödül dağılımı sıfırdan farklı olmalı.
+
+### 1.2 Öğrenme tanılamaları (Eksik #3)
+- [ ] Ajan ve periyot başına ödül, critic kaybı, actor kaybı, ortalama Q, gürültü σ ve "fiyat müdahale edildi mi" bilgisini kaydet. Öneri: yeni `AgentStepLog` modeli (ajan, periyot, alanlar) ya da çalıştırma başına CSV. İzleme ekranına küçük bir grafik eklenebilir.
+- **Doğrulama:** 30 periyotluk çalıştırmada her ajan için 28 satır log oluşur.
+
+### 1.3 Gözlem ve geçiş (C2, B1, B2)
+- [ ] Tek bir `build_observation(market, t)` fonksiyonu: `(talep(t), PTF(t-1), PTF(t-24), PTF(t-168))`. Periyotlara `order_by('-id')` indeksiyle değil `periodNumber` ile erişilir.
+- [ ] Ajanın bellekte `prev = (obs, action)` tutması. Bir sonraki adımda `(prev.obs, prev.action, r, o_t)` buffer'a eklenir (örnek kod: `analiz.md` 11.2).
+- [ ] Eksik gecikme politikası K2'ye göre.
+- [ ] Ödül ajanın **tüm** santrallerinin teklifleri üzerinden hesaplanır, `max_capacity` toplam kapasitedir (B2).
+- **Doğrulama:** sahte periyotlarla unit test. Saklanan gözlemin, karar anındaki gözlemle birebir aynı olduğu ve gecikmelerin doğru `periodNumber`'ı gösterdiği kontrol edilir.
+
+### 1.4 Ağlar: gürültü, normalizasyon, aksiyon uzayı (C3, C4, B6)
+- [ ] Actor: `tanh` çıktısı, `forward` içinde gürültü ve `clamp` yok.
+- [ ] `select_action(obs, explore)`: gürültü sadece burada ve normalize uzayda eklenir. σ azaltması periyot başına bir kez yapılır.
+- [ ] Buffer ve critic normalize aksiyon `u ∈ [-1, 1]` kullanır. Fiyata dönüşüm teklif oluşturulurken `Market.lowerBidBound/upperBidBound` ile yapılır (B6).
+- [ ] `ObservationNormalizer`: özellik başına sabit ortalama/standart sapma, Excel verisinin eğitim kısmından hesaplanır. Actor, critic, karar ve öğrenme için aynı fonksiyon kullanılır. Durumdaki `int()` dönüşümleri kaldırılır.
+- [ ] DDPG, TD3, RDPG, SAC ve PPO aynı arayüze getirilir (ortak bir `BaseAgentAlgorithm` sınıfı, ortak `ReplayBuffer`).
+- **Doğrulama:** farklı durumların farklı normalize vektör ürettiği, `explore=False`'ta çıktının deterministik olduğu ve actor gradyanının sıfır olmadığı unit testleri. `analiz.md` 11.1'deki kontrol deneyi tekrarlanır: gürültüsüz çıktı artık durumla değişmeli.
+
+### 1.5 Fail-stack ve ısınma (C7, B5, B7)
+- [ ] Mevcut üç ayrı mekanizma kaldırılır: `market_service.py:231-232`'deki sayaç, `agent_service.py:69-71`'deki rastgele fiyat, TD3/PPO içindeki `failstack`, aksiyon küçültme, ödül çarpanı ve PPO'daki `risk_tolerance`.
+- [ ] Yerine **tek bir kural** gelir. Kural algoritmaların dışında, `agent_service` içinde uygulanır ve tüm algoritmalar için aynıdır. Taslak (onay bekliyor, kesinleşince `FORMULATION.md`'ye yazılır):
+  - **Başarısızlık tanımı (santral *i*, periyot *t*):** teklif reddedildiyse ya da kâr marjı eşiğin altındaysa `f_i(t) = 1`.
+    `kâr_marjı = g_i / (p_acc · q_acc)` → TL / TL, birimsiz. Eşik `m_min`, varsayılan 0 (yani zarar).
+  - **Sayaç:** `n_i ← n_i + 1` başarısızlıkta, `n_i ← 0` başarıda. Sayaç ardışık başarısızlıkları sayar.
+  - **Müdahale:** `n_i ≥ L` ise o santralin bir sonraki fiyatı `U[max(alt_sınır, PTF(t−1) − δ), PTF(t−1))` aralığından çekilir ve `n_i ← 0` yapılır. `δ` TL/MWh cinsindendir (varsayılan 15, eski kuraldaki değer). Fiyatla aynı birimde olduğu için karşılaştırma tutarlıdır. Sonuç piyasa sınırlarına kırpılır.
+  - **Buffer'a giden aksiyon:** fiilen uygulanan fiyat (normalize uzayda). Müdahale bilgisi 1.2'deki loga yazılır.
+  - **Algoritma uyumu:** DDPG, TD3, SAC ve RDPG off-policy olduğu için davranış politikasından farklı aksiyonlarla öğrenebilir. PPO on-policy'dir ve oran hesabı davranış politikasının olasılığını gerektirir. Bu yüzden PPO'da müdahale edilen adımlar politika kaybından maskelenir, değer fonksiyonu eğitiminde kullanılır.
+  - **Parametreler (ajan başına):** `failstack_enabled` (varsayılan **kapalı**, adil karşılaştırmalar için), `failstack_limit` *L* (varsayılan 6), `failstack_delta` *δ* (varsayılan 15), `failstack_min_margin` *m_min* (varsayılan 0). Arayüz kısmı madde 2.1'de.
+- [ ] Tüm algoritmalar için ortak bir `learning_starts` parametresi (örn. bir batch dolana kadar eğitim yok).
+- **Doğrulama:** kural kapalıyken tam sayı fiyat oranı yaklaşık 0. Kural açıkken müdahaleler sadece *L* ardışık başarısızlıktan sonra oluşur (sahte sonuçlarla unit test). Birim testi: para birimi ölçeklense (TL → kuruş) başarısızlık kararı değişmez. Tüm algoritmalar aynı periyotta eğitime başlar.
+
+### 1.6 Algoritmaya özgü düzeltmeler (C5, C6, B3, A1)
+- [ ] TD3: hedef aksiyon normalize uzayda `clamp(-1, 1)`, yumuşatma gürültüsü σ = 0.2, kırpma 0.5 (1.4'ten sonra doğru hale gelir). Ödülün failstack ile çarpılması kaldırılır.
+- [ ] PPO: log-olasılık örnekleme anında saklanır. `evaluate` örneklemeyle aynı dağılımı kullanır. Sınırlı aksiyonlar için tanh ile sıkıştırılmış Gauss ve log-olasılık düzeltmesi. Güncelleme sabit uzunluklu rollout'lar üzerinden yapılır.
+- [ ] RDPG: karar ve öğrenme için ayrı geçmiş tutulmaz, saklanan gözlem dizileri kullanılır. Gizli durum her pencere için sıfırdan başlatılır (Heess vd., 2015). Critic dizideki her adımda o adımın gerçek aksiyonunu alır.
+- [ ] Tüm `select_action`'lar santral sayısı kadar aksiyon döndürür. Sessizce `[0.0]` döndüren `try/except` blokları kaldırılır (A1).
+- **Doğrulama:** algoritma başına unit test (çıktı şekli, hedef aksiyon aralığı, PPO'da ilk epoch'ta oran = 1).
+
+### 1.7 Piyasa takası (B4, B8, A8)
+- [ ] Eşit fiyat grubunda orantılı (pro-rata) bölüştürme: kalan talep, gruptaki tekliflere miktarlarıyla orantılı dağıtılır. Özyinelemeli fonksiyon kaldırılır.
+- [ ] `Offer.acceptanceAmount` (ve gerekirse `Period.metDemand`) `DecimalField`'a çevrilir, migration yazılır (B8).
+- [ ] Talep verisi doğrulaması: `periodNumber` veri uzunluğunu aşıyorsa veya NaN varsa simülasyon başlamadan anlaşılır bir hata verilir. İndeksleme `periodNumber - 1` ile yapılır (A8).
+- **Doğrulama:** `analiz.md` B4 örneği (A=100, B=10, D=60 → B=10, A=50), arz yetersizliği, tek teklif, sıfır talep testleri.
+
+### 1.8 Global durum (B10)
+- [ ] `market_service.agents` global listesi kaldırılır. Çalıştırma başına bir `SimulationContext` nesnesi ajanları ve algoritmaları taşır.
+- [ ] Hiperparametreler modül global'lerinden çıkar, `AlgorithmConfig` dataclass'ına taşınır. `FAILSTACK_LIMIT` global'i kaldırılır.
+- [ ] `PARAM_BOUNDS.update(...)` yerine her HPO çalışması kendi kopyasını kullanır.
+- **Doğrulama:** aynı süreçte arka arkaya iki simülasyon çalıştırılır, ikincisindeki ajan sayısı ve teklif–periyot market eşleşmesi doğru olmalı (silinen veride 18 840 tutarsız teklif vardı).
+
+### 1.9 Yazılım hataları (A2, A3, A4)
+- [ ] `params=None` durumunda algoritma için varsayılan `AlgorithmConfig` kullanılır. **Bu, arayüzden çalıştırmayı tekrar açar** ve 2.1'in ön adımıdır.
+- [ ] `main.py`, `views.start`, `market_service.run → init(market)` giriş noktaları düzeltilir ya da kaldırılır.
+- [ ] Çift tanımlı `createPlant` ve `readExcel` temizlenir. `resource_factory` hataları ve YAML tutarsızlıkları (`wind`/`winds`) düzeltilir. YAML yolu kullanılmıyorsa tamamen kaldırılır.
+- **Doğrulama:** arayüzden 5 periyotluk simülasyon `FINISHED` olur (integration testi, Django test client ile).
+
+### 1.10 Seed, değerlendirme modu, karşılaştırma ajanları (C9, Eksik #2)
+- [ ] Simülasyona `seed` alanı eklenir. `set_seed` CUDA'yı da seed'ler. Seed çalıştırma kaydında saklanır.
+- [ ] Eğitim ve değerlendirme fazları: değerlendirmede `explore=False`, ağlar dondurulmuş.
+- [ ] Karşılaştırma ajanları yeni algoritma türleri olarak eklenir: `RANDOM`, `MARGINAL_COST` (fiyat = değişken maliyet), `FIXED_MARKUP` (maliyet × (1 + m)).
+- **Doğrulama:** aynı seed ile iki çalıştırma aynı sonucu verir. Karşılaştırma ajanlarıyla senaryo uçtan uca çalışır.
+
+### 1.11 ABC ve değerlendirme metriği (C8, B9)
+- [ ] Standart ABC (Karaboga, 2005): gözcü arılar uygunlukla orantılı olasılıkla kaynak seçer. Kaşif fazı `limit` ile çalışır.
+- [ ] Amaç: ya iki amaç üzerinden gerçek Pareto baskınlığı (Deb, 2001) ya da açıkça tek amaç (ağırlıklı skor). Seçim `FORMULATION.md`'ye yazılır.
+- [ ] Değerlendirme JSON dosyası yerine veritabanından yapılır. Başlangıç bütçesi gerçek başlangıç değeri, kapasite ajanın toplam kapasitesi olur (B9).
+- [ ] Her aday birden fazla seed'de değerlendirilir. Raporlanan sonuç, aramada kullanılmamış seed'lerde tekrar ölçülür.
+- **Doğrulama:** sentetik bir amaç fonksiyonuyla (örn. bilinen optimumlu bir test fonksiyonu) ABC'nin optimuma yaklaştığını gösteren unit test.
+
+### 1.12 Performans (A10)
+- [ ] Teklifler `bulk_create`/`bulk_update` ile yazılır. Her durum değişikliğinde `agent.save()` çağrılmaz (sadece gerekli alanlar, `update_fields` ile).
+- [ ] Ölü kod temizliği: `estimatePTF`, `MPIP` (kullanılacaksa ayrı tutulur), `parallel_service`, `multi_objective_abc.py`, boş `visualization_service`, tekrarlanan `ReplayBuffer`'lar.
+- **Doğrulama:** 8 ajan × 336 periyot çalıştırmasının süresi önce/sonra ölçülür.
+
+### 1.13 WebSocket (A7)
+- [ ] K10 kararına göre kaldır ya da bağla.
+
+### 1.14 Duman testleri
+- [ ] Her algoritma ve karşılaştırma ajanı için 30 periyotluk, 2 ajanlı test senaryosu. NaN/Inf, boş teklif ve sınır değer kontrolleri.
+
+---
+
+## 4. Faz 2 — Özellik istekleri
+
+### 2.1 Ajan başına algoritma seçimi (İstek 1)
+- [ ] **Model:** `Agent.algorithm_type` alanı (`AlgorithmType` enum: `DDPG, RDPG, TD3, SAC, PPO` + 1.10'daki karşılaştırma ajanları), varsayılan `DDPG`. Migration.
+- [ ] **İsim çakışması:** mevcut `Agent.algorithm = 0` sınıf niteliği (çalışma anındaki ağları tutar) yeni alanla karışmasın diye `Agent.runtime_policy` olarak yeniden adlandırılır. Etkilenen yerler (codebase-memory ile tespit edildi): `agent_service.init`, `relearn`, `calculateOffers`, `market_service.saveOffers`.
+- [ ] **Servis:** `AgentService.init` algoritmayı `agent.algorithm_type`'tan seçer. Hiperparametreler algoritmanın varsayılan `AlgorithmConfig`'inden gelir. İsteğe bağlı olarak bir HPO sonucunun en iyi parametreleri seçilebilir (2.4 sonrası).
+- [ ] **Kopyalama:** `run_simulation`'daki derin kopya alanı otomatik taşır. Bu bir testle doğrulanır.
+- [ ] **Fail-stack ayarları (K3):** `Agent` modeline `failstack_enabled`, `failstack_limit`, `failstack_delta`, `failstack_min_margin` alanları eklenir (varsayılanlar madde 1.5'te). Kütüphaneden kopyalanırken ve çalıştırma kopyasında taşınır.
+- [ ] **Arayüz:** ajan formu, simülasyon oluşturma/düzenleme ekranlarındaki ajan satırı ve ajan listesi bir algoritma seçim alanı/sütunu alır. Algoritma seçiminin yanında fail-stack için açık/kapalı anahtarı bulunur. Açıkken *L*, *δ* ve *m_min* alanları görünür. Karşılaştırma ajanlarında (`RANDOM`, `MARGINAL_COST`, `FIXED_MARKUP`) anahtar pasiftir. İzleme ekranında ajan algoritması ve fail-stack durumu gösterilir.
+- **Doğrulama:** iki farklı algoritmalı ajanla senaryo oluşturulur, çalıştırılır ve her ajanın doğru algoritma sınıfıyla başlatıldığı kontrol edilir.
+
+### 2.2 Ajan türüne göre kaynak filtresi (İstek 2)
+- [ ] **Kural tek yerde:** `allowed_energy_types(agent_type)`: `RENEWABLE → {RENEWABLE}`, `FOSSIL → {FOSSIL}`, `NUCLEAR → {NUCLEAR}`, `HYBRID → hepsi`.
+- [ ] **Sunucu doğrulaması:** `create_simulation`, `update_simulation`, `create_agent_and_related`, `update_agent` ve `AgentForm.clean()` kuralı uygular. İhlalde açıklayıcı bir hata mesajıyla 400 döner.
+- [ ] **Arayüz:** tür seçilmeden kaynak listesi pasif kalır. Seçenekler `data-energy-type` niteliğine göre filtrelenir. Tür değiştiğinde uyumsuz santral satırları uyarıyla temizlenir.
+- [ ] **Veri:** K6 kararına göre `CCGT` düzeltilir. Mevcut proxy ajanlarda ihlal taraması yapılır (şu an sadece 529 ve 530'daki CCGT ajanları ihlalde).
+- **Doğrulama:** her tür için izin verilen/verilmeyen kaynak kombinasyonlarının view testleri.
+
+### 2.3 Proxy ajan kütüphanesi (İstek 4)
+- [ ] **Model** (K4 = A varsayımıyla): kütüphane ajanı `proxy=True, market=NULL`. Kısıtlar: kütüphane ajanları için `UniqueConstraint(Lower('name'), condition=Q(market__isnull=True))`, her market içinde `UniqueConstraint('market', 'name')`. Kopyaların kaynağını izlemek için `Agent.source` (kütüphane ajanına FK, `SET_NULL`). Migration ve K5'e göre veri aktarımı.
+- [ ] **Ajan sayfası = kütüphane:** oluşturma, düzenleme, silme. Liste sadece kütüphane ajanlarını gösterir.
+- [ ] **Simülasyon oluşturma/düzenleme:** iki yol.
+  - "Yeni ajan": formdan oluşturulan ajan önce kütüphaneye eklenir, sonra senaryoya kopyalanır.
+  - "Kütüphaneden seç": seçilen ajan santralleri ve algoritmasıyla birlikte senaryoya kopyalanır.
+- [ ] **İsim tekilliği:** anlık kontrol endpoint'i (`/dev/agent/check-name?name=`), sunucu doğrulaması ve veritabanı kısıtı. Çakışmada form gönderilmez ve mesaj gösterilir.
+- [ ] Ajan oluşturma kodu (`create_simulation`, `update_simulation`, `create_agent_and_related`, `run_simulation`'daki kopyalama) tek bir `agent_service.copy_agent(...)` / `create_library_agent(...)` fonksiyonunda toplanır.
+- **Doğrulama:** aynı isimle ikinci kütüphane ajanının reddedilmesi, kütüphaneden seçilen ajanın senaryoya tam kopyalanması ve kütüphane ajanı düzenlendiğinde mevcut senaryoların değişmemesi testleri.
+
+### 2.4 Hiperparametre araması arayüzü ve izleme ekranı (İstek 3)
+Önkoşullar: 1.8, 1.10, 1.11.
+- [ ] **Modeller:**
+  - `HPOStudy`: ad, algoritma, senaryo (proxy `Simulation`'a FK, `PROTECT`), parametre sınırları (JSON), koloni boyutu, iterasyon, limit, arama seed'leri ve değerlendirme seed'leri (JSON), amaç ayarı (JSON), durum (`CREATED, RUNNING, FINISHED, FAILED, CANCELED`), zaman damgaları, en iyi parametreler ve skor, hata metni, `cancel_requested`.
+  - `HPOTrial`: çalışma (FK, `CASCADE`), iterasyon, faz (`INIT, EMPLOYED, ONLOOKER, SCOUT`), kaynak indeksi, parametreler (JSON), seed, ajan skoru, piyasa skoru, simülasyon (FK, `SET_NULL`), durum, süre.
+- [ ] **Servis:** `hpo_service.start(study)` K8'e göre ayrı süreç başlatır. Her deneme bittiğinde `HPOTrial` yazılır. Partiler arasında iptal bayrağı kontrol edilir. Saklama politikası K9'a göre. `optimizer.py` aynı servisin ince bir komut satırı sarmalayıcısına dönüşür.
+- [ ] **Arayüz:**
+  - Kenar çubuğunda yeni "Hiperparametre Araması" sekmesi.
+  - Liste sayfası: çalışmalar, durum, en iyi skor.
+  - Oluşturma formu: senaryo seçimi (proxy simülasyonlar), algoritma seçimi, fail-stack açık/kapalı (açıksa `failstack_limit` ve `failstack_delta` aranacak parametrelere eklenebilir), algoritmaya göre dinamik parametre sınırları (min/max, varsayılanlar `AlgorithmConfig`'ten), ABC ayarları, seed'ler, amaç ayarı.
+  - İzleme ekranı (durum endpoint'i sorgulanarak): ilerleme (biten/toplam deneme), iterasyon başına en iyi skor grafiği, ajan skoru – piyasa skoru dağılım grafiği, deneme tablosu, iptal butonu, "en iyi parametreleri uygula" (algoritmanın varsayılanı olarak ya da senaryodaki ajanlara).
+- **Doğrulama:** 2 kaynaklı, 1 iterasyonlu küçük bir çalışma arayüzden başlatılıp izlenir. İptal ve hata durumları test edilir.
+
+---
+
+## 5. Faz 3 — Uçtan uca doğrulama ve dokümantasyon
+- [ ] Arayüzden: kütüphaneden ajan seçerek senaryo oluştur → çalıştır → izle → HPO çalışması başlat → izle → en iyi parametreleri uygula.
+- [ ] Çok seed'li deney: her algoritma karşılaştırma ajanlarına karşı, güven aralıklarıyla (`statistical-validity`, `fair-comparison` skill'leri). Öğrenme iddiası ancak eğitimli ajan karşılaştırma koşullarından ayrıştığında yapılır.
+- [ ] `analiz.md`'ye bulguların kapanış durumu eklenir. `ARCHITECTURE.md` yazılır, codebase-memory'deki ADR güncellenir.
+
+---
+
+## 6. codebase-memory MCP kullanımı
+- Proje: `D-Projeler-Lokal-abm_ddpg_ow` (2026-10-06'da `full` modda yeniden indekslendi).
+- Her değişiklikten önce: `trace_path` (inbound) ile etki analizi, `search_graph`/`search_code` ile tüm kullanım yerleri.
+- Her commit öncesi: `detect_changes` ile değişikliğin etki alanı kontrolü.
+- Her faz sonunda: `index_repository` ile yeniden indeksleme ve `manage_adr` ile mimari kararların kaydı.
+- Bilinen sınır: `multiprocessing.Process(target=...)` gibi dinamik çağrılar grafikte görünmez (`starter_service.start → simulation_service.run`, `moabc → simulate_multi`). Bu yollar elle kontrol edilir.
