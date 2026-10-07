@@ -229,6 +229,14 @@ Her maddede: **ne yapılacak**, **nasıl doğrulanacak**. Type B/C maddeleri ayr
 - [x] **Senaryo sihirbazı (oluşturma ve düzenleme aynı bileşen):** 4 adım: Temel bilgiler (ad, süre ön ayarları 1 gün/1 hafta/2 hafta/özel, mod; Gelişmiş: seed, değerlendirme penceresi, gecikmeler) → Piyasa (fiyatlandırma stratejisi kartlarla ve açıklamayla, fiyat aralığı varsayılan 0–200 TL/MWh) → Ajanlar (aranabilir ve türe göre filtrelenebilir kütüphane kartları, tıkla-ekle, "Yeni ajan" ajan sayfasıyla aynı form bileşenini modal olarak açar, eklenen ajanlar düzenlenebilir satırlar) → Özet (tüm ayarlar, "Kaydet" ve "Kaydet ve çalıştır"). Adım geçişinde alan doğrulaması, sunucu hataları ilgili adımda gösterilir.
 - [x] **Yardımcılar:** kapasite/talep uyarısı (seçilen süredeki talebe göre), taslağın tarayıcıda saklanması, şablon listesinde "Kopyala", alan açıklamaları (ⓘ).
 
+### 2.7 Senaryo YAML içe/dışa aktarma ve kütüphane kartlarının sınırlanması (İstek 7, onay 2026-10-07)
+- [ ] **Dışa aktarma:** şablon listesinde her senaryo için "YAML" düğmesi. Dosya: `format_version`, senaryo (ad, mod, periyot tipi, süre, seed, değerlendirme penceresi, gecikmeler), piyasa (strateji, teklif sınırları), kullanılan kaynaklar (tüm maliyet alanları), ajanlar (tür, bütçe, algoritma, algoritma parametreleri, fail-stack, santraller kaynak adıyla).
+- [ ] **İçe aktarma (önizleme + onay):** dosya yüklenince önce yapılacaklar gösterilir, onayla atomik olarak yazılır, sonra yeni senaryo sihirbazda açılır. Senaryo proxy olarak, ajanlar kütüphaneye proxy olarak eklenir.
+  - Kaynak çakışması: aynı ad ve aynı değerler → mevcut kaynak kullanılır. Farklı değerler → hata, farklar listelenir, hiçbir şey yazılmaz.
+  - Kütüphane ajanı çakışması: aynı ad ve aynı yapılandırma → mevcut kütüphane ajanı kullanılır. Farklı yapılandırma → hata, çakışan ajanlar listelenir, hiçbir şey yazılmaz.
+  - Ajan türü/kaynak kuralı, isim uzunluğu, sınırlar sunucuda aynı kurallarla doğrulanır. Dışa aktarılan dosya tekrar içe aktarılabilir (round trip).
+- [ ] **Sihirbazda kütüphane kartları:** varsayılanda tek satır kart, arama veya filtre sonuçlarının hepsi gösterilir, "Tümünü göster" düğmesi.
+
 ## 4b. Uygulama sırasında çıkan takip işleri
 
 - [x] **B13 (sonradan bulundu, `3b653d9` ile düzeltildi): `Agent.budget` taşabilir.** `max_digits=12` (en fazla ~9.99e9). Büyük kapasiteli uzun çalıştırmalarda periyot yazımı hata verir ve çalıştırma FAILED olarak biter. Alan genişletilmeli (migration). runtime_core worker'ı bildirdi.
