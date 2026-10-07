@@ -1,6 +1,5 @@
-from django.urls import path
-from . import views
-from abmem.consumers import SimulationConsumer
+from django.urls import include, path
+from . import views, views_analysis, views_scenario
 
 
 urlpatterns = [
@@ -15,17 +14,23 @@ urlpatterns = [
     path('get_agents/', views.get_agents, name='get_agents'),
     path('agent/create', views.create_agent_and_related, name='agent_create'),
     path('agent/list', views.agent_list, name='agent_list'),
+    path('agent/check-name', views.check_agent_name, name='agent_check_name'),
+    path('agent/library.json', views.library_agents_json, name='agent_library_json'),
     path('agent/<int:agent_id>/', views.update_agent, name='agent_update'),
     path('agent/delete/<int:agent_id>/', views.delete_agent, name='agent_delete'),
     path('blank/', views.blank, name='blank'),
-    path('start', views.start, name='start'),
     path('', views.dashboard, name='dashboard'),
     path('simulation/create/', views.create_simulation, name='create_simulation'),
     path('simulation/run/<int:simulation_id>/', views.run_simulation, name='run_simulation'),
     path('simulation/update/<int:simulation_id>/', views.update_simulation, name='update_simulation'),
+    path('simulation/<int:simulation_id>/duplicate/', views_scenario.duplicate_scenario, name='duplicate_scenario'),
+    path('simulation/demand-stats/', views_scenario.demand_stats, name='demand_stats'),
     path('simulation/watch/<str:simulation_id>/', views.watch_simulation, name='watch_simulation'),
     path('simulation/status/', views.get_simulation_status, name='get_simulation_status'),
     path('simulation/next/', views.nextPeriod, name='nextPeriod'),
-    path('ws/simulation/<str:simulation_id>/', SimulationConsumer.as_asgi()),
+    path('simulation/<int:sim_id>/analysis/', views_analysis.simulation_analysis, name='simulation_analysis'),
+    path('simulation/<int:sim_id>/analysis/data/', views_analysis.simulation_analysis_data, name='simulation_analysis_data'),
+    path('simulation/<int:sim_id>/export/<str:kind>.csv', views_analysis.simulation_export_csv, name='simulation_export_csv'),
+    path('hpo/', include('abmem.hpo_urls')),
 ]
 

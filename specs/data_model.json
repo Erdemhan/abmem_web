@@ -1,0 +1,211 @@
+{
+  "spec_id": "data_model",
+  "title": "Schema changes for algorithm selection, fail-stack settings, agent library, seed, step diagnostics and HPO",
+  "status": "approved",
+  "phase": "Faz 1 / Faz 2 (schema only)",
+  "wave": 2,
+  "plan_items": [
+    "1.2 (AgentStepLog)",
+    "1.5 / 2.1 (failstack_* fields)",
+    "1.10 (Simulation.seed)",
+    "2.1 (Agent.algorithm_type, rename runtime attribute)",
+    "2.3 (library constraints, Agent.source, K5 data import)",
+    "2.4 (HPOStudy, HPOTrial)"
+  ],
+  "defects": [
+    "C9 (seed storage)",
+    "A9 (diagnostics)"
+  ],
+  "decisions": [
+    "K3",
+    "K4",
+    "K5",
+    "K7",
+    "K9"
+  ],
+  "purpose": "Concentrate every remaining model change in one spec and one linear migration chain so that feature specs never edit model files in parallel (ADR-006).",
+  "depends_on": [
+    "faz0_infra",
+    "market_clearing (0004_offer_period_decimal)",
+    "resource_filter (0004_resource_ccgt_fossil)",
+    "rl_core (AlgorithmType enum)",
+    "wave-1 merge migration 0005_merge_wave1"
+  ],
+  "files": {
+    "create": [
+      "abmem/models/diagnostics.py",
+      "abmem/models/hpo.py",
+      "abmem/migrations/0006_agent_algorithm_failstack.py",
+      "abmem/migrations/0007_agent_source.py",
+      "abmem/migrations/0008_agent_library_import.py",
+      "abmem/migrations/0009_agent_name_constraints.py",
+      "abmem/migrations/0010_simulation_seed_agentsteplog.py",
+      "abmem/migrations/0011_hpo.py",
+      "tests/models/__init__.py",
+      "tests/models/test_agent_constraints.py",
+      "tests/models/test_library_import_migration.py",
+      "tests/models/test_hpo_models.py",
+      "tests/models/test_agentsteplog.py"
+    ],
+    "modify": [
+      "abmem/models/agent.py",
+      "abmem/models/simulation.py",
+      "abmem/models/enums.py (add HPOStatus, HPOPhase, HPOTrialStatus)",
+      "abmem/models/__init__.py (export new models)",
+      "abmem/admin.py (register new models, optional)"
+    ],
+    "delete": []
+  },
+  "public_interfaces": [
+    {
+      "module": "abmem/models/agent.py",
+      "signature": "class Agent(Base):\n    name = models.CharField(max_length=20)\n    market = models.ForeignKey(Market, on_delete=models.CASCADE, null=True, blank=True)\n    state = enum.EnumField(AgentState, null=True, default=AgentState.CREATED)\n    budget = models.DecimalField(decimal_places=2, max_digits=12, default=0)\n    type = enum.EnumField(AgentType, null=True, default=AgentType.FOSSIL)\n    algorithm_type = enum.EnumField(AlgorithmType, default=AlgorithmType.DDPG)\n    failstack_enabled = models.BooleanField(default=False)\n    failstack_limit = models.PositiveIntegerField(default=6)\n    failstack_delta = models.DecimalField(max_digits=8, decimal_places=2, default=Decimal('15'))\n    failstack_min_margin = models.DecimalField(max_digits=6, decimal_places=4, default=Decimal('0'))\n    source = models.ForeignKey('self', null=True, blank=True, on_delete=models.SET_NULL, related_name='copies')\n    runtime_policy: 'BaseAgentAlgorithm | None' = None\n\n    class Meta:\n        constraints = [\n            UniqueConstraint(Lower('name'), condition=Q(market__isnull=True), name='uniq_library_agent_name_ci'),\n            UniqueConstraint(fields=['market', 'name'], name='uniq_agent_name_per_market'),\n            CheckConstraint(check=Q(market__isnull=False) | Q(proxy=True), name='library_agent_is_proxy'),\n            CheckConstraint(check=Q(failstack_limit__gte=1), name='failstack_limit_gte_1'),\n            CheckConstraint(check=Q(failstack_delta__gte=0), name='failstack_delta_gte_0'),\n        ]\n\n    @property\n    def is_library(self) -> bool\n    @property\n    def is_baseline(self) -> bool",
+      "description": "runtime_policy replaces the class attribute 'algorithm = 0'. It is a plain class-level default None, never a model field. Use 'condition=' for UniqueConstraint and 'check=' for CheckConstraint as supported by Django 5.0 (Django 5.1 renames check to condition, keep 5.0 syntax as pinned in requirements.txt). is_library = proxy and market_id is None. is_baseline = algorithm_type in registry.BASELINE_TYPES."
+    },
+    {
+      "module": "abmem/models/simulation.py",
+      "signature": "seed = models.IntegerField(default=17081999)",
+      "description": "Seed stored with every run (1.10). Default keeps the current constant for existing rows. Range checked 0 <= seed < 2**32 by CheckConstraint 'simulation_seed_range'."
+    },
+    {
+      "module": "abmem/models/diagnostics.py",
+      "signature": "class AgentStepLog(models.Model):\n    agent = models.ForeignKey(Agent, on_delete=models.CASCADE, related_name='step_logs')\n    period = models.ForeignKey(Period, on_delete=models.CASCADE, related_name='step_logs')\n    reward = models.FloatField(null=True)\n    critic_loss = models.FloatField(null=True)\n    actor_loss = models.FloatField(null=True)\n    mean_q = models.FloatField(null=True)\n    exploration_scale = models.FloatField(null=True)\n    intervened_plants = models.JSONField(default=list)\n    learning_active = models.BooleanField(default=False)\n    evaluation_phase = models.BooleanField(default=False)\n    extra = models.JSONField(default=dict)\n\n    class Meta:\n        constraints = [UniqueConstraint(fields=['agent', 'period'], name='uniq_steplog_agent_period')]\n        indexes = [models.Index(fields=['agent', 'period'])]",
+      "description": "One row per agent step. period is the decision period t, reward refers to the outcome of t-1. Plain models.Model (no Base) to keep rows small. Float fields reject NaN/Inf at the service layer (step_logger)."
+    },
+    {
+      "module": "abmem/models/hpo.py",
+      "signature": "class HPOStudy(Base):\n    name = models.CharField(max_length=100)\n    algorithm_type = enum.EnumField(AlgorithmType)\n    scenario = models.ForeignKey(Simulation, on_delete=models.PROTECT, related_name='hpo_studies', limit_choices_to={'proxy': True})\n    param_bounds = models.JSONField()\n    fixed_params = models.JSONField(default=dict)\n    colony_size = models.PositiveIntegerField()\n    max_iter = models.PositiveIntegerField()\n    limit = models.PositiveIntegerField()\n    search_seeds = models.JSONField()\n    evaluation_seeds = models.JSONField()\n    objective = models.JSONField()\n    status = enum.EnumField(HPOStatus, default=HPOStatus.CREATED)\n    started_at = models.DateTimeField(null=True, blank=True)\n    finished_at = models.DateTimeField(null=True, blank=True)\n    best_params = models.JSONField(null=True, blank=True)\n    best_score = models.FloatField(null=True, blank=True)\n    error = models.TextField(blank=True, default='')\n    cancel_requested = models.BooleanField(default=False)",
+      "description": "Fields exactly as PLAN 2.4 plus fixed_params (ADR-009). CheckConstraints: colony_size >= 2, max_iter >= 1, limit >= 1. JSON shapes are validated in hpo_service (param_bounds: {name: {low, high, scale}}, seeds: list of distinct ints, search and evaluation seed sets disjoint)."
+    },
+    {
+      "module": "abmem/models/hpo.py",
+      "signature": "class HPOTrial(Base):\n    study = models.ForeignKey(HPOStudy, on_delete=models.CASCADE, related_name='trials')\n    iteration = models.PositiveIntegerField()\n    phase = enum.EnumField(HPOPhase)\n    source_index = models.PositiveIntegerField()\n    params = models.JSONField()\n    seed = models.IntegerField()\n    agent_score = models.FloatField(null=True, blank=True)\n    market_score = models.FloatField(null=True, blank=True)\n    simulation = models.OneToOneField(Simulation, null=True, blank=True, on_delete=models.SET_NULL, related_name='hpo_trial')\n    status = enum.EnumField(HPOTrialStatus, default=HPOTrialStatus.PENDING)\n    duration_s = models.FloatField(null=True, blank=True)\n    error = models.TextField(blank=True, default='')",
+      "description": "One row per (candidate, seed) evaluation. A candidate is identified by (study, iteration, phase, source_index). OneToOne to the evaluation simulation so 'Simulation.objects.filter(proxy=False, hpo_trial__isnull=True)' lists user runs only. Index on (study, iteration, phase)."
+    },
+    {
+      "module": "abmem/models/enums.py",
+      "signature": "class HPOStatus(enum.Enum): CREATED = 0, RUNNING = 1, FINISHED = 2, FAILED = 3, CANCELED = 4\nclass HPOPhase(enum.Enum): INIT = 0, EMPLOYED = 1, ONLOOKER = 2, SCOUT = 3, FINAL_EVAL = 4\nclass HPOTrialStatus(enum.Enum): PENDING = 0, RUNNING = 1, FINISHED = 2, FAILED = 3",
+      "description": "FINAL_EVAL added for held-out seed re-measurement (1.11, ADR-009)."
+    }
+  ],
+  "migrations": [
+    {
+      "name": "0006_agent_algorithm_failstack",
+      "depends_on": "0005_merge_wave1",
+      "kind": "AddField x5 (algorithm_type, failstack_enabled, failstack_limit, failstack_delta, failstack_min_margin) + check constraints for failstack"
+    },
+    {
+      "name": "0007_agent_source",
+      "depends_on": "0006_agent_algorithm_failstack",
+      "kind": "AddField source"
+    },
+    {
+      "name": "0008_agent_library_import",
+      "depends_on": "0007_agent_source",
+      "kind": "RunPython (K5) with reverse",
+      "algorithm": [
+        "Pre-check: for every market, names must be unique (case-sensitive, matching the constraint). If duplicates exist, raise RuntimeError listing them (no silent renaming).",
+        "Collect existing library names (proxy=True, market NULL) lower-cased into a set.",
+        "Deduplication (OQ-15): group scenario agents by configuration key (type, budget, algorithm_type, failstack fields, sorted tuple of (resource_id, capacity)). Each group yields ONE library agent named after its lowest-id member. The suffix rule in the next step applies only when that name is already taken by a library agent with a different configuration. Every member gets source = that library agent.",
+        "For each scenario agent (proxy=True, market not NULL), ordered by id: base = agent.name. candidate = base. While candidate.lower() in names: candidate = increment_suffix(candidate) (same semantics as views.increment_suffix: '_2', then '_3', ...), truncating the base so len(candidate) <= 20. Create the library agent (market NULL, proxy True, same budget, type, algorithm_type, failstack fields, state CREATED), copy its Portfolio and Plants with proxy True, add candidate.lower() to names, set scenario agent.source = library agent.",
+        "Existing library agents with colliding names among themselves (if any): rename later ones with the same suffix rule and log.",
+        "Reverse: delete library agents created by this migration (identified by being the source of a scenario agent and created in this migration, tracked via a temporary marker in Agent.state or by created_at window recorded at forward time), set source to NULL."
+      ]
+    },
+    {
+      "name": "0009_agent_name_constraints",
+      "depends_on": "0008_agent_library_import",
+      "kind": "AddConstraint x3 (uniq_library_agent_name_ci, uniq_agent_name_per_market, library_agent_is_proxy)"
+    },
+    {
+      "name": "0010_simulation_fields_agentsteplog",
+      "depends_on": "0009_agent_name_constraints",
+      "kind": "AddField Simulation.seed (+ constraint), Simulation.observation_lags (JSONField, default [1, 24], allowed [1, 24] or [1, 24, 168]), Simulation.evaluation_periods (PositiveIntegerField, default 0, must be < periodNumber), Simulation.error (TextField, blank). CreateModel AgentStepLog. SimulationState.FAILED is a new enum member. django_enumfield stores ints, so there is no schema change, but enums.py is edited in this wave. AlterField Period.demand to DecimalField(max_digits=12, decimal_places=3) (metDemand already became Decimal in 0004) (B12, found in wave 1: demand data has decimals and was truncated)."
+    },
+    {
+      "name": "0011_hpo",
+      "depends_on": "0010_simulation_seed_agentsteplog",
+      "kind": "CreateModel HPOStudy (including heartbeat_at, OQ-17), HPOTrial"
+    },
+    {
+      "name": "0012_algorithm_params",
+      "depends_on": "0011_hpo",
+      "kind": "AddField Agent.algorithm_params (JSONField, default dict). CreateModel AlgorithmDefault (algorithm_type unique, params JSON, updated_at) (OQ-9)"
+    }
+  ],
+  "invariants": [
+    "After 0008 every scenario agent of the four proxy scenarios has a non-NULL source pointing to a library agent with identical type, budget and plant set.",
+    "After 0009 no two library agents share a name case-insensitively and no market holds two agents with the same name.",
+    "Agent.runtime_policy is never saved and is None on freshly loaded instances.",
+    "Deleting a library agent leaves its copies intact with source NULL.",
+    "Deleting a proxy scenario referenced by an HPOStudy raises ProtectedError."
+  ],
+  "edge_cases": [
+    "Name of exactly 20 characters needing a suffix: base truncated to 18 characters + '_2'.",
+    "Name already ending in '_2': next candidate '_3' (increment_suffix semantics).",
+    "Case variants 'Coal' and 'COAL': collide in the library.",
+    "Market NULL with proxy False: rejected by library_agent_is_proxy.",
+    "failstack_limit 0 or negative delta: rejected by check constraints.",
+    "Migration run on an empty DB (tests): forward and reverse are no-ops without errors.",
+    "Existing scenario 32499 'test' with 2 agents: imported like the others."
+  ],
+  "test_plan": [
+    "test_agent_constraints.py: IntegrityError for duplicate library names in different case, duplicate names in one market, library agent with proxy False, failstack constraint violations. Same name allowed in two different markets and in library plus a market.",
+    "test_library_import_migration.py: uses django-test-migrations style manual MigrationExecutor: build state at 0007 with three markets each holding 'CCGT', migrate to 0009, assert library has 'CCGT', 'CCGT_2', 'CCGT_3', sources set, plants copied. Reverse to 0007 removes them.",
+    "test_hpo_models.py: PROTECT on scenario delete, CASCADE trials on study delete, SET_NULL simulation on simulation delete, enum defaults.",
+    "test_agentsteplog.py: unique (agent, period), JSON defaults.",
+    "python manage.py makemigrations --check --dry-run reports no changes after this spec."
+  ],
+  "research_debug": {
+    "bug_type": "A",
+    "bug_impact_required": false
+  },
+  "acceptance_criteria": [
+    "Migrations apply forward and backward on a copy of the dev DB",
+    "Dev DB after migration: 22 library agents with K5 names (deduplicated per OQ-15), 0 constraint violations"
+  ],
+  "out_of_scope": [
+    "Any service or view code using these models"
+  ],
+  "blocked_by_open_questions": [],
+  "approval_note": "Approved by the user on 2026-10-06. Open questions OQ-1..OQ-19 are resolved in ARCHITECTURE.md section 11. The entries in resolved_open_questions are binding and override any wording below that says \"proposal\", \"per OQ-x\" or \"if approved\".",
+  "resolved_open_questions": {
+    "OQ-5": "Simulation.evaluation_periods: the last N periods run with explore=False and no learning (RunPhase.EVALUATE).",
+    "OQ-8": "New SimulationState.FAILED enum value plus Simulation.error text field. Any exception in a run sets FAILED and stores the message.",
+    "OQ-9": "Agent.algorithm_params (JSON) plus AlgorithmDefault model, both added by data_model (migration 0012). Effective params = AlgorithmDefault for the type, overridden by Agent.algorithm_params, overridden by HPO overrides.",
+    "OQ-15": "K5 import deduplicates: scenario agents with identical configuration (type, budget, algorithm_type, failstack fields, plants as multiset of (resource, capacity)) map to ONE library agent. A name suffix (_2, _3, ...) is used only when the name is equal (case-insensitive) but the configuration differs.",
+    "OQ-17": "HPOStudy.heartbeat_at (added by data_model in 0011). Stale RUNNING studies become FAILED after settings.ABMEM_HPO_HEARTBEAT_TIMEOUT."
+  },
+  "resolved_items": [
+    {
+      "item": "Simulation.evaluation_periods",
+      "open_question": "OQ-5",
+      "note": "Add to 0010 only if the user approves the proposal before this wave, otherwise runtime_core adds a later migration.",
+      "resolution": "Simulation.evaluation_periods: the last N periods run with explore=False and no learning (RunPhase.EVALUATE)."
+    },
+    {
+      "item": "Simulation.error text field",
+      "open_question": "OQ-8",
+      "resolution": "New SimulationState.FAILED enum value plus Simulation.error text field. Any exception in a run sets FAILED and stores the message."
+    },
+    {
+      "item": "Agent.algorithm_params JSON and AlgorithmDefault model",
+      "open_question": "OQ-9",
+      "note": "Otherwise added by hpo (ui package) in its own migration.",
+      "resolution": "Agent.algorithm_params (JSON) plus AlgorithmDefault model, both added by data_model (migration 0012). Effective params = AlgorithmDefault for the type, overridden by Agent.algorithm_params, overridden by HPO overrides."
+    },
+    {
+      "item": "HPOStudy.heartbeat_at",
+      "open_question": "OQ-17",
+      "resolution": "HPOStudy.heartbeat_at (added by data_model in 0011). Stale RUNNING studies become FAILED after settings.ABMEM_HPO_HEARTBEAT_TIMEOUT."
+    },
+    {
+      "item": "K5 import granularity",
+      "open_question": "OQ-15",
+      "resolution": "K5 import deduplicates: scenario agents with identical configuration (type, budget, algorithm_type, failstack fields, plants as multiset of (resource, capacity)) map to ONE library agent. A name suffix (_2, _3, ...) is used only when the name is equal (case-insensitive) but the configuration differs."
+    }
+  ],
+  "added_after_approval": [
+    "B12 (2026-10-06): Period.demand becomes DecimalField in migration 0010 (metDemand already Decimal since 0004). Found by the wave-1 market_clearing worker. Same decision class as B8, no new user decision needed."
+  ]
+}

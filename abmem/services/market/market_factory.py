@@ -1,6 +1,4 @@
-import sys
 # Add the specified directory to the system path to allow imports from that location
-sys.path.append("D:/Projeler/abm/abmem_project/test")
 
 # Import necessary classes and enums from the models module
 from ...models.market import Market

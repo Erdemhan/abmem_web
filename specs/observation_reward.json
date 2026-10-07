@@ -1,0 +1,148 @@
+{
+  "spec_id": "observation_reward",
+  "title": "Single observation builder, fixed observation normaliser, action-price mapping, shared profit accounting, K1 reward",
+  "status": "approved",
+  "phase": "Faz 1",
+  "wave": 1,
+  "plan_items": [
+    "1.1",
+    "1.3",
+    "1.4 (ObservationNormalizer, action mapping)"
+  ],
+  "defects": [
+    "C1",
+    "C2",
+    "C4",
+    "B1",
+    "B2",
+    "B6"
+  ],
+  "decisions": [
+    "K1",
+    "K2"
+  ],
+  "purpose": "Provide the pure building blocks that the runtime (runtime_core) wires together: o_t built once from known data, one normaliser shared by acting and learning, one affine mapping between normalised actions and prices using market bounds, one profit function used by both budgets and reward, and the K1 reward over all plants of an agent.",
+  "depends_on": [
+    "faz0_infra"
+  ],
+  "consumes_interfaces_from": {
+    "market_clearing": [
+      "DemandSeries (type only, used through a Protocol so this spec can be built in parallel)"
+    ]
+  },
+  "files": {
+    "create": [
+      "abmem/services/agent/observation.py",
+      "abmem/services/agent/action_space.py",
+      "abmem/services/agent/reward.py",
+      "abmem/services/market/accounting.py",
+      "tests/agent/__init__.py",
+      "tests/agent/test_observation.py",
+      "tests/agent/test_action_space.py",
+      "tests/agent/test_reward.py",
+      "tests/market/test_accounting.py"
+    ],
+    "modify": [],
+    "delete": []
+  },
+  "public_interfaces": [
+    {
+      "module": "abmem/services/market/accounting.py",
+      "signature": "@dataclass(frozen=True)\nclass OfferOutcome:\n    quantity: Decimal\n    offer_price: Decimal\n    accepted_quantity: Decimal\n    acceptance_price: Decimal | None\n    static_cost_rate: Decimal\n    variable_cost_rate: Decimal\n\n    @property\n    def accepted(self) -> bool",
+      "description": "Outcome of one cleared offer. accepted is accepted_quantity > 0. static_cost_rate = Resource.staticCost() (omCost + investmentCost + co2Cost), variable_cost_rate = Resource.variableCost() (fuelCost), both TL/MWh."
+    },
+    {
+      "module": "abmem/services/market/accounting.py",
+      "signature": "def offer_profit(o: OfferOutcome) -> Decimal",
+      "description": "g = q_acc * p_acc - (c_s * q + c_v * q_acc). For q_acc == 0 this reduces to -c_s * q. Exact Decimal arithmetic. Identical to the current budgetCalculation for valid inputs (verified by a parity test against the characterization cases)."
+    },
+    {
+      "module": "abmem/services/market/accounting.py",
+      "signature": "def outcome_from_offer(offer: Offer) -> OfferOutcome",
+      "description": "Adapter from a cleared Offer instance (resource already loaded). The only function in this spec that touches a model instance. It does not query the database."
+    },
+    {
+      "module": "abmem/services/agent/reward.py",
+      "signature": "def compute_reward(outcomes: Sequence[OfferOutcome], total_capacity: Decimal, price_cap: Decimal) -> float",
+      "description": "K1: r = sum_i g_i / (sum_i q_i * P_max) over ALL offers of the agent in the period (B2). total_capacity is the sum of plant capacities. P_max = Market.upperBidBound. Returns a Python float, not clipped, not converted to int (C1)."
+    },
+    {
+      "module": "abmem/services/agent/observation.py",
+      "signature": "DEFAULT_LAGS: Final[tuple[int, ...]] = (1, 24)\nALLOWED_LAG_SETS: Final[frozenset[tuple[int, ...]]] = frozenset({(1, 24), (1, 24, 168)})\nDEMAND_SCALING_MEAN: Final[float]\nDEMAND_SCALING_STD: Final[float]",
+      "description": "Feature order: demand_t, then PTF(t-k) for k in lags ascending. DEMAND_SCALING_* are constants from all 8808 valid DEMAND values (OQ-2), checked by a test. Documented in FORMULATION.md section 5."
+    },
+    {
+      "module": "abmem/services/agent/observation.py",
+      "signature": "class DemandSource(Protocol):\n    def at(self, period_number: int) -> Decimal: ...",
+      "description": "Structural type satisfied by market.demand.DemandSeries."
+    },
+    {
+      "module": "abmem/services/agent/observation.py",
+      "signature": "@dataclass(frozen=True)\nclass Observation:\n    t: int\n    lags: tuple[int, ...]\n    raw: np.ndarray | None\n    missing_lags: tuple[int, ...]\n\n    @property\n    def complete(self) -> bool",
+      "description": "raw is float64 shape (1 + len(lags),) when complete, None otherwise. complete is len(missing_lags) == 0."
+    },
+    {
+      "module": "abmem/services/agent/observation.py",
+      "signature": "def build_observation(t: int, demand: DemandSource, ptf_history: Mapping[int, Decimal], lags: Sequence[int] = DEFAULT_LAGS) -> Observation",
+      "description": "o_t = (demand(t), PTF(t-k) for k in lags) (K2, OQ-1). lags must be in ALLOWED_LAG_SETS, else ValueError. PTF values are looked up by periodNumber in ptf_history (B1). A lag k is missing if t - k < 1 or t - k not in ptf_history. Never substitutes 0 for a missing lag. Pure. Used for acting AND learning (C2)."
+    },
+    {
+      "module": "abmem/services/agent/observation.py",
+      "signature": "@dataclass(frozen=True)\nclass ObservationNormalizer:\n    mean: np.ndarray\n    scale: np.ndarray\n\n    @classmethod\n    def for_market(cls, lags: Sequence[int], price_low: float, price_high: float) -> Self\n    def transform(self, raw: np.ndarray) -> np.ndarray\n    def to_dict(self) -> dict[str, list[float]]",
+      "description": "Per-feature affine normalisation (C4). Demand: (DEMAND_SCALING_MEAN, DEMAND_SCALING_STD). Price features: mean = (low + high) / 2, scale = (high - low) / 2, so the bid bounds map to -1 and +1. scale must be strictly > 0, else ValueError. transform returns float32 (raw - mean) / scale for shape (1 + len(lags),) or (n, 1 + len(lags)). No int() conversion. to_dict is stored in the run log."
+    },
+    {
+      "module": "abmem/services/agent/action_space.py",
+      "signature": "PRICE_QUANTUM: Final[Decimal] = Decimal('0.01')\ndef to_price(u: np.ndarray, low: Decimal, high: Decimal) -> list[Decimal]\ndef from_price(prices: Sequence[Decimal], low: Decimal, high: Decimal) -> np.ndarray",
+      "description": "to_price: p = low + (clip(u, -1, 1) + 1) / 2 * (high - low), quantised to PRICE_QUANTUM (Offer.offerPrice has 2 decimals) with ROUND_HALF_EVEN, then clipped to [low, high]. from_price: u = 2 * (p - low) / (high - low) - 1, float32, clipped to [-1, 1]. The runtime stores from_price(to_price(u)) in the buffer so the stored action is exactly the applied price (B6)."
+    }
+  ],
+  "data_model_changes": "none",
+  "migrations": "none",
+  "invariants": [
+    "compute_reward is invariant to scaling the currency unit of prices and costs together with P_max (unitless ratio).",
+    "compute_reward over a single plant equals g / (q * P_max).",
+    "build_observation(t, ...) depends only on demand(t) and PTF of periods strictly before t (no look-ahead beyond the K2 assumption).",
+    "ObservationNormalizer.transform is the same object for acting and learning within a run.",
+    "from_price(to_price(u)) equals u up to the price quantum mapped into u units.",
+    "to_price output is always within [low, high]."
+  ],
+  "edge_cases": [
+    "compute_reward with empty outcomes: ValueError (an agent always has at least one plant).",
+    "total_capacity <= 0 or price_cap <= 0: ValueError (SimulationContext.build validates earlier).",
+    "Non-finite intermediate (should not occur with Decimal): assert math.isfinite on the returned float.",
+    "Rejected offers: g = -c_s * q (negative reward), not clipped.",
+    "acceptance_price None with accepted_quantity > 0: ValueError (inconsistent outcome).",
+    "build_observation for t = 1: missing (1, 24, 168). For t = 25: missing (168,). For t = 169: missing (). Note: t - 168 = 1 exists from t = 169.",
+    "ptf_history entry None (period not cleared): treated as missing.",
+    "ObservationNormalizer.from_market with empty demand_train: ValueError. With std == 0 or non-finite: ValueError. With price_high <= price_low: ValueError.",
+    "transform with NaN or Inf in raw: ValueError (never forwarded to a network).",
+    "to_price with NaN in u: ValueError. u outside [-1, 1]: clipped (exploration noise is clipped in select_action, this is a second guard).",
+    "from_price with high == low: ValueError."
+  ],
+  "test_plan": [
+    "test_accounting.py: offer_profit parity with characterization budget cases, rejected offer, PAYASPTF acceptance price, Decimal exactness.",
+    "test_reward.py: multi-plant agent where only the second plant is accepted gives a non-zero reward (B2 regression), negative reward for all-rejected, unit invariance (multiply all prices, costs and P_max by 100), returned type is float and unchanged when passed through float32 (C1 regression at the reward level).",
+    "test_observation.py: synthetic ptf_history {1..200}, default lags: o_t at t = 30 equals (demand(30), PTF(29), PTF(6)), missing lags at t = 1, 24, 25. lags (1, 24, 168): o_t at t = 170 equals (demand(170), PTF(169), PTF(146), PTF(2)), missing at t = 168, 169. A disallowed lag set raises ValueError, history with a None entry. Distinct raw states give distinct normalised vectors (C4 regression: the three analiz.md C4 inputs map to three different vectors).",
+    "test_action_space.py: bounds map to -1/+1, round trip, quantisation, clipping, NaN rejection, low == high rejection.",
+    "test_scaling_constants: DEMAND_SCALING_MEAN/STD equal the mean and population std of the 8808 valid DEMAND values of marketData.xlsx (OQ-2)."
+  ],
+  "research_debug": {
+    "bug_type": "C (C1, C2, C4) and B (B1, B2, B6)",
+    "bug_impact_required": true,
+    "bug_impact_note": "All previous DRL runs had zero reward (C1) and mismatched transitions (C2). Results are not comparable. The commit that wires these into the runtime (runtime_core) carries the BUG-IMPACT note, this spec adds pure functions only."
+  },
+  "acceptance_criteria": [
+    "All tests green without database access except outcome_from_offer"
+  ],
+  "out_of_scope": [
+    "Wiring into agent_service (runtime_core)",
+    "Pre-learning action policy (OQ-1)"
+  ],
+  "blocked_by_open_questions": [],
+  "approval_note": "Approved by the user on 2026-10-06. Open questions OQ-1..OQ-19 are resolved in ARCHITECTURE.md section 11. The entries in resolved_open_questions are binding and override any wording below that says \"proposal\", \"per OQ-x\" or \"if approved\".",
+  "resolved_open_questions": {
+    "OQ-1": "Lag set per simulation (Simulation.observation_lags), default [1, 24], [1, 24, 168] opt-in. Until all configured lags exist a learning agent bids u ~ Uniform[-1, 1]^n from its own rng and the step is NOT stored in the buffer.",
+    "OQ-2": "Demand scaling constants DEMAND_SCALING_MEAN / DEMAND_SCALING_STD computed once from all 8808 valid DEMAND values of marketData.xlsx, a test checks them against the file."
+  }
+}

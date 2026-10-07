@@ -78,6 +78,15 @@
                             <div class="col mb-3">
                                 <p>Current Period: <span id="period"></span></p>
                             </div>
+                            <div class="col mb-3">
+                                <p>Seed: <span id="seed">{{ seed }}</span></p>
+                            </div>
+                            {% if analysis_url %}
+                            <div class="col mb-3">
+                                <a class="btn btn-sm bg-gradient-success mb-0 d-none" id="analysis-button"
+                                    href="{{ analysis_url }}">Analysis</a>
+                            </div>
+                            {% endif %}
                         </div>
                         <div class="row " id="nextRow">
                             <div class="form-group col">
@@ -106,6 +115,12 @@
                                                     <th
                                                         class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">
                                                         Budget</th>
+                                                    <th
+                                                        class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">
+                                                        Algorithm</th>
+                                                    <th
+                                                        class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">
+                                                        Fail-stack</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -164,6 +179,7 @@
                 }
                 if (data.status === 'FINISHED') {
                     flag = true
+                    $('#analysis-button').removeClass('d-none');
                     $('#status').removeClass('bg-gradient-info');
                     $('#status').addClass('bg-gradient-success');
                 }
@@ -195,7 +211,11 @@
 
                 var agentRows = '';
                 data.agents.forEach(function (agent) {
-                    agentRows += '<tr><td>' + agent.name + '</td><td>' + agent.state + '</td><td>' + agent.budget + '</td></tr>';
+                    var failstackBadge = agent.failstack_enabled
+                        ? '<span class="badge bg-gradient-success">On</span>'
+                        : '<span class="badge bg-gradient-secondary">Off</span>';
+                    agentRows += '<tr><td>' + agent.name + '</td><td>' + agent.state + '</td><td>' + agent.budget
+                        + '</td><td>' + agent.algorithm + '</td><td>' + failstackBadge + '</td></tr>';
                 });
                 $('#agents-table tbody').html(agentRows);
                 //>>>>>>>

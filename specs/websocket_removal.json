@@ -1,0 +1,71 @@
+{
+  "spec_id": "websocket_removal",
+  "title": "Remove the unused WebSocket layer, keep HTTP polling",
+  "status": "approved",
+  "phase": "Faz 1",
+  "wave": 1,
+  "plan_items": [
+    "1.13"
+  ],
+  "defects": [
+    "A7"
+  ],
+  "decisions": [
+    "K10"
+  ],
+  "purpose": "No code calls group_send, so SimulationConsumer never sends anything. The WebSocket route is registered in HTTP urlpatterns and routing.py uses a tutorial path. Remove the layer and its dependencies (channels, channels-redis, Redis channel layer).",
+  "depends_on": [
+    "faz0_infra"
+  ],
+  "files": {
+    "create": [
+      "tests/test_no_websocket.py"
+    ],
+    "modify": [
+      "abmem/urls.py (remove 'from abmem.consumers import SimulationConsumer' and the 'ws/simulation/<str:simulation_id>/' route only)",
+      "web_project/asgi.py (plain django.core.asgi.get_asgi_application, DJANGO_SETTINGS_MODULE set before the call)",
+      "web_project/settings.py (remove 'channels' from INSTALLED_APPS, remove CHANNEL_LAYERS and ASGI_APPLICATION)",
+      "requirements.txt (remove channels, channels-redis, daphne if present)",
+      "README.md (remove Redis requirement if documented)"
+    ],
+    "delete": [
+      "abmem/consumers.py",
+      "abmem/routing.py"
+    ]
+  },
+  "public_interfaces": [
+    {
+      "module": "web_project/asgi.py",
+      "signature": "application: django.core.handlers.asgi.ASGIHandler",
+      "description": "Standard Django ASGI application without ProtocolTypeRouter."
+    }
+  ],
+  "data_model_changes": "none",
+  "migrations": "none",
+  "invariants": [
+    "No module imports 'channels' or 'abmem.consumers'.",
+    "All existing HTTP routes resolve with the same names."
+  ],
+  "edge_cases": [
+    "Templates: verified by grep that no template opens a WebSocket (no 'WebSocket' or 'ws://' string under abmem/).",
+    "runserver must still work without daphne installed."
+  ],
+  "test_plan": [
+    "tests/test_no_websocket.py: django.urls.reverse for every named route still resolves. importlib.util.find_spec('abmem.consumers') is None. 'channels' not in settings.INSTALLED_APPS.",
+    "Client GET /dev/ and /dev/simulation/list return 200."
+  ],
+  "research_debug": {
+    "bug_type": "A",
+    "bug_impact_required": false
+  },
+  "acceptance_criteria": [
+    "python manage.py check passes",
+    "pytest green"
+  ],
+  "out_of_scope": [
+    "Removing the 'start' route (runtime_core)"
+  ],
+  "blocked_by_open_questions": [],
+  "approval_note": "Approved by the user on 2026-10-06. Open questions OQ-1..OQ-19 are resolved in ARCHITECTURE.md section 11. The entries in resolved_open_questions are binding and override any wording below that says \"proposal\", \"per OQ-x\" or \"if approved\".",
+  "resolved_open_questions": {}
+}

@@ -1,0 +1,295 @@
+{
+  "spec_id": "rl_algorithms",
+  "title": "Port DDPG, TD3, SAC, PPO, RDPG to BaseAgentAlgorithm with literature-conformant updates, add comparison policies",
+  "status": "approved",
+  "phase": "Faz 1",
+  "wave": 2,
+  "plan_items": [
+    "1.4 (actor tanh, noise only in select_action, normalised actions)",
+    "1.5 (remove TD3/PPO failstack, action shrinking, reward multiplier, PPO risk_tolerance, learning_starts)",
+    "1.6",
+    "1.10 (comparison policies RANDOM, MARGINAL_COST, FIXED_MARKUP)"
+  ],
+  "defects": [
+    "C3",
+    "C5",
+    "C6",
+    "C7 (algorithm side)",
+    "B3",
+    "B7",
+    "A1"
+  ],
+  "decisions": [
+    "K3"
+  ],
+  "purpose": "Each algorithm becomes a BaseAgentAlgorithm subclass operating only in the normalised spaces defined by rl_core. The six work packages touch disjoint files and can be implemented by six independent workers.",
+  "depends_on": [
+    "rl_core"
+  ],
+  "common_requirements": [
+    "Class implements BaseAgentAlgorithm and passes tests/algorithms/contract.py::assert_policy_contract.",
+    "Uses rl_core ReplayBuffer or RolloutBuffer. Local ReplayBuffer classes in the file are deleted (A10).",
+    "Uses networks.py (or sac_networks.py for SAC). Must not import actor_critic.py, agent_algorithm.py, algorithm_utils.py or any module global hyperparameter.",
+    "select_action returns action_dim values. No try/except that returns a default action (A1). Exceptions propagate.",
+    "No failstack counter, no action shrinking, no reward multiplier, no risk tolerance inside the algorithm (C7).",
+    "No gradient update before len(buffer) >= config.learning_starts (B7). update() performs config.gradient_steps updates.",
+    "All tensors float32 on device.get_device(). Uses torch.optim.Adam. Optional gradient clipping with torch.nn.utils.clip_grad_norm_ when max_grad_norm is set.",
+    "update() returns UpdateStats with critic_loss, actor_loss (None on steps without actor update), mean_q.",
+    "Google-style docstrings citing the equation numbers of the reference paper."
+  ],
+  "work_packages": [
+    {
+      "id": "rl_algorithms.ddpg",
+      "files": {
+        "modify": [
+          "abmem/services/algorithms/DDPG.py"
+        ],
+        "create": [
+          "tests/algorithms/test_ddpg.py"
+        ]
+      },
+      "class": "DDPGAlgorithm(BaseAgentAlgorithm), config_class = DDPGConfig, is_learning = True, is_on_policy = False",
+      "reference": "Lillicrap et al. (2016), Algorithm 1",
+      "update_rule": [
+        "y = r + gamma * (1 - terminated) * Q'(s', mu'(s')), target actor without noise (C3).",
+        "Critic loss: mean squared error between Q(s, a) and y, a from the buffer (normalised, C5).",
+        "Actor loss: -mean Q(s, mu(s)).",
+        "Soft target update with tau after each gradient step."
+      ],
+      "exploration": "u = clip(mu(o) + N(0, sigma^2 I), -1, 1) only when explore is True. sigma decays once per period in end_period.",
+      "tests": [
+        "contract",
+        "target computation uses actor_target without noise (monkeypatch rng, compare)",
+        "critic loss decreases on a fixed synthetic batch with constant reward",
+        "actor gradient non-zero"
+      ]
+    },
+    {
+      "id": "rl_algorithms.td3",
+      "files": {
+        "modify": [
+          "abmem/services/algorithms/TD3.py"
+        ],
+        "create": [
+          "tests/algorithms/test_td3.py"
+        ]
+      },
+      "class": "TD3Algorithm(BaseAgentAlgorithm), config_class = TD3Config",
+      "reference": "Fujimoto et al. (2018), Algorithm 1 and eq. 14-15",
+      "update_rule": [
+        "Target action: a' = clip(mu'(s') + clip(eps, -c, c), -1, 1), eps ~ N(0, policy_noise^2), c = noise_clip, in normalised space (C5).",
+        "y = r + gamma * (1 - terminated) * min(Q1'(s', a'), Q2'(s', a')).",
+        "Both critics regress to y.",
+        "Actor and target networks updated every policy_delay critic updates, actor loss -mean Q1(s, mu(s)).",
+        "Remove update_failstack, get_failstack_adjustment and the (1 - failstack) reward multiplier."
+      ],
+      "exploration": "Gaussian N(0, exploration_sigma^2) in normalised space, clipped to [-1, 1].",
+      "tests": [
+        "contract",
+        "target actions lie in [-1, 1] and differ from actor_target output by at most noise_clip",
+        "actor updated only every policy_delay steps (parameter snapshot)",
+        "multi-plant action_dim = 3 output shape (A1)"
+      ]
+    },
+    {
+      "id": "rl_algorithms.sac",
+      "files": {
+        "modify": [
+          "abmem/services/algorithms/SAC.py",
+          "abmem/services/algorithms/sac_networks.py"
+        ],
+        "create": [
+          "tests/algorithms/test_sac.py"
+        ]
+      },
+      "class": "SACAlgorithm(BaseAgentAlgorithm), config_class = SACConfig",
+      "reference": "Haarnoja et al. (2018), eq. 5-7, 11-13, appendix C (tanh correction), automatic temperature per Haarnoja et al. (2018b) 'Soft Actor-Critic Algorithms and Applications'",
+      "update_rule": [
+        "Policy outputs u = tanh(z), z ~ N(mu(s), sigma(s)), log pi includes the tanh Jacobian correction.",
+        "Remove _scale_action to prices: the policy, buffer and critics work with u in [-1, 1].",
+        "Twin soft Q critics, target y = r + gamma * (1 - terminated) * (min Q'(s', u') - alpha * log pi(u'|s')).",
+        "Temperature loss with target_entropy = -action_dim when None.",
+        "Training only after learning_starts (already present, aligned to config)."
+      ],
+      "exploration": "explore=True samples from the policy. explore=False returns tanh(mu(s)). exploration_scale returns alpha.",
+      "tests": [
+        "contract",
+        "log-prob correction matches numerical density of the squashed Gaussian on a grid (1-D)",
+        "deterministic output in eval mode",
+        "alpha updates toward target entropy sign"
+      ]
+    },
+    {
+      "id": "rl_algorithms.ppo",
+      "files": {
+        "modify": [
+          "abmem/services/algorithms/ppo.py"
+        ],
+        "create": [
+          "tests/algorithms/test_ppo.py"
+        ]
+      },
+      "class": "PPOAlgorithm(BaseAgentAlgorithm), config_class = PPOConfig, is_on_policy = True",
+      "reference": "Schulman et al. (2017) clipped surrogate eq. 7, Schulman et al. (2016) GAE eq. 16",
+      "update_rule": [
+        "Policy: tanh-squashed diagonal Gaussian with state-independent log std (initial_log_std). log pi(u|s) = log N(z; mu, sigma) - sum log(1 - tanh(z)^2), computed with the numerically stable form 2 * (log 2 - z - softplus(-2 z)).",
+        "select_action(explore=True) samples z, returns ActionResult(u=tanh(z), log_prob, value=V(s), pre_squash=z). The behaviour log-probability is stored at sampling time (C6).",
+        "evaluate(s, z) recomputes log pi of the stored pre-squash sample with the current parameters, the same distribution family as sampling (C6).",
+        "Update when the RolloutBuffer holds rollout_length transitions and len >= learning_starts: compute GAE with last value V(next_obs of the last transition), normalise advantages, run 'epochs' passes over shuffled minibatches.",
+        "Policy loss: -mean over NON-intervened steps of min(ratio * A, clip(ratio, 1 - eps, 1 + eps) * A), ratio = exp(logp_new - logp_old). Value loss: mean over ALL steps of (V(s) - return)^2 times value_coef. Optional entropy bonus estimated by -logp_new (entropy_coef default 0).",
+        "Intervened steps (fail-stack replaced the price): Transition.intervened True, excluded from the policy loss, kept in the value loss and GAE.",
+        "Remove risk_tolerance, update_failstack, get_failstack_adjustment, the reward multiplier, and the noise/decay parameters of the old PolicyNetwork.",
+        "Clear the rollout buffer after each update."
+      ],
+      "exploration": "Stochastic policy. explore=False returns tanh(mu(s)). exploration_scale returns mean sigma.",
+      "tests": [
+        "contract (adapted: update happens at rollout_length)",
+        "ratio == 1 for every sample in the first minibatch of the first epoch",
+        "stored behaviour log-prob equals evaluate() before any update",
+        "intervened steps contribute zero policy gradient (gradient check with all-intervened batch)",
+        "GAE against hand computation"
+      ]
+    },
+    {
+      "id": "rl_algorithms.rdpg",
+      "files": {
+        "modify": [
+          "abmem/services/algorithms/RDPG.py"
+        ],
+        "create": [
+          "tests/algorithms/test_rdpg.py"
+        ]
+      },
+      "class": "RDPGAlgorithm(BaseAgentAlgorithm), config_class = RDPGConfig",
+      "reference": "Heess et al. (2015), 'Memory-based control with recurrent neural networks', Algorithm 1",
+      "update_rule": [
+        "Training samples windows of seq_len consecutive transitions with ReplayBuffer.sample_sequences. Recurrent actor and critic start from a zero hidden state for every window (B3).",
+        "Critic: Q(h_k, a_k) for every step k of the window with the actually taken action a_k (B3). Target y_k = r_k + gamma * (1 - terminated_k) * Q'(h_{k+1}, mu'(h_{k+1})), computed by running the target networks over the window extended by the final next_obs.",
+        "Actor loss: -mean over steps of Q(h_k, mu(h_k)).",
+        "Soft target updates with tau."
+      ],
+      "acting_history": "One deque of the last seq_len observations passed to select_action. These are the same normalised observations that the runtime stores in transitions, so acting and learning use identically constructed sequences (PLAN 1.6: no second, differently built history). The acting pass also starts from a zero hidden state over the window. With fewer than seq_len observations the window is shorter (no zero padding with fake values).",
+      "exploration": "Gaussian N(0, exploration_sigma^2) on the last-step output, clipped to [-1, 1].",
+      "tests": [
+        "contract",
+        "critic receives per-step actions (changing a_k changes Q only at steps >= k)",
+        "acting is deterministic with explore=False for the same observation history",
+        "window never mixes observations from two different construction paths (history equals last seq_len observations given to select_action)"
+      ]
+    },
+    {
+      "id": "rl_algorithms.baselines",
+      "files": {
+        "create": [
+          "abmem/services/algorithms/baselines.py",
+          "tests/algorithms/test_baselines.py"
+        ]
+      },
+      "class": "RandomPolicy, MarginalCostPolicy, FixedMarkupPolicy (BaseAgentAlgorithm), is_learning = False",
+      "rules": [
+        "RANDOM: u ~ U[-1, 1]^action_dim from the agent generator, independent of explore.",
+        "MARGINAL_COST: price_i = plant_variable_costs[i] (fuelCost, TL/MWh), clipped to [price_low, price_high], returned as u via the affine map of action_space (local pure implementation to avoid importing services.agent).",
+        "FIXED_MARKUP: price_i = (plant_variable_costs[i] + plant_static_costs[i]) * (1 + markup), default markup 0.10 (OQ-6), clipped to [price_low, price_high], mapped to u.",
+        "observe/update are no-ops, update returns None, exploration_scale returns None, fail-stack never applies (runtime_core checks is_learning)."
+      ],
+      "tests": [
+        "contract (non-learning variant)",
+        "MARGINAL_COST price equals variable cost after to_price round trip within one price quantum",
+        "cost above price_high clips to +1",
+        "RANDOM reproducible with the same seed"
+      ]
+    }
+  ],
+  "files": {
+    "create": [
+      "abmem/services/algorithms/baselines.py",
+      "tests/algorithms/test_ddpg.py",
+      "tests/algorithms/test_td3.py",
+      "tests/algorithms/test_sac.py",
+      "tests/algorithms/test_ppo.py",
+      "tests/algorithms/test_rdpg.py",
+      "tests/algorithms/test_baselines.py"
+    ],
+    "modify": [
+      "abmem/services/algorithms/DDPG.py",
+      "abmem/services/algorithms/TD3.py",
+      "abmem/services/algorithms/SAC.py",
+      "abmem/services/algorithms/sac_networks.py",
+      "abmem/services/algorithms/ppo.py",
+      "abmem/services/algorithms/RDPG.py"
+    ],
+    "delete": []
+  },
+  "public_interfaces": [
+    {
+      "module": "abmem/services/algorithms/DDPG.py",
+      "signature": "class DDPGAlgorithm(BaseAgentAlgorithm)",
+      "description": "See work package."
+    },
+    {
+      "module": "abmem/services/algorithms/TD3.py",
+      "signature": "class TD3Algorithm(BaseAgentAlgorithm)",
+      "description": "See work package."
+    },
+    {
+      "module": "abmem/services/algorithms/SAC.py",
+      "signature": "class SACAlgorithm(BaseAgentAlgorithm)",
+      "description": "See work package."
+    },
+    {
+      "module": "abmem/services/algorithms/ppo.py",
+      "signature": "class PPOAlgorithm(BaseAgentAlgorithm)",
+      "description": "See work package."
+    },
+    {
+      "module": "abmem/services/algorithms/RDPG.py",
+      "signature": "class RDPGAlgorithm(BaseAgentAlgorithm)",
+      "description": "See work package."
+    },
+    {
+      "module": "abmem/services/algorithms/baselines.py",
+      "signature": "class RandomPolicy(BaseAgentAlgorithm)\nclass MarginalCostPolicy(BaseAgentAlgorithm)\nclass FixedMarkupPolicy(BaseAgentAlgorithm)",
+      "description": "See work package."
+    }
+  ],
+  "data_model_changes": "none",
+  "migrations": "none",
+  "invariants": [
+    "Class names match registry.ALGORITHM_CLASS_PATHS exactly.",
+    "No file in this spec reads or writes the database.",
+    "With a fixed rng seed and torch.manual_seed, two instances produce identical action sequences on CPU."
+  ],
+  "edge_cases": [
+    "action_dim from 1 to 5.",
+    "Reward magnitudes around -5 to 1 (K1 with losses) and exactly 0.",
+    "Constant observation stream (all identical obs).",
+    "Very small learning_starts equal to batch_size.",
+    "PPO: rollout of only intervened steps (policy loss over an empty mask returns 0 without NaN).",
+    "SAC/PPO: |z| large (tanh saturation) does not produce NaN or Inf log-probabilities.",
+    "RDPG: buffer length exactly seq_len."
+  ],
+  "test_plan": [
+    "Per work package tests listed above",
+    "tests/algorithms/test_registry.py xfail markers removed when all six packages land"
+  ],
+  "research_debug": {
+    "bug_type": "C (C3, C5, C6, C7) and B (B3, B7)",
+    "bug_impact_required": true,
+    "bug_impact_note": "One commit per algorithm with BUG-IMPACT describing the change of the update rule. All earlier algorithm comparisons are not interpretable (analiz.md section 9)."
+  },
+  "acceptance_criteria": [
+    "All six packages pass the contract test and their specific tests",
+    "No reference to actor_critic.py remains in DDPG.py, TD3.py, RDPG.py"
+  ],
+  "out_of_scope": [
+    "Runtime wiring and deletion of agent_algorithm.py/actor_critic.py (runtime_core)",
+    "Policy checkpointing"
+  ],
+  "blocked_by_open_questions": [],
+  "approval_note": "Approved by the user on 2026-10-06. Open questions OQ-1..OQ-19 are resolved in ARCHITECTURE.md section 11. The entries in resolved_open_questions are binding and override any wording below that says \"proposal\", \"per OQ-x\" or \"if approved\".",
+  "resolved_open_questions": {
+    "OQ-3": "Defaults: 1 gradient step per period (gradient_steps_per_period = 1, HPO-searchable), learning_starts = 64.",
+    "OQ-4": "PPO rollout_length default 64.",
+    "OQ-6": "FIXED_MARKUP price = (fuelCost + staticCost) per MWh * (1 + markup), default markup 0.10, configurable."
+  }
+}

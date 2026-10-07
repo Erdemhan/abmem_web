@@ -1,0 +1,1478 @@
+{% load static abmem_choices %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>ABMEM SIMULATION - {% if simulation %}Edit Scenario{% else %}New Scenario{% endif %}</title>
+    <!-- Fonts and icons -->
+    <link href="https://fonts.googleapis.com/css?family=Open+Sans:300,400,600,700" rel="stylesheet" />
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
+    <!-- MDB -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/7.2.0/mdb.min.css" rel="stylesheet" />
+    <!-- Nucleo Icons -->
+    <link href="{% static 'assets/css/nucleo-icons.css' %}" rel="stylesheet" />
+    <link href="{% static 'assets/css/nucleo-svg.css' %}" rel="stylesheet" />
+    <!-- Font Awesome Icons -->
+    <script src="https://kit.fontawesome.com/42d5adcbca.js" crossorigin="anonymous"></script>
+    <!-- CSS Files -->
+    <link id="pagestyle" href="{% static 'assets/css/soft-ui-dashboard.css' %}" rel="stylesheet" />
+    <link href="{% static 'assets/css/abmem.css' %}" rel="stylesheet" />
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"
+        integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=" crossorigin="anonymous"></script>
+    <style>
+        .wizard-steps { gap: .5rem; }
+        .wizard-step-btn { border: 1px solid #dee2e6; background: #fff; color: #67748e; text-transform: none; }
+        .wizard-step-btn.is-current { background: #cb0c9f; border-color: #cb0c9f; color: #fff; }
+        .wizard-step-btn.is-done { border-color: #82d616; color: #344767; }
+        .wizard-step-btn .step-num { display: inline-block; min-width: 1.4rem; font-weight: 700; }
+        .wizard-option { display: block; height: 100%; cursor: pointer; border: 1px solid #dee2e6; border-radius: .75rem;
+            padding: 1rem; background: #fff; transition: border-color .15s, box-shadow .15s; }
+        .btn-check:checked + .wizard-option { border-color: #cb0c9f; box-shadow: 0 0 0 .15rem rgba(203, 12, 159, .25); }
+        .btn-check:focus-visible + .wizard-option { outline: 2px solid #cb0c9f; outline-offset: 2px; }
+        .wizard-option .option-check { display: none; color: #cb0c9f; }
+        .btn-check:checked + .wizard-option .option-check { display: inline; }
+        .info-tip { color: #67748e; line-height: 1; vertical-align: baseline; }
+        .info-tip:hover, .info-tip:focus { color: #cb0c9f; }
+        .library-card { cursor: pointer; transition: border-color .15s; border: 1px solid #e9ecef; }
+        .library-card:hover { border-color: #cb0c9f; }
+        .library-card.is-added { cursor: default; border-color: #82d616; background: #f8fdf2; }
+        .agent-row .agent-row-name { word-break: break-word; }
+        .agent-row.has-error { border-left: 3px solid #ea0606; }
+        .review-list dt { font-weight: 600; color: #344767; }
+        .review-list dd { margin-bottom: .5rem; }
+        @media (max-width: 575.98px) {
+            .wizard-nav .btn { flex: 1 1 auto; }
+        }
+    </style>
+</head>
+
+<body class="g-sidenav-show bg-gray-100">
+
+    <!-- SIDEBAR -->
+    <aside class="sidenav navbar navbar-vertical navbar-expand-xs border-0 border-radius-xl my-3 fixed-start ms-3"
+        id="sidenav-main">
+        {% include '../static/assets/components/sidebar.html' %}
+    </aside>
+    <!-- END SIDEBAR -->
+
+    <!-- MAIN -->
+    <main class="main-content position-relative max-height-vh-100 h-100 border-radius-lg">
+
+        <!-- NAVBAR -->
+        {% if simulation %}
+        {% include '../static/assets/components/navbar.html' with contextName="Simulation" pageName="Edit Scenario" topPageName="ABMEM" %}
+        {% else %}
+        {% include '../static/assets/components/navbar.html' with contextName="Simulation" pageName="New Scenario" topPageName="ABMEM" %}
+        {% endif %}
+        <!-- END NAVBAR -->
+
+        <div class="container-fluid py-4" id="scenario-wizard">
+            {% csrf_token %}
+
+            <!-- Draft restore prompt (PLAN 2.6, no blocking dialog) -->
+            <div id="draft-banner" class="alert alert-info text-white d-none" role="status">
+                <span id="draft-banner-text">An unsaved draft of this scenario was found.</span>
+                <div class="mt-2 d-flex flex-wrap gap-2">
+                    <button type="button" class="btn btn-sm btn-light mb-0" id="draft-restore">Restore draft</button>
+                    <button type="button" class="btn btn-sm btn-outline-light mb-0" id="draft-discard">Discard draft</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header pb-0">
+                    <h5 class="mb-1" id="wizard-title">{% if simulation %}Edit scenario: {{ simulation.name }}{% else %}New scenario{% endif %}</h5>
+                    <p class="text-sm text-secondary mb-3">A scenario is a template. Every run copies it, so editing it later does not change finished runs.</p>
+                    <ol class="wizard-steps list-unstyled d-flex flex-wrap mb-0" aria-label="Wizard steps">
+                        <li class="flex-fill"><button type="button" class="wizard-step-btn btn btn-sm w-100 mb-0" data-goto-step="0" aria-controls="wizard-step-0" aria-label="Step 1: Basics"><span class="step-num">1</span><span class="d-none d-sm-inline">Basics</span></button></li>
+                        <li class="flex-fill"><button type="button" class="wizard-step-btn btn btn-sm w-100 mb-0" data-goto-step="1" aria-controls="wizard-step-1" aria-label="Step 2: Market"><span class="step-num">2</span><span class="d-none d-sm-inline">Market</span></button></li>
+                        <li class="flex-fill"><button type="button" class="wizard-step-btn btn btn-sm w-100 mb-0" data-goto-step="2" aria-controls="wizard-step-2" aria-label="Step 3: Agents"><span class="step-num">3</span><span class="d-none d-sm-inline">Agents</span></button></li>
+                        <li class="flex-fill"><button type="button" class="wizard-step-btn btn btn-sm w-100 mb-0" data-goto-step="3" aria-controls="wizard-step-3" aria-label="Step 4: Review"><span class="step-num">4</span><span class="d-none d-sm-inline">Review</span></button></li>
+                    </ol>
+                </div>
+
+                <div class="card-body">
+                    <div id="wizard-errors" class="alert alert-danger text-white d-none" role="alert"></div>
+                    <div id="wizard-success" class="alert alert-success text-white d-none" role="status"></div>
+
+                    <!-- STEP 1: BASICS -->
+                    <section class="wizard-step" id="wizard-step-0" data-step="0" aria-labelledby="wizard-step-0-title">
+                        <h6 id="wizard-step-0-title">Basics</h6>
+                        <div class="row">
+                            <div class="col-12 col-lg-6 mb-3">
+                                <label for="simulation_name" class="form-label">Scenario name</label>
+                                <input type="text" id="simulation_name" class="form-control" maxlength="{{ wizard_config.name_max_length }}"
+                                    value="{{ wizard_config.initial.simulation_name }}" aria-describedby="simulation_name-feedback simulation_name-help" required>
+                                <small id="simulation_name-help" class="form-text text-muted">At most {{ wizard_config.name_max_length }} characters.</small>
+                                <div class="invalid-feedback" id="simulation_name-feedback"></div>
+                            </div>
+                        </div>
+
+                        <fieldset class="mb-3">
+                            <legend class="form-label text-sm mb-1">Duration</legend>
+                            <div class="d-flex flex-wrap gap-2 mb-2" role="group" aria-label="Duration presets">
+                                <input type="radio" class="btn-check" name="durationPreset" id="duration-24" value="24" autocomplete="off">
+                                <label class="btn btn-outline-primary btn-sm mb-0" for="duration-24">1 day (24 h)</label>
+                                <input type="radio" class="btn-check" name="durationPreset" id="duration-168" value="168" autocomplete="off">
+                                <label class="btn btn-outline-primary btn-sm mb-0" for="duration-168">1 week (168 h)</label>
+                                <input type="radio" class="btn-check" name="durationPreset" id="duration-336" value="336" autocomplete="off">
+                                <label class="btn btn-outline-primary btn-sm mb-0" for="duration-336">2 weeks (336 h)</label>
+                                <input type="radio" class="btn-check" name="durationPreset" id="duration-custom" value="custom" autocomplete="off">
+                                <label class="btn btn-outline-primary btn-sm mb-0" for="duration-custom">Custom</label>
+                            </div>
+                            <div class="row">
+                                <div class="col-12 col-sm-6 col-lg-3">
+                                    <label for="periodNumber" class="form-label">Number of periods (hours)</label>
+                                    <input type="number" id="periodNumber" class="form-control" min="1" step="1"
+                                        value="{{ wizard_config.initial.periodNumber }}" aria-describedby="periodNumber-hint periodNumber-feedback" required>
+                                    <small id="periodNumber-hint" class="form-text text-muted"></small>
+                                    <div class="invalid-feedback" id="periodNumber-feedback"></div>
+                                </div>
+                            </div>
+                            <input type="hidden" id="periodType" value="{{ wizard_config.initial.periodType }}">
+                        </fieldset>
+
+                        <fieldset class="mb-3" id="simulationMode-group">
+                            <legend class="form-label text-sm mb-1">Simulation mode
+                                <button type="button" class="btn btn-link p-0 ms-1 mb-0 info-tip" data-bs-toggle="tooltip" data-bs-placement="top"
+                                    title="Only result runs every period without stopping. Period by period pauses after each period until you press Next on the watch page."
+                                    aria-label="Help: simulation mode"><i class="fas fa-circle-info" aria-hidden="true"></i></button>
+                            </legend>
+                            <div class="row g-3">
+                                <div class="col-12 col-md-6">
+                                    <input type="radio" class="btn-check" name="simulationMode" id="mode-1" value="1" autocomplete="off">
+                                    <label class="wizard-option" for="mode-1">
+                                        <span class="d-flex justify-content-between"><strong>Only result</strong><i class="fas fa-check option-check" aria-hidden="true"></i></span>
+                                        <span class="d-block text-sm text-secondary mt-1">Runs all periods without stopping. Watch the progress and analyse the results when the run ends. Recommended for training.</span>
+                                    </label>
+                                </div>
+                                <div class="col-12 col-md-6">
+                                    <input type="radio" class="btn-check" name="simulationMode" id="mode-0" value="0" autocomplete="off">
+                                    <label class="wizard-option" for="mode-0">
+                                        <span class="d-flex justify-content-between"><strong>Period by period</strong><i class="fas fa-check option-check" aria-hidden="true"></i></span>
+                                        <span class="d-block text-sm text-secondary mt-1">Pauses after every period until you press Next on the watch page. Useful to inspect single market clearings.</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="invalid-feedback" id="simulationMode-feedback"></div>
+                        </fieldset>
+
+                        <div class="mb-2">
+                            <button type="button" class="btn btn-link px-0 mb-0" id="advanced-toggle" data-bs-toggle="collapse"
+                                data-bs-target="#advanced-settings" aria-expanded="false" aria-controls="advanced-settings">
+                                <i class="fas fa-sliders-h me-1" aria-hidden="true"></i>Advanced settings
+                            </button>
+                        </div>
+                        <div class="collapse" id="advanced-settings">
+                            <div class="row">
+                                <div class="col-12 col-md-6 col-lg-4 mb-3">
+                                    <label for="seed" class="form-label">Seed
+                                        <button type="button" class="btn btn-link p-0 ms-1 mb-0 info-tip" data-bs-toggle="tooltip"
+                                            title="Seed of all random number generators of a run. Runs with the same seed are reproducible. The run dialog can override it for a single run."
+                                            aria-label="Help: seed"><i class="fas fa-circle-info" aria-hidden="true"></i></button>
+                                    </label>
+                                    <div class="input-group">
+                                        <input type="number" id="seed" class="form-control" min="0" max="2147483647" step="1"
+                                            value="{{ run_seed }}" aria-describedby="seed-feedback" required>
+                                        <button class="btn btn-outline-secondary mb-0" type="button" id="seed-random">Random</button>
+                                    </div>
+                                    <div class="invalid-feedback" id="seed-feedback"></div>
+                                </div>
+                                <div class="col-12 col-md-6 col-lg-4 mb-3">
+                                    <label for="evaluation_periods" class="form-label">Evaluation periods
+                                        <button type="button" class="btn btn-link p-0 ms-1 mb-0 info-tip" data-bs-toggle="tooltip"
+                                            title="Number of final periods in which learning agents neither explore nor learn, to evaluate the trained policy. 0 turns it off; otherwise it must be less than the number of periods."
+                                            aria-label="Help: evaluation periods"><i class="fas fa-circle-info" aria-hidden="true"></i></button>
+                                    </label>
+                                    <input type="number" id="evaluation_periods" class="form-control" min="0" step="1"
+                                        value="{{ run_evaluation_periods }}" aria-describedby="evaluation_periods-feedback" required>
+                                    <div class="invalid-feedback" id="evaluation_periods-feedback"></div>
+                                </div>
+                                <div class="col-12 col-md-6 col-lg-4 mb-3">
+                                    <label for="observation_lags" class="form-label">Observation lags (hours)
+                                        <button type="button" class="btn btn-link p-0 ms-1 mb-0 info-tip" data-bs-toggle="tooltip"
+                                            title="Past market clearing prices an agent observes, in hours before the current period. 1, 24 = the previous hour and the same hour of the previous day; 168 adds the same hour of the previous week."
+                                            aria-label="Help: observation lags"><i class="fas fa-circle-info" aria-hidden="true"></i></button>
+                                    </label>
+                                    <select class="form-control" id="observation_lags" aria-describedby="observation_lags-feedback">
+                                        {% for value, label in observation_lag_choices %}
+                                        <option value="{{ value }}" {% if value == run_observation_lags %}selected{% endif %}>{{ label }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <div class="invalid-feedback" id="observation_lags-feedback"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- STEP 2: MARKET -->
+                    <section class="wizard-step" id="wizard-step-1" data-step="1" aria-labelledby="wizard-step-1-title" hidden>
+                        <h6 id="wizard-step-1-title">Market</h6>
+                        <fieldset class="mb-3" id="strategy-group">
+                            <legend class="form-label text-sm mb-1">Pricing strategy
+                                <button type="button" class="btn btn-link p-0 ms-1 mb-0 info-tip" data-bs-toggle="tooltip"
+                                    title="How accepted offers are paid. Uniform price: every accepted offer receives the market clearing price (PTF) of the period. Pay as bid: every accepted offer receives its own bid price."
+                                    aria-label="Help: pricing strategy"><i class="fas fa-circle-info" aria-hidden="true"></i></button>
+                            </legend>
+                            <div class="row g-3">
+                                <div class="col-12 col-md-6">
+                                    <input type="radio" class="btn-check" name="strategy" id="strategy-1" value="1" autocomplete="off">
+                                    <label class="wizard-option" for="strategy-1">
+                                        <span class="d-flex justify-content-between"><strong>Uniform price (PAYASPTF)</strong><i class="fas fa-check option-check" aria-hidden="true"></i></span>
+                                        <span class="d-block text-sm text-secondary mt-1">All accepted offers are paid the market clearing price (PTF) of the period, as in the day-ahead market.</span>
+                                    </label>
+                                </div>
+                                <div class="col-12 col-md-6">
+                                    <input type="radio" class="btn-check" name="strategy" id="strategy-0" value="0" autocomplete="off">
+                                    <label class="wizard-option" for="strategy-0">
+                                        <span class="d-flex justify-content-between"><strong>Pay as bid (PAYASBID)</strong><i class="fas fa-check option-check" aria-hidden="true"></i></span>
+                                        <span class="d-block text-sm text-secondary mt-1">Every accepted offer is paid its own bid price, so bidding low lowers the agent's revenue.</span>
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="invalid-feedback" id="strategy-feedback"></div>
+                        </fieldset>
+
+                        <fieldset class="mb-3">
+                            <legend class="form-label text-sm mb-1">Bid bounds
+                                <button type="button" class="btn btn-link p-0 ms-1 mb-0 info-tip" data-bs-toggle="tooltip"
+                                    title="Lowest and highest price an offer may have. Agents choose their bid prices inside this range, so it also scales their actions. Default 0 to 200 TL/MWh."
+                                    aria-label="Help: bid bounds"><i class="fas fa-circle-info" aria-hidden="true"></i></button>
+                            </legend>
+                            <div class="row">
+                                <div class="col-12 col-sm-6 col-lg-3 mb-3">
+                                    <label for="lowerBound" class="form-label">Lower bid bound</label>
+                                    <div class="input-group has-validation">
+                                        <input type="number" id="lowerBound" class="form-control" step="1"
+                                            value="{{ wizard_config.initial.lowerBound }}" aria-describedby="lowerBound-feedback" required>
+                                        <span class="input-group-text">TL/MWh</span>
+                                    </div>
+                                    <div class="invalid-feedback" id="lowerBound-feedback"></div>
+                                </div>
+                                <div class="col-12 col-sm-6 col-lg-3 mb-3">
+                                    <label for="upperBound" class="form-label">Upper bid bound</label>
+                                    <div class="input-group has-validation">
+                                        <input type="number" id="upperBound" class="form-control" step="1"
+                                            value="{{ wizard_config.initial.upperBound }}" aria-describedby="upperBound-feedback" required>
+                                        <span class="input-group-text">TL/MWh</span>
+                                    </div>
+                                    <div class="invalid-feedback" id="upperBound-feedback"></div>
+                                </div>
+                            </div>
+                        </fieldset>
+                    </section>
+
+                    <!-- STEP 3: AGENTS -->
+                    <section class="wizard-step" id="wizard-step-2" data-step="2" aria-labelledby="wizard-step-2-title" hidden>
+                        <h6 id="wizard-step-2-title">Agents</h6>
+                        <div class="row">
+                            <div class="col-12 col-xl-5 mb-4">
+                                <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                                    <span class="text-sm font-weight-bold">Scenario agents <span class="badge bg-gradient-secondary" id="agent-count">0</span></span>
+                                    <button type="button" class="btn btn-sm bg-gradient-primary mb-0" id="new-agent-button">
+                                        <i class="fas fa-plus me-1" aria-hidden="true"></i>New agent
+                                    </button>
+                                </div>
+                                <p class="text-xs text-secondary mb-2">New agents are also added to the agent library when the scenario is saved. Library agents are copied with all settings.</p>
+                                <ul class="list-group" id="agent-rows" aria-live="polite"></ul>
+                                <p class="text-sm text-secondary mt-2 mb-0" id="agent-rows-empty">No agents yet. Add library agents from the list or create a new agent.</p>
+                                <div class="invalid-feedback" id="agents-feedback"></div>
+                                <div class="mt-3 p-3 border-radius-lg bg-gray-100">
+                                    <p class="text-sm mb-1" id="capacity-summary"></p>
+                                    <div id="capacity-warnings" class="text-sm text-warning font-weight-bold" role="status"></div>
+                                </div>
+                            </div>
+                            <div class="col-12 col-xl-7">
+                                <span class="text-sm font-weight-bold d-block mb-2">Agent library</span>
+                                <div class="row g-2 mb-2">
+                                    <div class="col-12 col-sm-7">
+                                        <label for="library-search" class="form-label text-xs mb-0">Search by name</label>
+                                        <input type="search" id="library-search" class="form-control no-draft">
+                                    </div>
+                                    <div class="col-12 col-sm-5">
+                                        <label for="library-type-filter" class="form-label text-xs mb-0">Agent type</label>
+                                        <select id="library-type-filter" class="form-control no-draft">
+                                            <option value="">All types</option>
+                                            <option value="0">Renewable</option>
+                                            <option value="1">Fossil</option>
+                                            <option value="2">Nuclear</option>
+                                            <option value="3">Hybrid</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <p class="text-xs text-secondary mb-2">Cards show the algorithm
+                                    <button type="button" class="btn btn-link p-0 mb-0 info-tip" data-bs-toggle="tooltip"
+                                        title="Bidding algorithm of the agent. DDPG, TD3, SAC, PPO and RDPG learn during the run; RANDOM, MARGINAL_COST and FIXED_MARKUP are fixed baselines for comparison."
+                                        aria-label="Help: algorithm"><i class="fas fa-circle-info" aria-hidden="true"></i></button>
+                                    and the fail-stack rule
+                                    <button type="button" class="btn btn-link p-0 mb-0 info-tip" data-bs-toggle="tooltip"
+                                        title="Fail-stack: after L consecutive failed offers (rejected or margin below m_min), the next price of that plant is drawn just below the previous clearing price (at most δ TL/MWh lower). Baseline algorithms never use it."
+                                        aria-label="Help: fail-stack"><i class="fas fa-circle-info" aria-hidden="true"></i></button>.
+                                    Click a card to add the agent.</p>
+                                <p class="text-sm mb-2" id="library-status" role="status"></p>
+                                <div class="row g-2" id="library-cards"></div>
+                            </div>
+                        </div>
+                    </section>
+
+                    <!-- STEP 4: REVIEW -->
+                    <section class="wizard-step" id="wizard-step-3" data-step="3" aria-labelledby="wizard-step-3-title" hidden>
+                        <h6 id="wizard-step-3-title">Review</h6>
+                        <div id="review-warnings" class="alert alert-warning text-white d-none" role="status"></div>
+                        <div class="row">
+                            <div class="col-12 col-md-6 mb-3">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <span class="text-sm font-weight-bold">Basics</span>
+                                    <button type="button" class="btn btn-link btn-sm mb-0" data-goto-step="0">Edit</button>
+                                </div>
+                                <dl class="review-list text-sm mb-0" id="review-basics"></dl>
+                            </div>
+                            <div class="col-12 col-md-6 mb-3">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <span class="text-sm font-weight-bold">Market</span>
+                                    <button type="button" class="btn btn-link btn-sm mb-0" data-goto-step="1">Edit</button>
+                                </div>
+                                <dl class="review-list text-sm mb-0" id="review-market"></dl>
+                            </div>
+                        </div>
+                        <div class="d-flex justify-content-between align-items-center">
+                            <span class="text-sm font-weight-bold">Agents</span>
+                            <button type="button" class="btn btn-link btn-sm mb-0" data-goto-step="2">Edit</button>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-sm align-items-center mb-0 text-sm">
+                                <thead>
+                                    <tr>
+                                        <th scope="col">Name</th>
+                                        <th scope="col">Origin</th>
+                                        <th scope="col">Type</th>
+                                        <th scope="col">Algorithm</th>
+                                        <th scope="col">Fail-stack</th>
+                                        <th scope="col">Plants</th>
+                                        <th scope="col" class="text-end">Capacity (MW)</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="review-agents"></tbody>
+                            </table>
+                        </div>
+                        <p class="text-sm mt-2 mb-0" id="review-capacity"></p>
+                    </section>
+
+                    <!-- NAVIGATION -->
+                    <div class="wizard-nav d-flex flex-wrap gap-2 justify-content-between mt-4">
+                        <button type="button" class="btn btn-outline-secondary mb-0" id="wizard-back">Back</button>
+                        <div class="d-flex flex-wrap gap-2 ms-auto">
+                            <button type="button" class="btn bg-gradient-primary mb-0" id="wizard-next">Next</button>
+                            <button type="button" class="btn bg-gradient-success mb-0" id="wizard-save" hidden>Save</button>
+                            <button type="button" class="btn bg-gradient-info mb-0" id="wizard-save-run" hidden>Save and run</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Agent form dialog: the same component as the agent library page -->
+        <div class="modal fade" id="agent-modal" tabindex="-1" role="dialog" aria-labelledby="agent-modal-title" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable" role="document">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="agent-modal-title">New agent</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">
+                            <span aria-hidden="true">&times;</span>
+                        </button>
+                    </div>
+                    <div class="modal-body">
+                        {% include '../static/assets/components/agent-form.html' with resources=resources %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+    <!-- END MAIN -->
+
+    {{ wizard_config|json_script:"wizard-config" }}
+
+    <!-- Core JS Files -->
+    <script src="{% static 'assets/js/core/popper.min.js' %}"></script>
+    <script src="{% static 'assets/js/core/bootstrap.min.js' %}"></script>
+    <script src="{% static 'assets/js/plugins/perfect-scrollbar.min.js' %}"></script>
+    <script src="{% static 'assets/js/plugins/smooth-scrollbar.min.js' %}"></script>
+    <!-- MDB -->
+    <script type="text/javascript"
+        src="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/7.2.0/mdb.umd.min.js"></script>
+
+    <script>
+        // Scenario wizard (PLAN 2.6). The page builds the same JSON payload as the former scenario pages;
+        // the server validates it again and stays authoritative (HTTP 400 {"errors": {field: [messages]}}).
+        // Agent entry modes: "new" (added to the library and copied), "library" (copy of a library agent),
+        // "scenario" (agent already in the edited scenario, edited in place).
+        (function () {
+            'use strict';
+
+            var CONFIG = JSON.parse(document.getElementById('wizard-config').textContent);
+            var STEP_COUNT = 4;
+            var PRESETS = ['24', '168', '336'];
+            var FIELD_STEP = {
+                simulation_name: 0, periodNumber: 0, periodType: 0, simulationMode: 0,
+                seed: 0, evaluation_periods: 0, observation_lags: 0,
+                strategy: 1, lowerBound: 1, upperBound: 1
+            };
+            var STEP_FIELDS = [
+                ['simulation_name', 'periodNumber', 'simulationMode', 'seed', 'evaluation_periods', 'observation_lags'],
+                ['strategy', 'lowerBound', 'upperBound'],
+                ['agents'],
+                []
+            ];
+            var ADVANCED_FIELDS = ['seed', 'evaluation_periods', 'observation_lags'];
+            var AGENT_ERROR_KEYS = ['agents', 'name', 'type', 'budget', 'algorithm_type', 'failstack', 'plants',
+                'failstack_limit', 'failstack_delta', 'failstack_min_margin', 'library_agent_id', 'agent_id', 'mode'];
+            var MODE_LABELS = { '1': 'Only result', '0': 'Period by period' };
+            var STRATEGY_LABELS = { '1': 'Uniform price (PAYASPTF)', '0': 'Pay as bid (PAYASBID)' };
+
+            var state = {
+                step: 0,
+                agents: [],
+                rowErrors: {},
+                library: null,
+                libraryLoading: false,
+                libraryError: '',
+                demand: null,
+                demandError: '',
+                demandFor: null,
+                editingKey: null,
+                saving: false,
+                saved: false,
+                draftPending: false
+            };
+            var nextKey = 1;
+            var demandTicket = 0;
+            var demandTimer = null;
+            var draftTimer = null;
+
+            function byId(id) { return document.getElementById(id); }
+
+            function csrfToken() {
+                var input = document.querySelector('#scenario-wizard input[name="csrfmiddlewaretoken"]');
+                return input ? input.value : '';
+            }
+
+            function formatNumber(value) {
+                return Math.round(Number(value) || 0).toLocaleString('en-US');
+            }
+
+            function el(tag, className, text) {
+                var node = document.createElement(tag);
+                if (className) { node.className = className; }
+                if (text !== undefined && text !== null) { node.textContent = String(text); }
+                return node;
+            }
+
+            function showBanner(id, messages) {
+                var box = byId(id);
+                box.textContent = '';
+                messages.forEach(function (message) { box.appendChild(el('div', '', message)); });
+                box.classList.toggle('d-none', messages.length === 0);
+            }
+
+            // ---------------------------------------------------------------- form values
+
+            function radioValue(name) {
+                var checked = document.querySelector('input[name="' + name + '"]:checked');
+                return checked ? checked.value : '';
+            }
+
+            function setRadio(name, value) {
+                Array.prototype.forEach.call(document.querySelectorAll('input[name="' + name + '"]'), function (radio) {
+                    radio.checked = String(radio.value) === String(value);
+                });
+            }
+
+            function readForm() {
+                return {
+                    simulation_name: byId('simulation_name').value.trim(),
+                    simulationMode: radioValue('simulationMode'),
+                    periodType: byId('periodType').value,
+                    periodNumber: byId('periodNumber').value.trim(),
+                    strategy: radioValue('strategy'),
+                    lowerBound: byId('lowerBound').value.trim(),
+                    upperBound: byId('upperBound').value.trim(),
+                    seed: byId('seed').value.trim(),
+                    evaluation_periods: byId('evaluation_periods').value.trim(),
+                    observation_lags: byId('observation_lags').value.split(',').map(Number)
+                };
+            }
+
+            function writeForm(values) {
+                byId('simulation_name').value = values.simulation_name || '';
+                setRadio('simulationMode', values.simulationMode);
+                byId('periodType').value = values.periodType;
+                byId('periodNumber').value = values.periodNumber;
+                setRadio('strategy', values.strategy);
+                byId('lowerBound').value = values.lowerBound;
+                byId('upperBound').value = values.upperBound;
+                byId('seed').value = values.seed;
+                byId('evaluation_periods').value = values.evaluation_periods;
+                var lags = (values.observation_lags || []).join(',');
+                if (Array.prototype.some.call(byId('observation_lags').options, function (o) { return o.value === lags; })) {
+                    byId('observation_lags').value = lags;
+                }
+                syncDurationPreset();
+            }
+
+            function agentPayload(row) {
+                if (row.mode === 'library') {
+                    return { mode: 'library', library_agent_id: row.library_agent_id };
+                }
+                var entry = {
+                    mode: row.mode,
+                    name: row.name,
+                    type: row.type,
+                    budget: row.budget,
+                    algorithm_type: row.algorithm_type,
+                    failstack: {
+                        enabled: Boolean(row.failstack.enabled),
+                        limit: row.failstack.limit,
+                        delta: row.failstack.delta,
+                        min_margin: row.failstack.min_margin
+                    },
+                    plants: row.plants.map(function (plant) {
+                        return { resource: plant.resource, capacity: plant.capacity };
+                    })
+                };
+                if (row.mode === 'scenario') {
+                    entry.agent_id = row.agent_id;
+                }
+                return entry;
+            }
+
+            function buildPayload() {
+                var payload = readForm();
+                payload.agents = state.agents.map(agentPayload);
+                return payload;
+            }
+
+            // ---------------------------------------------------------------- agents
+
+            function isBaseline(algorithmType) {
+                var algorithm = CONFIG.algorithms[String(algorithmType)];
+                return Boolean(algorithm && algorithm.baseline);
+            }
+
+            function rowFromServerAgent(agent, mode) {
+                return {
+                    key: nextKey++,
+                    mode: mode,
+                    library_agent_id: mode === 'library' ? agent.id : null,
+                    agent_id: mode === 'scenario' ? agent.agent_id : null,
+                    source_id: mode === 'library' ? agent.id : (agent.source_id || null),
+                    source_name: mode === 'library' ? agent.name : (agent.source_name || ''),
+                    name: agent.name,
+                    type: String(agent.type),
+                    budget: String(agent.budget),
+                    algorithm_type: String(agent.algorithm_type),
+                    failstack: {
+                        enabled: Boolean(agent.failstack.active),
+                        limit: agent.failstack.limit,
+                        delta: agent.failstack.delta,
+                        min_margin: agent.failstack.min_margin
+                    },
+                    plants: agent.plants.map(function (plant) {
+                        return { resource: String(plant.resource_id), capacity: String(plant.capacity) };
+                    })
+                };
+            }
+
+            function typeName(type) {
+                return CONFIG.agent_types[String(type)] || 'Unknown type';
+            }
+
+            function algorithmName(algorithmType) {
+                var algorithm = CONFIG.algorithms[String(algorithmType)];
+                return algorithm ? algorithm.name : 'Unknown';
+            }
+
+            function failstackText(row) {
+                var fs = row.failstack || {};
+                if (fs.enabled && !isBaseline(row.algorithm_type)) {
+                    return 'On (L=' + fs.limit + ', δ=' + fs.delta + ', m_min=' + fs.min_margin + ')';
+                }
+                return 'Off';
+            }
+
+            function resourceName(resourceId) {
+                var resource = CONFIG.resources[String(resourceId)];
+                return resource ? resource.name : 'Resource ' + resourceId;
+            }
+
+            function plantsText(row) {
+                return row.plants.map(function (plant) {
+                    return resourceName(plant.resource) + ': ' + plant.capacity + ' MW';
+                }).join(', ');
+            }
+
+            function rowCapacity(row) {
+                return row.plants.reduce(function (sum, plant) { return sum + (Number(plant.capacity) || 0); }, 0);
+            }
+
+            function totalCapacity() {
+                return state.agents.reduce(function (sum, row) { return sum + rowCapacity(row); }, 0);
+            }
+
+            function originText(row) {
+                if (row.mode === 'new') { return 'New, added to the library on save'; }
+                if (row.mode === 'library') { return 'From library'; }
+                return row.source_id ? 'Copy of library agent ' + row.source_name : 'Not linked to a library agent';
+            }
+
+            function usedLibraryIds() {
+                var ids = {};
+                state.agents.forEach(function (row) {
+                    if (row.mode === 'library' && row.library_agent_id) { ids[String(row.library_agent_id)] = true; }
+                    if (row.mode === 'scenario' && row.source_id) { ids[String(row.source_id)] = true; }
+                });
+                return ids;
+            }
+
+            // Same rules as the server: names unique in the scenario (case-sensitive), new agents also
+            // unique among each other case-insensitively (library constraint).
+            function duplicateNameMessage(name, mode, excludeKey) {
+                if (!name) { return 'Agent name is required.'; }
+                if (name.length > CONFIG.agent_name_max_length) {
+                    return 'Agent name must have at most ' + CONFIG.agent_name_max_length + ' characters.';
+                }
+                var message = '';
+                state.agents.forEach(function (row) {
+                    if (message || row.key === excludeKey) { return; }
+                    if (row.name === name) {
+                        message = 'Another agent of this scenario already uses this name.';
+                    } else if (mode === 'new' && row.mode === 'new' && row.name.toLowerCase() === name.toLowerCase()) {
+                        message = 'Another new agent uses this name (library names are compared case-insensitively).';
+                    }
+                });
+                return message;
+            }
+
+            function findRow(key) {
+                for (var i = 0; i < state.agents.length; i++) {
+                    if (state.agents[i].key === key) { return state.agents[i]; }
+                }
+                return null;
+            }
+
+            function removeRow(key) {
+                state.agents = state.agents.filter(function (row) { return row.key !== key; });
+                delete state.rowErrors[key];
+                agentsChanged();
+            }
+
+            function agentsChanged() {
+                setFieldError('agents', '');
+                renderAgents();
+                renderLibrary();
+                renderCapacity();
+                scheduleDraft();
+            }
+
+            function renderAgents() {
+                var list = byId('agent-rows');
+                list.textContent = '';
+                state.agents.forEach(function (row) {
+                    var item = el('li', 'list-group-item agent-row d-flex flex-wrap align-items-start gap-2');
+                    item.setAttribute('data-key', String(row.key));
+                    item.setAttribute('data-mode', row.mode);
+                    var error = state.rowErrors[row.key];
+                    if (error) { item.classList.add('has-error'); }
+
+                    var body = el('div', 'flex-grow-1');
+                    body.style.minWidth = '0';
+                    var title = el('div', 'd-flex flex-wrap align-items-center gap-2');
+                    title.appendChild(el('strong', 'agent-row-name text-sm', row.name));
+                    var badgeClass = row.mode === 'new' ? 'bg-gradient-info' : (row.mode === 'library' ? 'bg-gradient-secondary' : 'bg-gradient-dark');
+                    title.appendChild(el('span', 'badge ' + badgeClass, originText(row)));
+                    body.appendChild(title);
+                    body.appendChild(el('div', 'text-xs text-secondary',
+                        typeName(row.type) + ' · ' + algorithmName(row.algorithm_type) + ' · Fail-stack ' + failstackText(row)
+                        + ' · Budget ' + row.budget + ' TL'));
+                    body.appendChild(el('div', 'text-xs', plantsText(row) + ' (total ' + formatNumber(rowCapacity(row)) + ' MW)'));
+                    if (error) {
+                        body.appendChild(el('div', 'text-xs text-danger font-weight-bold', error));
+                    }
+                    item.appendChild(body);
+
+                    var actions = el('div', 'd-flex gap-1');
+                    if (row.mode !== 'library') {
+                        var edit = el('button', 'btn btn-sm btn-outline-primary mb-0', 'Edit');
+                        edit.type = 'button';
+                        edit.setAttribute('aria-label', 'Edit agent ' + row.name);
+                        edit.addEventListener('click', function () { openAgentForm(row); });
+                        actions.appendChild(edit);
+                    }
+                    var remove = el('button', 'btn btn-sm btn-outline-danger mb-0', 'Remove');
+                    remove.type = 'button';
+                    remove.setAttribute('aria-label', 'Remove agent ' + row.name);
+                    remove.addEventListener('click', function () { removeRow(row.key); });
+                    actions.appendChild(remove);
+                    item.appendChild(actions);
+                    list.appendChild(item);
+                });
+                byId('agent-count').textContent = String(state.agents.length);
+                byId('agent-rows-empty').hidden = state.agents.length > 0;
+            }
+
+            // ---------------------------------------------------------------- library
+
+            function loadLibrary() {
+                if (state.library !== null || state.libraryLoading) { return; }
+                state.libraryLoading = true;
+                state.libraryError = '';
+                renderLibrary();
+                fetch(CONFIG.library_url, { headers: { 'Accept': 'application/json' } })
+                    .then(function (response) {
+                        if (!response.ok) { throw new Error('HTTP ' + response.status); }
+                        return response.json();
+                    })
+                    .then(function (agents) {
+                        state.library = agents;
+                        state.libraryLoading = false;
+                        renderLibrary();
+                    })
+                    .catch(function (error) {
+                        state.libraryLoading = false;
+                        state.libraryError = 'The agent library could not be loaded (' + error.message + ').';
+                        renderLibrary();
+                    });
+            }
+
+            function addLibraryAgent(agent) {
+                if (usedLibraryIds()[String(agent.id)]) { return; }
+                var clash = duplicateNameMessage(agent.name, 'library', null);
+                if (clash) {
+                    setFieldError('agents', agent.name + ': ' + clash);
+                    return;
+                }
+                state.agents.push(rowFromServerAgent(agent, 'library'));
+                agentsChanged();
+            }
+
+            function renderLibrary() {
+                var container = byId('library-cards');
+                var status = byId('library-status');
+                container.textContent = '';
+                if (state.libraryLoading) { status.textContent = 'Loading the agent library...'; return; }
+                if (state.libraryError) { status.textContent = state.libraryError; return; }
+                if (state.library === null) { status.textContent = ''; return; }
+                var search = byId('library-search').value.trim().toLowerCase();
+                var type = byId('library-type-filter').value;
+                var used = usedLibraryIds();
+                var shown = 0;
+                state.library.forEach(function (agent) {
+                    if (search && agent.name.toLowerCase().indexOf(search) === -1) { return; }
+                    if (type !== '' && String(agent.type) !== type) { return; }
+                    shown += 1;
+                    var added = Boolean(used[String(agent.id)]);
+                    var row = rowFromServerAgent(agent, 'library');
+                    var col = el('div', 'col-12 col-md-6 col-xxl-4');
+                    var card = el('div', 'card library-card h-100' + (added ? ' is-added' : ''));
+                    card.setAttribute('data-library-id', String(agent.id));
+                    var body = el('div', 'card-body p-3 d-flex flex-column');
+                    var head = el('div', 'd-flex justify-content-between align-items-start gap-2');
+                    head.appendChild(el('h6', 'mb-1 text-sm text-break', agent.name));
+                    head.appendChild(el('span', 'badge bg-gradient-dark', typeName(agent.type)));
+                    body.appendChild(head);
+                    body.appendChild(el('p', 'text-xs mb-1', 'Algorithm: ' + algorithmName(agent.algorithm_type)));
+                    body.appendChild(el('p', 'text-xs mb-1', 'Fail-stack: ' + failstackText(row)));
+                    var plants = el('ul', 'list-unstyled text-xs mb-1');
+                    row.plants.forEach(function (plant) {
+                        plants.appendChild(el('li', '', resourceName(plant.resource) + ': ' + plant.capacity + ' MW'));
+                    });
+                    body.appendChild(plants);
+                    body.appendChild(el('p', 'text-xs text-secondary mb-2',
+                        'Capacity ' + formatNumber(rowCapacity(row)) + ' MW · Budget ' + agent.budget + ' TL'));
+                    var button = el('button', 'btn btn-sm mb-0 mt-auto ' + (added ? 'btn-success' : 'btn-outline-primary'),
+                        added ? 'Added' : 'Add');
+                    button.type = 'button';
+                    button.disabled = added;
+                    button.setAttribute('aria-label', (added ? 'Already added: ' : 'Add to the scenario: ') + agent.name);
+                    body.appendChild(button);
+                    card.appendChild(body);
+                    if (!added) {
+                        card.addEventListener('click', function () { addLibraryAgent(agent); });
+                    }
+                    col.appendChild(card);
+                    container.appendChild(col);
+                });
+                if (state.library.length === 0) {
+                    status.textContent = 'The agent library is empty. Create agents with "New agent".';
+                } else {
+                    status.textContent = shown + ' of ' + state.library.length + ' library agents shown.';
+                }
+            }
+
+            // ---------------------------------------------------------------- agent form dialog
+
+            function agentModal() {
+                return bootstrap.Modal.getOrCreateInstance(byId('agent-modal'));
+            }
+
+            function setSubmitLabel(text) {
+                var label = document.querySelector('#submit-button span');
+                if (label) { label.textContent = text; } else { byId('submit-button').textContent = text; }
+            }
+
+            function openAgentForm(row) {
+                state.editingKey = row ? row.key : null;
+                if (row) {
+                    agentFormFill(row);
+                } else {
+                    agentFormReset();
+                }
+                var mode = row ? row.mode : 'new';
+                agentFormConfigure({
+                    checkLibraryName: mode === 'new',
+                    extraNameCheck: function (name) { return duplicateNameMessage(name, mode, row ? row.key : null); },
+                    onSubmit: saveAgentFromForm
+                });
+                byId('agent-modal-title').textContent = row ? 'Edit agent ' + row.name : 'New agent';
+                setSubmitLabel(row ? 'Apply changes' : 'Add to scenario');
+                agentModal().show();
+            }
+
+            function saveAgentFromForm(values) {
+                var row = state.editingKey !== null ? findRow(state.editingKey) : null;
+                if (row) {
+                    row.name = values.name;
+                    row.type = values.type;
+                    row.budget = values.budget;
+                    row.algorithm_type = values.algorithm_type;
+                    row.failstack = values.failstack;
+                    row.plants = values.plants;
+                    delete state.rowErrors[row.key];
+                } else {
+                    state.agents.push({
+                        key: nextKey++,
+                        mode: 'new',
+                        library_agent_id: null,
+                        agent_id: null,
+                        source_id: null,
+                        source_name: '',
+                        name: values.name,
+                        type: values.type,
+                        budget: values.budget,
+                        algorithm_type: values.algorithm_type,
+                        failstack: values.failstack,
+                        plants: values.plants
+                    });
+                }
+                state.editingKey = null;
+                agentModal().hide();
+                agentsChanged();
+            }
+
+            // ---------------------------------------------------------------- demand and capacity
+
+            function scheduleDemand() {
+                clearTimeout(demandTimer);
+                demandTimer = setTimeout(fetchDemand, 400);
+            }
+
+            function fetchDemand() {
+                var periods = byId('periodNumber').value.trim();
+                if (!/^\d+$/.test(periods) || Number(periods) < 1) {
+                    state.demand = null;
+                    state.demandError = '';
+                    state.demandFor = null;
+                    renderCapacity();
+                    return;
+                }
+                if (state.demandFor === periods) { return; }
+                state.demandFor = periods;
+                var ticket = ++demandTicket;
+                fetch(CONFIG.demand_stats_url + '?periods=' + encodeURIComponent(periods), { headers: { 'Accept': 'application/json' } })
+                    .then(function (response) {
+                        return response.json().then(function (body) { return { ok: response.ok, body: body }; });
+                    })
+                    .then(function (result) {
+                        if (ticket !== demandTicket) { return; }
+                        if (result.ok) {
+                            state.demand = result.body;
+                            state.demandError = '';
+                        } else {
+                            state.demand = null;
+                            state.demandError = errorsText(result.body.errors) || 'Demand statistics are not available.';
+                        }
+                        renderCapacity();
+                    })
+                    .catch(function () {
+                        if (ticket !== demandTicket) { return; }
+                        state.demand = null;
+                        state.demandFor = null;
+                        state.demandError = 'Demand statistics could not be loaded, the capacity check is skipped.';
+                        renderCapacity();
+                    });
+            }
+
+            function capacityWarnings() {
+                var warnings = [];
+                if (state.demandError) { warnings.push(state.demandError); }
+                if (state.demand && state.agents.length > 0) {
+                    var total = totalCapacity();
+                    var peak = state.demand.max;
+                    if (total < peak) {
+                        warnings.push('Total capacity (' + formatNumber(total) + ' MW) is below the peak demand of the chosen horizon ('
+                            + formatNumber(peak) + ' MWh): the market may not clear in peak hours.');
+                    } else if (total > 5 * peak) {
+                        warnings.push('Total capacity (' + formatNumber(total) + ' MW) is more than five times the peak demand ('
+                            + formatNumber(peak) + ' MWh): most offers can never be accepted.');
+                    }
+                }
+                return warnings;
+            }
+
+            function capacitySummary() {
+                var text = 'Total capacity: ' + formatNumber(totalCapacity()) + ' MW.';
+                if (state.demand) {
+                    text += ' Demand over ' + state.demand.periods + ' periods: min ' + formatNumber(state.demand.min)
+                        + ', mean ' + formatNumber(state.demand.mean) + ', max ' + formatNumber(state.demand.max) + ' MWh.';
+                }
+                return text;
+            }
+
+            function renderCapacity() {
+                byId('capacity-summary').textContent = capacitySummary();
+                var box = byId('capacity-warnings');
+                box.textContent = '';
+                capacityWarnings().forEach(function (warning) { box.appendChild(el('div', '', warning)); });
+                if (state.step === 3) { renderReview(); }
+            }
+
+            // ---------------------------------------------------------------- validation
+
+            function setFieldError(field, message) {
+                var input = byId(field);
+                var feedback = byId(field + '-feedback');
+                if (input && input.tagName !== 'FIELDSET') { input.classList.toggle('is-invalid', Boolean(message)); }
+                if (feedback) {
+                    feedback.textContent = message || '';
+                    feedback.classList.toggle('d-block', Boolean(message));
+                }
+            }
+
+            function isNonNegativeInt(text) { return /^\d+$/.test(text); }
+            function isInt(text) { return /^-?\d+$/.test(text); }
+
+            function validateStep(step) {
+                var values = readForm();
+                var errors = {};
+                if (step === 0) {
+                    if (!values.simulation_name) {
+                        errors.simulation_name = 'Scenario name is required.';
+                    } else if (values.simulation_name.length > CONFIG.name_max_length) {
+                        errors.simulation_name = 'Scenario name must have at most ' + CONFIG.name_max_length + ' characters.';
+                    }
+                    var periodsOk = isNonNegativeInt(values.periodNumber) && Number(values.periodNumber) >= 1;
+                    if (!periodsOk) { errors.periodNumber = 'Enter a positive whole number of periods.'; }
+                    if (values.simulationMode === '') { errors.simulationMode = 'Choose a simulation mode.'; }
+                    if (!isNonNegativeInt(values.seed) || Number(values.seed) >= CONFIG.seed_upper_bound) {
+                        errors.seed = 'Seed must be an integer from 0 to ' + (CONFIG.seed_upper_bound - 1) + '.';
+                    }
+                    if (!isNonNegativeInt(values.evaluation_periods)) {
+                        errors.evaluation_periods = 'Evaluation periods must be a non-negative integer.';
+                    } else if (periodsOk && Number(values.evaluation_periods) > 0
+                        && Number(values.evaluation_periods) >= Number(values.periodNumber)) {
+                        errors.evaluation_periods = 'Evaluation periods must be less than the number of periods ('
+                            + values.periodNumber + ').';
+                    }
+                } else if (step === 1) {
+                    if (values.strategy === '') { errors.strategy = 'Choose a pricing strategy.'; }
+                    if (!isInt(values.lowerBound)) { errors.lowerBound = 'Enter the lower bid bound as a whole number (TL/MWh).'; }
+                    if (!isInt(values.upperBound)) {
+                        errors.upperBound = 'Enter the upper bid bound as a whole number (TL/MWh).';
+                    } else if (isInt(values.lowerBound) && Number(values.upperBound) <= Number(values.lowerBound)) {
+                        errors.upperBound = 'The upper bid bound must be greater than the lower bid bound.';
+                    }
+                } else if (step === 2) {
+                    state.rowErrors = {};
+                    state.agents.forEach(function (row) {
+                        var message = duplicateNameMessage(row.name, row.mode, row.key);
+                        if (message) { state.rowErrors[row.key] = message; }
+                    });
+                    if (state.agents.length === 0) {
+                        errors.agents = 'Add at least one agent to the scenario.';
+                    } else if (Object.keys(state.rowErrors).length > 0) {
+                        errors.agents = 'Please fix the highlighted agents.';
+                    }
+                    renderAgents();
+                }
+                return errors;
+            }
+
+            function showStepErrors(step, errors) {
+                STEP_FIELDS[step].forEach(function (field) { setFieldError(field, errors[field] || ''); });
+                var fields = Object.keys(errors);
+                if (fields.some(function (field) { return ADVANCED_FIELDS.indexOf(field) !== -1; })) {
+                    openAdvanced();
+                }
+                return fields.length === 0;
+            }
+
+            function validateAndShow(step) {
+                return showStepErrors(step, validateStep(step));
+            }
+
+            function focusFirstError() {
+                var section = byId('wizard-step-' + state.step);
+                var invalid = section.querySelector('.is-invalid') || section.querySelector('.invalid-feedback.d-block');
+                if (invalid && invalid.focus) {
+                    if (invalid.classList.contains('invalid-feedback')) {
+                        invalid.setAttribute('tabindex', '-1');
+                    }
+                    invalid.focus();
+                }
+            }
+
+            function openAdvanced() {
+                var panel = byId('advanced-settings');
+                if (window.bootstrap && bootstrap.Collapse) {
+                    bootstrap.Collapse.getOrCreateInstance(panel, { toggle: false }).show();
+                } else {
+                    panel.classList.add('show');
+                }
+                byId('advanced-toggle').setAttribute('aria-expanded', 'true');
+            }
+
+            // ---------------------------------------------------------------- navigation
+
+            function goTo(step) {
+                state.step = Math.max(0, Math.min(STEP_COUNT - 1, step));
+                for (var i = 0; i < STEP_COUNT; i++) {
+                    byId('wizard-step-' + i).hidden = i !== state.step;
+                }
+                Array.prototype.forEach.call(document.querySelectorAll('.wizard-step-btn'), function (button) {
+                    var target = Number(button.getAttribute('data-goto-step'));
+                    button.classList.toggle('is-current', target === state.step);
+                    button.classList.toggle('is-done', target < state.step);
+                    if (target === state.step) {
+                        button.setAttribute('aria-current', 'step');
+                    } else {
+                        button.removeAttribute('aria-current');
+                    }
+                });
+                byId('wizard-back').disabled = state.step === 0;
+                byId('wizard-next').hidden = state.step === STEP_COUNT - 1;
+                byId('wizard-save').hidden = state.step !== STEP_COUNT - 1;
+                byId('wizard-save-run').hidden = state.step !== STEP_COUNT - 1;
+                if (state.step === 2) {
+                    loadLibrary();
+                    renderAgents();
+                    renderLibrary();
+                }
+                if (state.step === 3) { renderReview(); }
+                renderCapacity();
+            }
+
+            // Moving forward validates every step in between; moving back never validates.
+            function requestStep(target) {
+                if (target <= state.step) {
+                    goTo(target);
+                    return;
+                }
+                for (var step = state.step; step < target; step++) {
+                    if (!validateAndShow(step)) {
+                        goTo(step);
+                        focusFirstError();
+                        return;
+                    }
+                }
+                goTo(target);
+                byId('scenario-wizard').scrollIntoView({ block: 'start' });
+            }
+
+            // ---------------------------------------------------------------- duration
+
+            function syncDurationPreset() {
+                var periods = byId('periodNumber').value.trim();
+                var preset = PRESETS.indexOf(periods) !== -1 ? periods : 'custom';
+                setRadio('durationPreset', preset);
+                var hint = '';
+                if (/^\d+$/.test(periods) && Number(periods) > 0) {
+                    var days = Number(periods) / 24;
+                    hint = 'Hourly periods, ' + (Number.isInteger(days) ? days : days.toFixed(1)) + (days === 1 ? ' day.' : ' days.');
+                }
+                byId('periodNumber-hint').textContent = hint;
+            }
+
+            // ---------------------------------------------------------------- review
+
+            function addReviewItem(list, term, description) {
+                list.appendChild(el('dt', '', term));
+                list.appendChild(el('dd', '', description));
+            }
+
+            function reviewWarnings(values) {
+                var warnings = capacityWarnings();
+                if (values.simulationMode === '0' && Number(values.periodNumber) > 48) {
+                    warnings.push('Period by period mode pauses after each of the ' + values.periodNumber
+                        + ' periods until you press Next on the watch page.');
+                }
+                state.agents.forEach(function (row) {
+                    if (row.plants.length === 0) {
+                        warnings.push('Agent ' + row.name + ' has no plants and cannot make offers.');
+                    }
+                });
+                return warnings;
+            }
+
+            function renderReview() {
+                var values = readForm();
+                var basics = byId('review-basics');
+                basics.textContent = '';
+                addReviewItem(basics, 'Name', values.simulation_name);
+                addReviewItem(basics, 'Duration', values.periodNumber + ' hourly periods');
+                addReviewItem(basics, 'Mode', MODE_LABELS[values.simulationMode] || '-');
+                addReviewItem(basics, 'Seed', values.seed);
+                addReviewItem(basics, 'Evaluation periods', values.evaluation_periods);
+                addReviewItem(basics, 'Observation lags', values.observation_lags.join(', ') + ' h');
+                var market = byId('review-market');
+                market.textContent = '';
+                addReviewItem(market, 'Pricing strategy', STRATEGY_LABELS[values.strategy] || '-');
+                addReviewItem(market, 'Bid bounds', values.lowerBound + ' to ' + values.upperBound + ' TL/MWh');
+
+                var body = byId('review-agents');
+                body.textContent = '';
+                state.agents.forEach(function (row) {
+                    var tr = document.createElement('tr');
+                    [row.name, originText(row), typeName(row.type), algorithmName(row.algorithm_type),
+                        failstackText(row), plantsText(row)].forEach(function (text) {
+                        tr.appendChild(el('td', 'text-wrap', text));
+                    });
+                    tr.appendChild(el('td', 'text-end', formatNumber(rowCapacity(row))));
+                    body.appendChild(tr);
+                });
+                if (state.agents.length === 0) {
+                    var empty = document.createElement('tr');
+                    var cell = el('td', 'text-secondary', 'No agents.');
+                    cell.colSpan = 7;
+                    empty.appendChild(cell);
+                    body.appendChild(empty);
+                }
+                byId('review-capacity').textContent = capacitySummary();
+                showBanner('review-warnings', reviewWarnings(values));
+            }
+
+            // ---------------------------------------------------------------- server errors
+
+            function errorsText(errors) {
+                if (!errors) { return ''; }
+                return Object.keys(errors).map(function (key) { return [].concat(errors[key]).join(' '); }).join(' ');
+            }
+
+            function clearAllFieldErrors() {
+                STEP_FIELDS.forEach(function (fields) {
+                    fields.forEach(function (field) { setFieldError(field, ''); });
+                });
+                state.rowErrors = {};
+            }
+
+            function setRowErrorByIndex(index, message) {
+                var row = state.agents[index];
+                if (!row) { return false; }
+                state.rowErrors[row.key] = state.rowErrors[row.key] ? state.rowErrors[row.key] + ' ' + message : message;
+                return true;
+            }
+
+            // Map HTTP 400 {"errors": {key: [messages]}} back to the step and field it belongs to.
+            function showServerErrors(errors) {
+                clearAllFieldErrors();
+                var messages = [];
+                var firstStep = STEP_COUNT;
+                Object.keys(errors).forEach(function (key) {
+                    var list = [].concat(errors[key]);
+                    var text = list.join(' ');
+                    messages = messages.concat(list);
+                    var indexed = /^agents\[(\d+)\]\./.exec(key);
+                    if (indexed) {
+                        setRowErrorByIndex(Number(indexed[1]), text);
+                        firstStep = Math.min(firstStep, 2);
+                        return;
+                    }
+                    if (Object.prototype.hasOwnProperty.call(FIELD_STEP, key)) {
+                        setFieldError(key, text);
+                        firstStep = Math.min(firstStep, FIELD_STEP[key]);
+                        if (ADVANCED_FIELDS.indexOf(key) !== -1) { openAdvanced(); }
+                        return;
+                    }
+                    if (AGENT_ERROR_KEYS.indexOf(key) !== -1) {
+                        var matched = false;
+                        list.forEach(function (message) {
+                            var agent = /^Agent (\d+)\b/.exec(message);
+                            if (agent && setRowErrorByIndex(Number(agent[1]) - 1, message)) { matched = true; }
+                        });
+                        if (!matched) { setFieldError('agents', text); }
+                        firstStep = Math.min(firstStep, 2);
+                    }
+                });
+                showBanner('wizard-errors', ['The scenario was not saved. Please fix the highlighted fields.'].concat(messages));
+                goTo(firstStep < STEP_COUNT ? firstStep : state.step);
+                renderAgents();
+                focusFirstError();
+            }
+
+            // ---------------------------------------------------------------- save
+
+            function setSaving(saving) {
+                state.saving = saving;
+                ['wizard-save', 'wizard-save-run', 'wizard-back', 'wizard-next'].forEach(function (id) {
+                    byId(id).disabled = saving || (id === 'wizard-back' && state.step === 0);
+                });
+            }
+
+            function postJson(url, payload) {
+                return fetch(url, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json',
+                        'X-CSRFToken': csrfToken()
+                    },
+                    body: JSON.stringify(payload)
+                }).then(function (response) {
+                    return response.json().catch(function () { return {}; }).then(function (body) {
+                        return { ok: response.ok, status: response.status, body: body };
+                    });
+                });
+            }
+
+            function save(run) {
+                if (state.saving || state.saved) { return; }
+                showBanner('wizard-errors', []);
+                showBanner('wizard-success', []);
+                for (var step = 0; step < STEP_COUNT - 1; step++) {
+                    if (!validateAndShow(step)) {
+                        goTo(step);
+                        showBanner('wizard-errors', ['Please complete this step before saving.']);
+                        focusFirstError();
+                        return;
+                    }
+                }
+                setSaving(true);
+                postJson(CONFIG.save_url, buildPayload()).then(function (result) {
+                    if (!result.ok || result.body.status !== 'success') {
+                        setSaving(false);
+                        showServerErrors(result.body.errors || { __all__: ['The request failed (HTTP ' + result.status + ').'] });
+                        return;
+                    }
+                    state.saved = true;
+                    clearDraft();
+                    if (!run) {
+                        showBanner('wizard-success', ['Scenario saved. Redirecting to the templates list...']);
+                        setTimeout(function () { window.location.href = CONFIG.list_url; }, 1200);
+                        return;
+                    }
+                    showBanner('wizard-success', ['Scenario saved. Starting a run with the scenario seed...']);
+                    return startRun(result.body);
+                }).catch(function (error) {
+                    if (!state.saved) {
+                        setSaving(false);
+                        showBanner('wizard-errors', ['The request failed: ' + error]);
+                    }
+                });
+            }
+
+            // "Save and run": POST to run_simulation without options, i.e. the scenario seed and fresh policies,
+            // then open the watch page of the new run.
+            function startRun(saved) {
+                return postJson(saved.run_url, {}).then(function (result) {
+                    if (result.ok && result.body.watch_url) {
+                        window.location.href = result.body.watch_url;
+                        return;
+                    }
+                    showRunFailure(saved, errorsText(result.body.errors) || 'HTTP ' + result.status);
+                }).catch(function (error) {
+                    showRunFailure(saved, String(error));
+                });
+            }
+
+            function showRunFailure(saved, text) {
+                showBanner('wizard-success', []);
+                var box = byId('wizard-errors');
+                box.textContent = '';
+                box.appendChild(el('div', '', 'The scenario was saved, but the run could not be started: ' + text));
+                var links = el('div', 'mt-2');
+                var edit = el('a', 'text-white text-decoration-underline me-3', 'Open the saved scenario');
+                edit.href = saved.edit_url;
+                var list = el('a', 'text-white text-decoration-underline', 'Go to the templates list');
+                list.href = CONFIG.list_url;
+                links.appendChild(edit);
+                links.appendChild(list);
+                box.appendChild(links);
+                box.classList.remove('d-none');
+            }
+
+            // ---------------------------------------------------------------- draft (localStorage)
+
+            function snapshot() {
+                return {
+                    form: readForm(),
+                    agents: state.agents.map(function (row) {
+                        var copy = $.extend(true, {}, row);
+                        delete copy.key;
+                        return copy;
+                    })
+                };
+            }
+
+            function readDraft() {
+                try {
+                    var raw = window.localStorage.getItem(CONFIG.draft_key);
+                    return raw ? JSON.parse(raw) : null;
+                } catch (error) {
+                    return null;
+                }
+            }
+
+            function writeDraft() {
+                if (state.draftPending || state.saved) { return; }
+                var data = snapshot();
+                data.saved_at = new Date().toISOString();
+                try {
+                    if (JSON.stringify({ form: data.form, agents: data.agents }) === INITIAL_SNAPSHOT) {
+                        window.localStorage.removeItem(CONFIG.draft_key);
+                    } else {
+                        window.localStorage.setItem(CONFIG.draft_key, JSON.stringify(data));
+                    }
+                } catch (error) {
+                    // Storage unavailable (private mode, quota): drafts are a convenience only.
+                }
+            }
+
+            function clearDraft() {
+                try {
+                    window.localStorage.removeItem(CONFIG.draft_key);
+                } catch (error) {
+                    // Nothing to clear.
+                }
+            }
+
+            function scheduleDraft() {
+                clearTimeout(draftTimer);
+                draftTimer = setTimeout(writeDraft, 500);
+            }
+
+            function restoreDraft(draft) {
+                writeForm(draft.form || {});
+                state.agents = (draft.agents || []).map(function (row) {
+                    var copy = $.extend(true, {}, row);
+                    copy.key = nextKey++;
+                    return copy;
+                });
+                state.rowErrors = {};
+                state.demandFor = null;
+                fetchDemand();
+                renderAgents();
+                goTo(0);
+            }
+
+            function offerDraft() {
+                var draft = readDraft();
+                if (!draft || !draft.form) { return; }
+                if (JSON.stringify({ form: draft.form, agents: draft.agents }) === INITIAL_SNAPSHOT) {
+                    clearDraft();
+                    return;
+                }
+                state.draftPending = true;
+                var when = draft.saved_at ? new Date(draft.saved_at) : null;
+                byId('draft-banner-text').textContent = 'An unsaved draft of this scenario was found'
+                    + (when && !isNaN(when.getTime()) ? ' (' + when.toLocaleString() + ')' : '') + '.';
+                byId('draft-banner').classList.remove('d-none');
+                byId('draft-restore').addEventListener('click', function () {
+                    state.draftPending = false;
+                    byId('draft-banner').classList.add('d-none');
+                    restoreDraft(draft);
+                });
+                byId('draft-discard').addEventListener('click', function () {
+                    state.draftPending = false;
+                    byId('draft-banner').classList.add('d-none');
+                    clearDraft();
+                });
+            }
+
+            // ---------------------------------------------------------------- init
+
+            writeForm(CONFIG.initial);
+            state.agents = (CONFIG.initial.agents || []).map(function (agent) {
+                return rowFromServerAgent(agent, 'scenario');
+            });
+            var INITIAL_SNAPSHOT = JSON.stringify(snapshot());
+
+            Array.prototype.forEach.call(document.querySelectorAll('[data-goto-step]'), function (button) {
+                button.addEventListener('click', function () {
+                    requestStep(Number(button.getAttribute('data-goto-step')));
+                });
+            });
+            byId('wizard-next').addEventListener('click', function () { requestStep(state.step + 1); });
+            byId('wizard-back').addEventListener('click', function () { goTo(state.step - 1); });
+            byId('wizard-save').addEventListener('click', function () { save(false); });
+            byId('wizard-save-run').addEventListener('click', function () { save(true); });
+            byId('new-agent-button').addEventListener('click', function () { openAgentForm(null); });
+            byId('library-search').addEventListener('input', renderLibrary);
+            byId('library-type-filter').addEventListener('change', renderLibrary);
+
+            Array.prototype.forEach.call(document.querySelectorAll('input[name="durationPreset"]'), function (radio) {
+                radio.addEventListener('change', function () {
+                    if (radio.value === 'custom') {
+                        byId('periodNumber').focus();
+                    } else {
+                        byId('periodNumber').value = radio.value;
+                        setFieldError('periodNumber', '');
+                    }
+                    syncDurationPreset();
+                    scheduleDemand();
+                    scheduleDraft();
+                });
+            });
+            byId('periodNumber').addEventListener('input', function () {
+                syncDurationPreset();
+                scheduleDemand();
+            });
+            byId('seed-random').addEventListener('click', function () {
+                var buffer = new Uint32Array(1);
+                window.crypto.getRandomValues(buffer);
+                byId('seed').value = String(buffer[0] % CONFIG.seed_upper_bound);
+                setFieldError('seed', '');
+                scheduleDraft();
+            });
+
+            // Editing a field clears its error; any change of the form is saved as a draft.
+            var wizard = byId('scenario-wizard');
+            ['input', 'change'].forEach(function (type) {
+                wizard.addEventListener(type, function (event) {
+                    var target = event.target;
+                    if (target.classList && target.classList.contains('no-draft')) { return; }
+                    if (target.id && Object.prototype.hasOwnProperty.call(FIELD_STEP, target.id)) {
+                        setFieldError(target.id, '');
+                    }
+                    if (target.name === 'simulationMode' || target.name === 'strategy') {
+                        setFieldError(target.name, '');
+                    }
+                    scheduleDraft();
+                });
+            });
+
+            byId('agent-modal').addEventListener('hidden.bs.modal', function () { state.editingKey = null; });
+
+            if (window.bootstrap && bootstrap.Tooltip) {
+                Array.prototype.forEach.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'), function (node) {
+                    bootstrap.Tooltip.getOrCreateInstance(node);
+                });
+            }
+
+            renderAgents();
+            goTo(0);
+            fetchDemand();
+            offerDraft();
+        })();
+    </script>
+</body>
+
+</html>

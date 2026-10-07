@@ -1,0 +1,463 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <title>ABMEM SIMULATION - {{ study.name }}</title>
+  <link href="https://fonts.googleapis.com/css?family=Open+Sans:300,400,600,700" rel="stylesheet" />
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/7.2.0/mdb.min.css" rel="stylesheet" />
+  <link href="{% static 'assets/css/nucleo-icons.css' %}" rel="stylesheet" />
+  <link href="{% static 'assets/css/nucleo-svg.css' %}" rel="stylesheet" />
+  <link id="pagestyle" href="{% static 'assets/css/soft-ui-dashboard.css' %}" rel="stylesheet" />
+  <link href="{% static 'assets/css/abmem.css' %}" rel="stylesheet" />
+  <style>
+    .hpo-chart { position: relative; height: 300px; }
+    .hpo-trials { max-height: 420px; overflow-y: auto; }
+    .hpo-params td { padding: 0.2rem 0.5rem; }
+    .hpo-error { white-space: pre-wrap; font-size: 0.75rem; max-height: 260px; overflow-y: auto; }
+  </style>
+</head>
+
+<body class="g-sidenav-show bg-gray-100">
+
+  <aside class="sidenav navbar navbar-vertical navbar-expand-xs border-0 border-radius-xl my-3 fixed-start ms-3"
+    id="sidenav-main">
+    {% include '../static/assets/components/sidebar.html' %}
+  </aside>
+
+  <main class="main-content position-relative max-height-vh-100 h-100 border-radius-lg">
+
+    {% include '../static/assets/components/navbar.html' with contextName="Hyperparameter Search" pageName=study.name topPageName="ABMEM" %}
+
+    {% csrf_token %}
+    <div class="container-fluid py-4">
+
+      <!-- HEADER -->
+      <div class="row">
+        <div class="col-12 mb-4">
+          <div class="card">
+            <div class="card-body p-3">
+              <div class="d-flex flex-wrap align-items-center">
+                <h5 class="mb-0 me-3">{{ study.name }}</h5>
+                <span class="badge bg-gradient-secondary me-3" id="hpo-status">{{ status }}</span>
+                <span class="text-sm me-3"><strong>Algorithm:</strong> {{ algorithm }}</span>
+                <span class="text-sm me-3"><strong>Scenario:</strong> {{ study.scenario.name }} (#{{ study.scenario.id }})</span>
+                <div class="ms-auto">
+                  <a class="btn btn-sm bg-gradient-secondary mb-0 me-2" href="{% url 'hpo_list' %}">Back</a>
+                  <button class="btn btn-sm bg-gradient-danger mb-0 d-none" id="hpo-cancel" type="button">Cancel search</button>
+                </div>
+              </div>
+              <div class="mt-3">
+                <div class="d-flex justify-content-between">
+                  <span class="text-sm">Progress</span>
+                  <span class="text-sm" id="hpo-progress-text">-</span>
+                </div>
+                <div class="progress" style="height: 8px;">
+                  <div class="progress-bar bg-gradient-info" id="hpo-progress-bar" role="progressbar" style="width: 0%; height: 8px;"
+                    aria-valuemin="0" aria-valuemax="100"></div>
+                </div>
+              </div>
+              <div class="text-xs text-secondary mt-2">
+                Colony {{ study.colony_size }}, {{ study.max_iter }} iterations, limit {{ study.limit }} -
+                search seeds [{{ search_seeds }}], evaluation seeds [{{ evaluation_seeds }}] -
+                objective {{ weights.0 }} x agent score + {{ weights.1 }} x market score
+                {% if fixed_params.failstack_enabled %}- fail-stack on{% if fixed_params.failstack_limit %}, limit {{ fixed_params.failstack_limit }}{% endif %}{% if fixed_params.failstack_delta is not None %}, delta {{ fixed_params.failstack_delta }}{% endif %}{% else %}- fail-stack off{% endif %}
+              </div>
+              <div class="text-xs text-secondary">
+                Bounds:
+                {% for name, bound in bounds %}<span class="me-2">{{ name }} [{{ bound.low }}, {{ bound.high }}] {{ bound.scale }}</span>{% endfor %}
+              </div>
+              <div class="alert alert-danger text-white mt-3 mb-0 d-none" id="hpo-error-box">
+                <strong>Error</strong>
+                <div class="hpo-error" id="hpo-error"></div>
+              </div>
+              <div class="alert alert-warning text-white mt-3 mb-0 d-none" id="hpo-message"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- BEST + APPLY -->
+      <div class="row">
+        <div class="col-lg-6 mb-4">
+          <div class="card h-100">
+            <div class="card-header pb-0">
+              <h6 class="mb-0">Best candidate</h6>
+              <p class="text-xs text-secondary mb-0" id="hpo-best-caption">Search best: mean over the search seeds.</p>
+            </div>
+            <div class="card-body pt-2">
+              <div class="text-sm mb-2"><strong>Score:</strong> <span id="hpo-best-score">-</span></div>
+              <table class="table table-sm hpo-params mb-0"><tbody id="hpo-best-params"></tbody></table>
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-6 mb-4">
+          <div class="card h-100">
+            <div class="card-header pb-0"><h6 class="mb-0">Apply best parameters</h6></div>
+            <div class="card-body pt-2">
+              <p class="text-sm" id="hpo-apply-hint">Available when the study has FINISHED.</p>
+              <button class="btn btn-sm bg-gradient-primary mb-2 me-2" id="hpo-apply-default" type="button" disabled>As {{ algorithm }} default</button>
+              <button class="btn btn-sm bg-gradient-info mb-2" id="hpo-apply-scenario" type="button" disabled>To scenario agents</button>
+              <div class="form-check">
+                <input class="form-check-input" type="checkbox" id="hpo-switch-algorithm" checked>
+                <label class="form-check-label text-sm" for="hpo-switch-algorithm">Switch every scenario agent to {{ algorithm }}
+                  (as in the search). Unchecked: only agents that already use {{ algorithm }} are updated.</label>
+              </div>
+              <p class="text-xs text-secondary mb-0">The algorithm default is used by every agent of {{ algorithm }} unless
+                the agent has its own parameters. Fail-stack values are agent settings and are written only to scenario agents.</p>
+              <div class="text-sm mt-2" id="hpo-apply-result"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CHARTS -->
+      <div class="row">
+        <div class="col-lg-6 mb-4">
+          <div class="card">
+            <div class="card-header pb-0">
+              <h6 class="mb-0">Best score per iteration</h6>
+              <p class="text-xs text-secondary mb-0">Best weighted objective found so far (search seeds).</p>
+            </div>
+            <div class="card-body p-3"><div class="hpo-chart"><canvas id="hpo-history-chart"></canvas></div></div>
+          </div>
+        </div>
+        <div class="col-lg-6 mb-4">
+          <div class="card">
+            <div class="card-header pb-0">
+              <h6 class="mb-0">Agent score vs market score</h6>
+              <p class="text-xs text-secondary mb-0">One point per finished trial. The Pareto front of the search trials is
+                shown for information and is not used for selection.</p>
+            </div>
+            <div class="card-body p-3"><div class="hpo-chart"><canvas id="hpo-scatter-chart"></canvas></div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- TRIALS -->
+      <div class="row">
+        <div class="col-12 mb-4">
+          <div class="card">
+            <div class="card-header pb-0">
+              <h6 class="mb-0">Trials</h6>
+              <p class="text-xs text-secondary mb-0" id="hpo-trials-caption"></p>
+            </div>
+            <div class="card-body px-0 pt-0 pb-2 hpo-trials">
+              <table class="table align-items-center mb-0">
+                <thead>
+                  <tr>
+                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ps-3">#</th>
+                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Iteration</th>
+                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Phase</th>
+                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Source</th>
+                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Seed</th>
+                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Status</th>
+                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Agent score</th>
+                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Market score</th>
+                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Duration (s)</th>
+                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Parameters</th>
+                  </tr>
+                </thead>
+                <tbody id="hpo-trial-rows"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Confirmation dialog (non-blocking replacement of window.confirm) -->
+    <div class="modal fade" id="hpo-confirm-modal" tabindex="-1" role="dialog" aria-labelledby="hpo-confirm-title"
+      aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered" role="document">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="hpo-confirm-title">Please confirm</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">
+              <span aria-hidden="true">&times;</span>
+            </button>
+          </div>
+          <div class="modal-body">
+            <p class="mb-0" id="hpo-confirm-message"></p>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="button" class="btn btn-primary" id="hpo-confirm-ok">Confirm</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script src="{% static 'assets/js/core/popper.min.js' %}"></script>
+  <script src="{% static 'assets/js/core/bootstrap.min.js' %}"></script>
+  <script src="{% static 'assets/js/plugins/perfect-scrollbar.min.js' %}"></script>
+  <script src="{% static 'assets/js/plugins/smooth-scrollbar.min.js' %}"></script>
+  <script src="{% static 'assets/js/plugins/chartjs.min.js' %}"></script>
+  <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/7.2.0/mdb.umd.min.js"></script>
+
+  <script>
+    (function () {
+      'use strict';
+      var STATUS_URL = "{{ status_url }}";
+      var CANCEL_URL = "{{ cancel_url }}";
+      var APPLY_URL = "{{ apply_url }}";
+      var POLL_MS = 2000;
+      var ACTIVE = ['CREATED', 'RUNNING'];
+      var BADGE = { CREATED: 'bg-gradient-primary', RUNNING: 'bg-gradient-info', FINISHED: 'bg-gradient-success',
+        FAILED: 'bg-gradient-danger', CANCELED: 'bg-gradient-warning' };
+      var historyChart = null;
+      var scatterChart = null;
+      var lastStatus = null;
+
+      function $(id) { return document.getElementById(id); }
+
+      function csrfToken() {
+        var input = document.querySelector('input[name="csrfmiddlewaretoken"]');
+        return input ? input.value : '';
+      }
+
+      function fmt(value, digits) {
+        if (value === null || value === undefined) { return '-'; }
+        if (typeof value !== 'number') { return String(value); }
+        var abs = Math.abs(value);
+        if (abs !== 0 && (abs < 1e-3 || abs >= 1e6)) { return value.toExponential(3); }
+        return value.toFixed(digits === undefined ? 4 : digits);
+      }
+
+      function cell(text, className) {
+        var td = document.createElement('td');
+        td.className = className || 'text-sm';
+        td.textContent = text;
+        return td;
+      }
+
+      function paramsText(params) {
+        return Object.keys(params || {}).sort().map(function (k) { return k + '=' + fmt(params[k]); }).join(', ');
+      }
+
+      function makeCharts() {
+        if (typeof Chart === 'undefined') { return; }
+        historyChart = new Chart($('hpo-history-chart').getContext('2d'), {
+          type: 'line',
+          data: { datasets: [{ label: 'Best score', data: [], borderColor: '#cb0c9f', backgroundColor: 'rgba(203,12,159,0.15)',
+            stepped: true, fill: false, pointRadius: 3 }] },
+          options: { maintainAspectRatio: false, animation: false, parsing: false,
+            scales: { x: { type: 'linear', title: { display: true, text: 'Iteration' }, ticks: { precision: 0 } },
+              y: { title: { display: true, text: 'Weighted objective' } } },
+            plugins: { legend: { display: false } } }
+        });
+        scatterChart = new Chart($('hpo-scatter-chart').getContext('2d'), {
+          type: 'scatter',
+          data: { datasets: [
+            { label: 'Search trials', data: [], backgroundColor: 'rgba(130,141,163,0.55)', pointRadius: 3 },
+            { label: 'Pareto front', data: [], backgroundColor: '#cb0c9f', borderColor: '#cb0c9f', pointRadius: 5,
+              showLine: true, borderWidth: 1 },
+            { label: 'Final evaluation', data: [], backgroundColor: '#17c1e8', pointStyle: 'triangle', pointRadius: 6 }
+          ] },
+          options: { maintainAspectRatio: false, animation: false,
+            scales: { x: { title: { display: true, text: 'Agent score' } }, y: { title: { display: true, text: 'Market score' } } } }
+        });
+      }
+
+      function updateCharts(data) {
+        if (!historyChart || !scatterChart) { return; }
+        historyChart.data.datasets[0].data = data.history.map(function (p) { return { x: p[0], y: p[1] }; });
+        historyChart.update();
+        var search = [], front = [], finalEval = [];
+        data.scatter.forEach(function (p) {
+          var point = { x: p[0], y: p[1] };
+          if (p[2] === 'FINAL_EVAL') { finalEval.push(point); } else if (p[3]) { front.push(point); } else { search.push(point); }
+        });
+        front.sort(function (a, b) { return a.x - b.x; });
+        scatterChart.data.datasets[0].data = search;
+        scatterChart.data.datasets[1].data = front;
+        scatterChart.data.datasets[2].data = finalEval;
+        scatterChart.update();
+      }
+
+      function updateBest(data) {
+        var final = data.status === 'FINISHED' && data.best_params;
+        var params = final ? data.best_params : (data.search_best ? data.search_best.params : null);
+        var score = final ? data.best_score : (data.search_best ? data.search_best.score : null);
+        $('hpo-best-caption').textContent = final
+          ? 'Final score: mean over the evaluation seeds (not used in the search).'
+          : 'Search best so far: mean over the search seeds.';
+        $('hpo-best-score').textContent = fmt(score);
+        var body = $('hpo-best-params');
+        body.innerHTML = '';
+        Object.keys(params || {}).sort().forEach(function (name) {
+          var tr = document.createElement('tr');
+          tr.appendChild(cell(name, 'text-sm font-weight-bold'));
+          tr.appendChild(cell(fmt(params[name], 6)));
+          body.appendChild(tr);
+        });
+      }
+
+      function updateTrials(data) {
+        var body = $('hpo-trial-rows');
+        body.innerHTML = '';
+        data.trials.forEach(function (t) {
+          var tr = document.createElement('tr');
+          tr.appendChild(cell(String(t.id), 'text-sm ps-3'));
+          tr.appendChild(cell(String(t.iteration)));
+          tr.appendChild(cell(t.phase));
+          tr.appendChild(cell(String(t.source_index)));
+          tr.appendChild(cell(String(t.seed)));
+          var status = cell(t.status, 'text-sm font-weight-bold' + (t.status === 'FAILED' ? ' text-danger' : ''));
+          if (t.error) { status.title = t.error; }
+          tr.appendChild(status);
+          tr.appendChild(cell(fmt(t.agent_score)));
+          tr.appendChild(cell(fmt(t.market_score)));
+          tr.appendChild(cell(fmt(t.duration_s, 1)));
+          tr.appendChild(cell(paramsText(t.params), 'text-xs'));
+          body.appendChild(tr);
+        });
+        $('hpo-trials-caption').textContent = data.trials_truncated
+          ? 'Newest ' + data.trials.length + ' of ' + data.trials_total + ' trials.'
+          : data.trials_total + ' trials, newest first. Hover a failed status to see its error.';
+      }
+
+      function render(data) {
+        lastStatus = data.status;
+        var badge = $('hpo-status');
+        badge.textContent = data.status + (data.cancel_requested && ACTIVE.indexOf(data.status) >= 0 ? ' (cancel requested)' : '');
+        badge.className = 'badge me-3 ' + (BADGE[data.status] || 'bg-gradient-secondary');
+        var done = data.progress.done, total = data.progress.total;
+        var pct = total > 0 ? Math.min(100, Math.round(100 * done / total)) : 0;
+        $('hpo-progress-text').textContent = done + ' / ' + total + ' trials (' + pct + '%)';
+        $('hpo-progress-bar').style.width = pct + '%';
+        $('hpo-cancel').classList.toggle('d-none', !(ACTIVE.indexOf(data.status) >= 0 && !data.cancel_requested));
+        var errorBox = $('hpo-error-box');
+        errorBox.classList.toggle('d-none', !data.error);
+        $('hpo-error').textContent = data.error || '';
+        var finished = data.status === 'FINISHED' && !!data.best_params;
+        $('hpo-apply-default').disabled = !finished;
+        $('hpo-apply-scenario').disabled = !finished;
+        $('hpo-apply-hint').textContent = finished
+          ? 'Write the best parameters to the database.'
+          : 'Available when the study has FINISHED.';
+        updateBest(data);
+        updateCharts(data);
+        updateTrials(data);
+      }
+
+      function showMessage(text) {
+        var box = $('hpo-message');
+        box.textContent = text;
+        box.classList.toggle('d-none', !text);
+      }
+
+      function errorText(body, status) {
+        var errors = (body && body.errors) || { __all__: ['HTTP ' + status] };
+        return Object.keys(errors).map(function (k) { return errors[k].join(' '); }).join(' ');
+      }
+
+      function poll() {
+        fetch(STATUS_URL, { headers: { 'Accept': 'application/json' }, cache: 'no-store' })
+          .then(function (response) {
+            if (!response.ok) { throw new Error('HTTP ' + response.status); }
+            return response.json();
+          })
+          .then(function (data) {
+            showMessage('');
+            render(data);
+            if (ACTIVE.indexOf(data.status) >= 0) { window.setTimeout(poll, POLL_MS); }
+          })
+          .catch(function (error) {
+            showMessage('Status update failed (' + error.message + '). Retrying ...');
+            window.setTimeout(poll, POLL_MS);
+          });
+      }
+
+      // Show the confirmation modal; onConfirm runs only after the Confirm button.
+      var pendingConfirm = null;
+
+      function confirmModal(message, onConfirm) {
+        pendingConfirm = onConfirm;
+        $('hpo-confirm-message').textContent = message;
+        bootstrap.Modal.getOrCreateInstance($('hpo-confirm-modal')).show();
+      }
+
+      $('hpo-confirm-ok').addEventListener('click', function () {
+        var action = pendingConfirm;
+        pendingConfirm = null;
+        bootstrap.Modal.getOrCreateInstance($('hpo-confirm-modal')).hide();
+        if (action) { action(); }
+      });
+
+      $('hpo-confirm-modal').addEventListener('hidden.bs.modal', function () { pendingConfirm = null; });
+
+      function post(url, data) {
+        return fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRFToken': csrfToken() },
+          body: JSON.stringify(data || {})
+        }).then(function (response) {
+          return response.json().then(function (body) { return { ok: response.ok, status: response.status, body: body }; });
+        });
+      }
+
+      function cancelSearch() {
+        var button = $('hpo-cancel');
+        button.disabled = true;
+        post(CANCEL_URL).then(function (result) {
+          button.disabled = false;
+          if (!result.ok) { showMessage(errorText(result.body, result.status)); }
+          if (ACTIVE.indexOf(lastStatus) < 0) { poll(); }
+        }).catch(function (error) { button.disabled = false; showMessage('Cancel failed: ' + error); });
+      }
+
+      $('hpo-cancel').addEventListener('click', function () {
+        confirmModal('Cancel this search? Running evaluations are terminated.', cancelSearch);
+      });
+
+      function apply(target) {
+        var switchAlgorithm = $('hpo-switch-algorithm').checked;
+        var question = target === 'default'
+          ? 'Store the best parameters as the default of {{ algorithm }}?'
+          : (switchAlgorithm
+            ? 'Set every agent of the scenario to {{ algorithm }} with the best parameters?'
+            : 'Write the best parameters to the scenario agents that use {{ algorithm }}?');
+        confirmModal(question, function () { applyConfirmed(target, switchAlgorithm); });
+      }
+
+      function applyConfirmed(target, switchAlgorithm) {
+        var result = $('hpo-apply-result');
+        result.className = 'text-sm mt-2';
+        result.textContent = 'Applying ...';
+        post(APPLY_URL, { target: target, switch_algorithm: switchAlgorithm }).then(function (response) {
+          if (!response.ok) {
+            result.className = 'text-sm mt-2 text-danger';
+            result.textContent = errorText(response.body, response.status);
+            return;
+          }
+          var body = response.body;
+          result.className = 'text-sm mt-2 text-success';
+          var text = body.target === 'default'
+            ? 'Stored as default of ' + body.algorithm + ': ' + paramsText(body.params) + '.'
+            : 'Updated agents: ' + body.agents_updated.join(', ') + '.';
+          if (body.not_applied && body.not_applied.length) {
+            text += ' Not applied (agent settings): ' + body.not_applied.join(', ') + '.';
+          }
+          result.textContent = text;
+        }).catch(function (error) {
+          result.className = 'text-sm mt-2 text-danger';
+          result.textContent = 'Request failed: ' + error;
+        });
+      }
+
+      $('hpo-apply-default').addEventListener('click', function () { apply('default'); });
+      $('hpo-apply-scenario').addEventListener('click', function () { apply('scenario'); });
+
+      makeCharts();
+      poll();
+    })();
+  </script>
+</body>
+
+</html>

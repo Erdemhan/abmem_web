@@ -1,0 +1,457 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <title>ABMEM SIMULATION - New Hyperparameter Search</title>
+  <link href="https://fonts.googleapis.com/css?family=Open+Sans:300,400,600,700" rel="stylesheet" />
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/7.2.0/mdb.min.css" rel="stylesheet" />
+  <link href="{% static 'assets/css/nucleo-icons.css' %}" rel="stylesheet" />
+  <link href="{% static 'assets/css/nucleo-svg.css' %}" rel="stylesheet" />
+  <link id="pagestyle" href="{% static 'assets/css/soft-ui-dashboard.css' %}" rel="stylesheet" />
+  <link href="{% static 'assets/css/abmem.css' %}" rel="stylesheet" />
+  <style>
+    .hpo-bounds input.form-control, .hpo-bounds select.form-select { min-width: 90px; }
+    .hpo-row-off td:not(:first-child) { opacity: 0.45; }
+  </style>
+</head>
+
+<body class="g-sidenav-show bg-gray-100">
+
+  <aside class="sidenav navbar navbar-vertical navbar-expand-xs border-0 border-radius-xl my-3 fixed-start ms-3"
+    id="sidenav-main">
+    {% include '../static/assets/components/sidebar.html' %}
+  </aside>
+
+  <main class="main-content position-relative max-height-vh-100 h-100 border-radius-lg">
+
+    {% include '../static/assets/components/navbar.html' with contextName="Hyperparameter Search" pageName="New Search" topPageName="ABMEM" %}
+
+    <div class="container-fluid py-4">
+      <form id="hpo-form" novalidate>
+        {% csrf_token %}
+
+        <div id="hpo-errors" class="alert alert-danger text-white d-none" role="alert"></div>
+
+        <div class="row">
+          <!-- STUDY -->
+          <div class="col-lg-6 mb-4">
+            <div class="card h-100">
+              <div class="card-header pb-0"><h6>Study</h6></div>
+              <div class="card-body">
+                <div class="mb-3">
+                  <label class="form-label" for="hpo-name">Name</label>
+                  <input class="form-control" id="hpo-name" name="name" maxlength="100" required>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label" for="hpo-scenario">Scenario template</label>
+                  <select class="form-select" id="hpo-scenario" name="scenario" required>
+                    <option value="">Select a scenario</option>
+                    {% for scenario in scenarios %}
+                    <option value="{{ scenario.id }}" {% if selected_scenario == scenario.id|stringformat:"d" %}selected{% endif %}>{{ scenario.name }} (#{{ scenario.id }}, {{ scenario.periodNumber }} periods)</option>
+                    {% endfor %}
+                  </select>
+                  {% if not scenarios %}
+                  <small class="text-danger">No scenario template exists. Create one under "Create Simulation" first.</small>
+                  {% endif %}
+                  <small class="text-secondary d-block">Every agent of the scenario uses the selected algorithm during
+                    the search.</small>
+                </div>
+                <div class="mb-3">
+                  <label class="form-label" for="hpo-algorithm">Algorithm</label>
+                  <select class="form-select" id="hpo-algorithm" name="algorithm_type">
+                    {% for algorithm in algorithms %}
+                    <option value="{{ algorithm.name }}" {% if algorithm.name == selected_algorithm %}selected{% endif %}>{{ algorithm.name }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ABC + SEEDS + OBJECTIVE -->
+          <div class="col-lg-6 mb-4">
+            <div class="card h-100">
+              <div class="card-header pb-0"><h6>Search settings</h6></div>
+              <div class="card-body">
+                <div class="row">
+                  <div class="col-4 mb-3">
+                    <label class="form-label" for="hpo-colony">Colony size</label>
+                    <input class="form-control" type="number" min="2" step="1" id="hpo-colony" name="colony_size"
+                      value="{{ initial.colony_size }}">
+                  </div>
+                  <div class="col-4 mb-3">
+                    <label class="form-label" for="hpo-iter">Iterations</label>
+                    <input class="form-control" type="number" min="1" step="1" id="hpo-iter" name="max_iter"
+                      value="{{ initial.max_iter }}">
+                  </div>
+                  <div class="col-4 mb-3">
+                    <label class="form-label" for="hpo-limit">Limit</label>
+                    <input class="form-control" type="number" min="1" step="1" id="hpo-limit" name="limit"
+                      value="{{ initial.limit }}">
+                  </div>
+                </div>
+                <small class="text-secondary d-block mb-3">Colony size is the number of food sources. A source whose
+                  trial counter exceeds the limit is replaced by a scout. Karaboga and Basturk (2007) use limit =
+                  colony size x number of parameters.</small>
+                <div class="row">
+                  <div class="col-6 mb-3">
+                    <label class="form-label" for="hpo-search-seeds">Search seeds</label>
+                    <input class="form-control" id="hpo-search-seeds" name="search_seeds"
+                      value="{{ initial.search_seeds }}">
+                  </div>
+                  <div class="col-6 mb-3">
+                    <label class="form-label" for="hpo-eval-seeds">Evaluation seeds</label>
+                    <input class="form-control" id="hpo-eval-seeds" name="evaluation_seeds"
+                      value="{{ initial.evaluation_seeds }}">
+                  </div>
+                </div>
+                <small class="text-secondary d-block mb-3">Comma-separated integers. Every candidate runs on all
+                  search seeds. The best candidate is measured again on the evaluation seeds, which must differ from
+                  the search seeds.</small>
+                <div class="row">
+                  <div class="col-6 mb-3">
+                    <label class="form-label" for="hpo-w-agent">Weight of agent score</label>
+                    <input class="form-control" type="number" step="any" id="hpo-w-agent" name="weight_agent"
+                      value="{{ initial.weight_agent }}">
+                  </div>
+                  <div class="col-6 mb-3">
+                    <label class="form-label" for="hpo-w-market">Weight of market score</label>
+                    <input class="form-control" type="number" step="any" id="hpo-w-market" name="weight_market"
+                      value="{{ initial.weight_market }}">
+                  </div>
+                </div>
+                <small class="text-secondary d-block">Objective = w_agent x agent score + w_market x market score
+                  (maximised).</small>
+                <div class="mt-3"><strong class="text-sm">Trials:</strong> <span class="text-sm" id="hpo-estimate">-</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- FAIL-STACK -->
+        <div class="row">
+          <div class="col-12 mb-4">
+            <div class="card">
+              <div class="card-header pb-0 d-flex align-items-center">
+                <h6 class="mb-0 me-3">Fail-stack</h6>
+                <div class="form-check form-switch mb-0">
+                  <input class="form-check-input" type="checkbox" id="hpo-failstack" name="failstack_enabled">
+                  <label class="form-check-label" for="hpo-failstack">enabled</label>
+                </div>
+                <small class="text-secondary ms-3" id="hpo-failstack-note"></small>
+              </div>
+              <div class="card-body" id="hpo-failstack-body">
+                <div class="table-responsive">
+                  <table class="table align-items-center mb-0 hpo-bounds">
+                    <thead>
+                      <tr>
+                        <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Search</th>
+                        <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Parameter</th>
+                        <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Fixed value</th>
+                        <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Min</th>
+                        <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Max</th>
+                        <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Scale</th>
+                      </tr>
+                    </thead>
+                    <tbody id="hpo-failstack-rows"></tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- PARAMETER BOUNDS -->
+        <div class="row">
+          <div class="col-12 mb-4">
+            <div class="card">
+              <div class="card-header pb-0">
+                <h6>Searched parameters</h6>
+                <p class="text-sm mb-0">Default bounds come from the algorithm configuration. Unchecked parameters
+                  keep their default (or the algorithm default stored in the database).</p>
+              </div>
+              <div class="card-body">
+                <div class="table-responsive">
+                  <table class="table align-items-center mb-0 hpo-bounds">
+                    <thead>
+                      <tr>
+                        <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Search</th>
+                        <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Parameter</th>
+                        <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Default</th>
+                        <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Min</th>
+                        <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Max</th>
+                        <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Scale</th>
+                      </tr>
+                    </thead>
+                    <tbody id="hpo-param-rows">
+                      <tr><td colspan="6" class="text-sm text-secondary">Loading ...</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="d-flex justify-content-end mb-4">
+          <a class="btn bg-gradient-secondary me-2" href="{% url 'hpo_list' %}">Back</a>
+          <button type="submit" class="btn bg-gradient-primary" id="hpo-submit">Create and start</button>
+        </div>
+      </form>
+    </div>
+  </main>
+
+  <script src="{% static 'assets/js/core/popper.min.js' %}"></script>
+  <script src="{% static 'assets/js/core/bootstrap.min.js' %}"></script>
+  <script src="{% static 'assets/js/plugins/perfect-scrollbar.min.js' %}"></script>
+  <script src="{% static 'assets/js/plugins/smooth-scrollbar.min.js' %}"></script>
+  <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/7.2.0/mdb.umd.min.js"></script>
+
+  <script>
+    (function () {
+      'use strict';
+      var PARAM_SPACE_URL = "{% url 'hpo_param_space' %}";
+      var CREATE_URL = "{% url 'hpo_create' %}";
+      var form = document.getElementById('hpo-form');
+      var algorithmSelect = document.getElementById('hpo-algorithm');
+      var paramRows = document.getElementById('hpo-param-rows');
+      var failstackRows = document.getElementById('hpo-failstack-rows');
+      var failstackToggle = document.getElementById('hpo-failstack');
+      var failstackBody = document.getElementById('hpo-failstack-body');
+      var failstackNote = document.getElementById('hpo-failstack-note');
+      var errorBox = document.getElementById('hpo-errors');
+      var submitButton = document.getElementById('hpo-submit');
+      var currentSpace = null;
+      var SCALES = ['linear', 'log', 'int'];
+
+      function csrfToken() {
+        var input = form.querySelector('input[name="csrfmiddlewaretoken"]');
+        return input ? input.value : '';
+      }
+
+      function el(tag, attrs, text) {
+        var node = document.createElement(tag);
+        Object.keys(attrs || {}).forEach(function (key) {
+          if (key === 'className') { node.className = attrs[key]; } else { node.setAttribute(key, attrs[key]); }
+        });
+        if (text !== undefined && text !== null) { node.textContent = String(text); }
+        return node;
+      }
+
+      function scaleSelect(name, scale, integer) {
+        var select = el('select', { className: 'form-select form-select-sm', 'data-role': 'scale', 'data-name': name });
+        SCALES.forEach(function (option) {
+          if (integer ? option !== 'int' : option === 'int') { return; }
+          var opt = el('option', { value: option }, option);
+          if (option === scale) { opt.selected = true; }
+          select.appendChild(opt);
+        });
+        if (integer) { select.disabled = true; }
+        return select;
+      }
+
+      function numberInput(role, name, value, integer) {
+        return el('input', {
+          className: 'form-control form-control-sm', type: 'number', step: integer ? '1' : 'any',
+          'data-role': role, 'data-name': name, value: value
+        });
+      }
+
+      function boundRow(name, defaultCell, bound, integer, checked, fixedInput) {
+        var tr = el('tr', { 'data-param': name });
+        var check = el('input', { className: 'form-check-input', type: 'checkbox', 'data-role': 'include', 'data-name': name });
+        check.checked = checked;
+        var tdCheck = el('td');
+        tdCheck.appendChild(check);
+        tr.appendChild(tdCheck);
+        tr.appendChild(el('td', { className: 'text-sm font-weight-bold' }, name));
+        var tdDefault = el('td', { className: 'text-sm' });
+        if (fixedInput) { tdDefault.appendChild(fixedInput); } else { tdDefault.textContent = defaultCell; }
+        tr.appendChild(tdDefault);
+        var tdLow = el('td'); tdLow.appendChild(numberInput('low', name, bound.low, integer)); tr.appendChild(tdLow);
+        var tdHigh = el('td'); tdHigh.appendChild(numberInput('high', name, bound.high, integer)); tr.appendChild(tdHigh);
+        var tdScale = el('td'); tdScale.appendChild(scaleSelect(name, bound.scale, integer)); tr.appendChild(tdScale);
+        function sync() { tr.classList.toggle('hpo-row-off', !check.checked); updateEstimate(); }
+        check.addEventListener('change', sync);
+        sync();
+        return tr;
+      }
+
+      function renderParams(space) {
+        paramRows.innerHTML = '';
+        var names = Object.keys(space.bounds);
+        if (!names.length) {
+          paramRows.appendChild(el('tr')).appendChild(el('td', { colspan: '6', className: 'text-sm' }, 'This algorithm has no searchable parameters.'));
+          return;
+        }
+        names.forEach(function (name) {
+          var bound = space.bounds[name];
+          var integer = space.integer.indexOf(name) >= 0;
+          paramRows.appendChild(boundRow(name, space.defaults[name], bound, integer, true, null));
+        });
+      }
+
+      function renderFailstack(space) {
+        failstackRows.innerHTML = '';
+        var defaults = space.failstack_defaults;
+        var limit = Number(defaults.failstack_limit);
+        var delta = Number(defaults.failstack_delta);
+        // Suggested search ranges around the agent defaults (editable).
+        var rows = [
+          { name: 'failstack_limit', value: limit, integer: true,
+            bound: { low: Math.max(1, limit - 4), high: limit + 6, scale: 'int' } },
+          { name: 'failstack_delta', value: delta, integer: false,
+            bound: { low: 0, high: Math.max(1, 2 * delta), scale: 'linear' } }
+        ];
+        rows.forEach(function (row) {
+          var fixed = numberInput('fixed', row.name, row.value, row.integer);
+          failstackRows.appendChild(boundRow(row.name, '', row.bound, row.integer, false, fixed));
+        });
+        failstackToggle.disabled = !space.failstack;
+        if (!space.failstack) { failstackToggle.checked = false; }
+        failstackNote.textContent = space.failstack ? '' : 'Fail-stack applies only to learning algorithms.';
+        syncFailstack();
+      }
+
+      function syncFailstack() {
+        failstackBody.style.display = failstackToggle.checked ? '' : 'none';
+        updateEstimate();
+      }
+
+      function loadSpace() {
+        var algorithm = algorithmSelect.value;
+        paramRows.innerHTML = '<tr><td colspan="6" class="text-sm text-secondary">Loading ...</td></tr>';
+        fetch(PARAM_SPACE_URL + '?algorithm=' + encodeURIComponent(algorithm), { headers: { 'Accept': 'application/json' } })
+          .then(function (response) {
+            return response.json().then(function (body) { return { ok: response.ok, body: body }; });
+          })
+          .then(function (result) {
+            if (!result.ok) { showErrors(result.body.errors || { algorithm: ['Could not load parameters.'] }); return; }
+            currentSpace = result.body;
+            renderParams(currentSpace);
+            renderFailstack(currentSpace);
+            updateEstimate();
+          })
+          .catch(function (error) { showErrors({ algorithm: ['Could not load parameters: ' + error] }); });
+      }
+
+      function collectBounds(container, onlyChecked) {
+        var bounds = {};
+        container.querySelectorAll('tr[data-param]').forEach(function (tr) {
+          var name = tr.getAttribute('data-param');
+          var include = tr.querySelector('[data-role="include"]');
+          if (onlyChecked && !include.checked) { return; }
+          bounds[name] = {
+            low: tr.querySelector('[data-role="low"]').value,
+            high: tr.querySelector('[data-role="high"]').value,
+            scale: tr.querySelector('[data-role="scale"]').value
+          };
+        });
+        return bounds;
+      }
+
+      function value(id) { return document.getElementById(id).value; }
+
+      function seedCount(text) {
+        return text.split(',').filter(function (s) { return s.trim() !== ''; }).length;
+      }
+
+      function updateEstimate() {
+        var sn = parseInt(value('hpo-colony'), 10);
+        var iterations = parseInt(value('hpo-iter'), 10);
+        var nSearch = seedCount(value('hpo-search-seeds'));
+        var nEval = seedCount(value('hpo-eval-seeds'));
+        var target = document.getElementById('hpo-estimate');
+        if (!(sn >= 2) || !(iterations >= 1)) { target.textContent = '-'; return; }
+        var total = sn * (1 + 2 * iterations) * nSearch + nEval;
+        target.textContent = 'at least ' + total + ' simulation runs (plus ' + nSearch +
+          ' per scout): ' + sn + ' x (1 + 2 x ' + iterations + ') candidates x ' + nSearch +
+          ' search seeds + ' + nEval + ' evaluation seeds.';
+      }
+
+      function showErrors(errors) {
+        errorBox.innerHTML = '';
+        var list = el('ul', { className: 'mb-0' });
+        Object.keys(errors).forEach(function (field) {
+          (errors[field] || []).forEach(function (message) {
+            var label = field === '__all__' ? '' : field + ': ';
+            list.appendChild(el('li', {}, label + message));
+          });
+        });
+        errorBox.appendChild(el('strong', {}, 'The study was not created.'));
+        errorBox.appendChild(list);
+        errorBox.classList.remove('d-none');
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+
+      function payload() {
+        var bounds = collectBounds(paramRows, true);
+        var failstack = failstackToggle.checked;
+        var data = {
+          name: value('hpo-name'),
+          scenario: value('hpo-scenario'),
+          algorithm_type: algorithmSelect.value,
+          failstack_enabled: failstack,
+          colony_size: value('hpo-colony'),
+          max_iter: value('hpo-iter'),
+          limit: value('hpo-limit'),
+          search_seeds: value('hpo-search-seeds'),
+          evaluation_seeds: value('hpo-eval-seeds'),
+          weight_agent: value('hpo-w-agent'),
+          weight_market: value('hpo-w-market')
+        };
+        if (failstack) {
+          var searched = collectBounds(failstackRows, true);
+          Object.keys(searched).forEach(function (name) { bounds[name] = searched[name]; });
+          failstackRows.querySelectorAll('[data-role="fixed"]').forEach(function (input) {
+            data[input.getAttribute('data-name')] = input.value;
+          });
+        }
+        data.param_bounds = bounds;
+        return data;
+      }
+
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        errorBox.classList.add('d-none');
+        submitButton.disabled = true;
+        fetch(CREATE_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRFToken': csrfToken() },
+          body: JSON.stringify(payload())
+        })
+          .then(function (response) {
+            return response.json().then(function (body) { return { status: response.status, body: body }; });
+          })
+          .then(function (result) {
+            if (result.body.watch_url && result.status === 201) {
+              window.location.href = result.body.watch_url;
+              return;
+            }
+            submitButton.disabled = false;
+            showErrors(result.body.errors || { __all__: ['Unexpected server response (' + result.status + ').'] });
+            if (result.body.watch_url) {
+              errorBox.appendChild(el('a', { href: result.body.watch_url, className: 'text-white' }, 'Open the study'));
+            }
+          })
+          .catch(function (error) {
+            submitButton.disabled = false;
+            showErrors({ __all__: ['Request failed: ' + error] });
+          });
+      });
+
+      algorithmSelect.addEventListener('change', loadSpace);
+      failstackToggle.addEventListener('change', syncFailstack);
+      ['hpo-colony', 'hpo-iter', 'hpo-search-seeds', 'hpo-eval-seeds'].forEach(function (id) {
+        document.getElementById(id).addEventListener('input', updateEstimate);
+      });
+      if (algorithmSelect.value) { loadSpace(); }
+    })();
+  </script>
+</body>
+
+</html>

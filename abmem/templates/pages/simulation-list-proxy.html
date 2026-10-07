@@ -86,11 +86,13 @@
                         <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Name</th>
                         <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">Created</th>
                         <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Last Update</th>
+                        <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Seed</th>
+                        <th></th>
                       </tr>
                     </thead>
                     <tbody>
+                      {% for simulation in simulations %}
                       <tr>
-                        {% for simulation in simulations %}
                         <td>
                           <div class="d-flex px-2 py-1">
                             <div class="text-center d-flex flex-column justify-content-center ">
@@ -111,6 +113,11 @@
                               <h6 class="mb-0 text-sm">{{simulation.updated_at}}</h6>
                             </div>
                           </div>
+                        </td>
+                        <td>
+                          <div class="d-flex px-2 py-1">
+                            <h6 class="mb-0 text-sm">{{ simulation.seed }}</h6>
+                          </div>
                         </td>                 
                         <td>
                           <row class="row">
@@ -125,14 +132,26 @@
                             </div>
 
                             <div class="col-2 mx-2">
-                              <a class="nav-link active" href="{% url 'run_simulation' simulation_id=simulation.id %}">
-                                <div class="col-4 text-end">
-                                  <div
-                                    class="icon icon-shape bg-gradient-info shadow text-center border-radius-md zoom4-1">
-                                    <i class="fas fa-play"></i>
-                                  </div>
-                                </div>
-                              </a>
+                              <button type="button"
+                                class="center icon icon-shape bg-gradient-info shadow text-center border-radius-md zoom4-1 js-run-button"
+                                style="border:none" title="Run"
+                                data-run-url="{% url 'run_simulation' simulation_id=simulation.id %}"
+                                data-seed="{{ simulation.seed }}" data-name="{{ simulation.name }}"
+                                data-scenario-id="{{ simulation.id }}">
+                                <i class="fas fa-play"></i>
+                              </button>
+                            </div>
+
+                            <div class="col-2 mx-2">
+                              <!-- Duplicate: deep copy as '<name> (copy)', then open it in the wizard (PLAN 2.6) -->
+                              <form action="{% url 'duplicate_scenario' simulation_id=simulation.id %}" method="POST" class="js-duplicate-form">
+                                {% csrf_token %}
+                                <button type="submit"
+                                  class="center icon icon-shape bg-gradient-secondary shadow text-center border-radius-md zoom4-1"
+                                  style="border:none" title="Duplicate" aria-label="Duplicate {{ simulation.name }}">
+                                  <i class="fas fa-copy" aria-hidden="true"></i>
+                                </button>
+                              </form>
                             </div>
 
                             <div class="col-2 mx-2">
@@ -162,6 +181,50 @@
       </div>
       <!-- END CONTAINER -->
 
+
+    <!-- Run dialog: seed of this run only (PLAN 2.5) and initial policies (A9), no blocking browser dialogs -->
+    {% csrf_token %}
+    {{ warm_start_sources|json_script:"run-sources" }}
+    <div class="modal fade" id="run-modal" tabindex="-1" role="dialog" aria-labelledby="run-modal-title" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered" role="document">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="run-modal-title">Run scenario</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">
+              <span aria-hidden="true">&times;</span>
+            </button>
+          </div>
+          <div class="modal-body">
+            <p class="text-sm mb-2">Scenario: <strong id="run-modal-name"></strong></p>
+            <label class="form-label text-sm" for="run-seed">Seed</label>
+            <div class="input-group">
+              <input type="number" class="form-control" id="run-seed" min="0" max="2147483647" step="1">
+              <button class="btn btn-outline-secondary mb-0" type="button" id="run-random-seed">Random seed</button>
+            </div>
+            <p class="text-xs text-secondary mt-1 mb-0">Integer from 0 to 2147483647. The seed applies to this run
+              only. The scenario seed is not changed.</p>
+            <label class="form-label text-sm mt-3" for="run-warm-start">Initial policies</label>
+            <select class="form-select" id="run-warm-start">
+              <option value="">Fresh (untrained)</option>
+            </select>
+            <p class="text-xs text-secondary mt-1 mb-0">Saved policies of a finished run of this scenario. Agents are
+              matched by library agent, or by name when an agent has no library source. Unmatched agents start
+              fresh.</p>
+            <div class="form-check mt-2">
+              <input class="form-check-input" type="checkbox" id="run-freeze" disabled>
+              <label class="form-check-label text-sm" for="run-freeze">Evaluate only: loaded policies do not
+                learn and do not explore in any period</label>
+            </div>
+            <div class="text-sm text-warning mt-2 d-none" id="run-warnings"></div>
+            <div class="text-sm text-danger mt-2 d-none" id="run-error"></div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="button" class="btn bg-gradient-info" id="run-start">Run</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </main>
   <!-- END MAIN-->
 
@@ -176,6 +239,153 @@
   <script async defer src="https://buttons.github.io/buttons.js"></script>
   <!-- MDB -->
   <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/7.2.0/mdb.umd.min.js"></script>
+
+  <script>
+    (function () {
+      'use strict';
+      var SEED_UPPER_BOUND = 2147483648;
+      var runUrl = null;
+
+      function $(id) { return document.getElementById(id); }
+
+      function csrfToken() {
+        var input = document.querySelector('input[name="csrfmiddlewaretoken"]');
+        return input ? input.value : '';
+      }
+
+      function showError(text) {
+        var box = $('run-error');
+        box.textContent = text || '';
+        box.classList.toggle('d-none', !text);
+      }
+
+      function randomSeed() {
+        var buffer = new Uint32Array(1);
+        window.crypto.getRandomValues(buffer);
+        return buffer[0] % SEED_UPPER_BOUND;
+      }
+
+      function showWarnings(list) {
+        var box = $('run-warnings');
+        box.textContent = '';
+        (list || []).forEach(function (text) {
+          var line = document.createElement('div');
+          line.textContent = text;
+          box.appendChild(line);
+        });
+        box.classList.toggle('d-none', !(list && list.length));
+      }
+
+      function readSources() {
+        var node = $('run-sources');
+        try { return node ? JSON.parse(node.textContent) : {}; } catch (e) { return {}; }
+      }
+      var SOURCES = readSources();
+
+      function fillSources(scenarioId) {
+        var select = $('run-warm-start');
+        while (select.options.length > 1) { select.remove(1); }
+        (SOURCES[String(scenarioId)] || []).forEach(function (run) {
+          var option = document.createElement('option');
+          option.value = String(run.id);
+          option.textContent = 'Run #' + run.id + ' (' + run.created + ', seed ' + run.seed + ', ' +
+            run.checkpoints + ' saved ' + (run.checkpoints === 1 ? 'policy' : 'policies') +
+            (run.warm_start_from ? ', warm-started from #' + run.warm_start_from : '') + ')';
+          select.appendChild(option);
+        });
+        select.value = '';
+        select.disabled = select.options.length < 2;
+        $('run-freeze').checked = false;
+        $('run-freeze').disabled = true;
+      }
+
+      function openDialog(button) {
+        runUrl = button.getAttribute('data-run-url');
+        $('run-modal-name').textContent = button.getAttribute('data-name');
+        $('run-seed').value = button.getAttribute('data-seed');
+        fillSources(button.getAttribute('data-scenario-id'));
+        $('run-start').disabled = false;
+        showError('');
+        showWarnings([]);
+        bootstrap.Modal.getOrCreateInstance($('run-modal')).show();
+      }
+
+      function errorText(body, status) {
+        var errors = (body && body.errors) || { __all__: ['HTTP ' + status] };
+        return Object.keys(errors).map(function (k) { return errors[k].join(' '); }).join(' ');
+      }
+
+      function postRun(payload) {
+        return fetch(runUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRFToken': csrfToken() },
+          body: JSON.stringify(payload)
+        }).then(function (response) {
+          return response.json().then(function (body) { return { ok: response.ok, status: response.status, body: body }; });
+        });
+      }
+
+      function warmStartPayload() {
+        var source = $('run-warm-start').value;
+        if (!source) { return {}; }
+        return { warm_start_from: Number(source), freeze_policies: $('run-freeze').checked };
+      }
+
+      var checkCounter = 0;
+      function checkWarmStart() {
+        var source = $('run-warm-start').value;
+        $('run-freeze').disabled = !source;
+        if (!source) { $('run-freeze').checked = false; }
+        showError('');
+        showWarnings([]);
+        if (!source) { return; }
+        var payload = warmStartPayload();
+        payload.dry_run = true;
+        var ticket = ++checkCounter;
+        postRun(payload).then(function (result) {
+          if (ticket !== checkCounter) { return; }
+          if (!result.ok) { showError(errorText(result.body, result.status)); return; }
+          showWarnings(result.body.warnings);
+        }).catch(function (error) {
+          if (ticket === checkCounter) { showError('Request failed: ' + error); }
+        });
+      }
+
+      function startRun() {
+        var raw = $('run-seed').value.trim();
+        if (!/^\d+$/.test(raw) || Number(raw) >= SEED_UPPER_BOUND) {
+          showError('Seed must be an integer from 0 to ' + (SEED_UPPER_BOUND - 1) + '.');
+          return;
+        }
+        $('run-start').disabled = true;
+        showError('');
+        var payload = warmStartPayload();
+        payload.seed = Number(raw);
+        postRun(payload).then(function (result) {
+          if (!result.ok) {
+            $('run-start').disabled = false;
+            showError(errorText(result.body, result.status));
+            return;
+          }
+          window.location.href = result.body.watch_url;
+        }).catch(function (error) {
+          $('run-start').disabled = false;
+          showError('Request failed: ' + error);
+        });
+      }
+
+      Array.prototype.forEach.call(document.querySelectorAll('.js-run-button'), function (button) {
+        button.addEventListener('click', function () { openDialog(button); });
+      });
+      $('run-random-seed').addEventListener('click', function () {
+        $('run-seed').value = String(randomSeed());
+        showError('');
+      });
+      $('run-warm-start').addEventListener('change', checkWarmStart);
+      $('run-freeze').addEventListener('change', checkWarmStart);
+      $('run-start').addEventListener('click', startRun);
+    })();
+  </script>
 
 </body>
 

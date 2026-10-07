@@ -1,0 +1,58 @@
+{
+  "spec_id": "policy_persistence",
+  "title": "Saving and loading trained policies (finding A9)",
+  "status": "approved",
+  "approval_note": "User asked on 2026-10-07 to fix all open A findings including A9. Scope choices below are the integrator's defaults and are reported to the user.",
+  "plan_items": ["A9"],
+  "purpose": "A trained policy is lost when its run ends. Persist the learned state of every agent at the end of a run and allow a later run to start from it (warm start) or to evaluate it without further learning.",
+  "decisions": [
+    "Checkpoints are files (torch.save of a plain dict) under settings.ABMEM_CHECKPOINT_DIR (default BASE_DIR / 'checkpoints', git-ignored), one file per run agent, plus a DB row PolicyCheckpoint for lookup. No binary blobs in the database.",
+    "Saved automatically when a run reaches FINISHED, for learning policies only (baselines have no learned state). Not saved for HPO trial runs (hpo_trial set), to avoid thousands of files; HPO keeps its best params, which is enough to retrain.",
+    "Content: algorithm_type, config (dataclass as dict), PolicySpec (obs_dim, action_dim, price bounds, plant costs), every nn.Module state_dict, every optimizer state_dict, temperature/log_alpha where present, exploration sigma, internal counters (update counts, PPO/RDPG state needed to keep acting), numpy rng bit_generator state and torch generator state, normaliser constants, format_version, torch version, created_at. Replay/rollout buffers are NOT saved (size); a warm-started policy starts with an empty buffer and learns again after learning_starts.",
+    "Loading is strict: algorithm_type, obs_dim, action_dim and network shapes must match; otherwise a clear validation error (HTTP 400 in the UI) and no run is created. format_version mismatch -> error.",
+    "Warm start is chosen per run in the run dialog: 'Initial policies: fresh | from run <id>' listing FINISHED runs of the same scenario that have checkpoints. Agents are matched by Agent.source (library agent) and, when source is empty, by name. Unmatched agents start fresh and are listed in a warning. An optional 'evaluate only (no learning)' switch freezes all loaded policies for the whole run (equivalent to evaluation_periods = periodNumber for those agents).",
+    "The run records its origin: Simulation.warm_start_from (FK to Simulation, null) and per checkpoint the source checkpoint (PolicyCheckpoint.parent, null), shown in the run settings table of the analysis page."
+  ],
+  "files": {
+    "create": [
+      "abmem/models/checkpoint.py (PolicyCheckpoint: agent FK SET_NULL, simulation FK CASCADE, algorithm_type, path, file_size, sha256, format_version, periods_trained, parent FK self SET_NULL, created_at)",
+      "abmem/migrations/0014_policy_checkpoint.py (PolicyCheckpoint, Simulation.warm_start_from, Simulation.freeze_policies BooleanField default False)",
+      "abmem/services/algorithms/persistence.py (state_dict_of(policy) -> dict, load_state_into(policy, state) -> None, save_checkpoint(path, policy, meta), load_checkpoint(path) -> dict; uses torch.save/torch.load(weights_only=True) with only tensors and plain Python types)",
+      "abmem/services/simulation/checkpoints.py (save_run_checkpoints(ctx) after FINISHED, resolve_warm_start(scenario, source_run) -> mapping, apply_warm_start(ctx, mapping), delete files when a Simulation is deleted via a post_delete signal)",
+      "tests/algorithms/test_persistence.py",
+      "tests/runtime/test_checkpoints.py",
+      "tests/views/test_warm_start_run.py"
+    ],
+    "modify": [
+      "abmem/services/algorithms/base.py (get_state()/set_state() template methods with the common part: rng, sigma, frozen, counters; subclasses add networks/optimizers)",
+      "abmem/services/algorithms/{DDPG,TD3,SAC,ppo,RDPG}.py (implement _extra_state()/_load_extra_state())",
+      "abmem/models/__init__.py, abmem/models/simulation.py, abmem/admin.py",
+      "abmem/services/simulation/simulation_service.py, context.py (hook: apply warm start after build, save after FINISHED; freeze_policies)",
+      "abmem/services/agent/library_service.py (clone_scenario_for_run accepts warm_start_from and freeze_policies)",
+      "abmem/views.py (run_simulation POST accepts warm_start_from, freeze_policies; list of candidate runs endpoint or context)",
+      "abmem/templates/pages/simulation-list-proxy.html (run dialog fields)",
+      "abmem/services/analysis/run_analysis.py + simulation-analysis.html (show warm-start origin and checkpoint list with sizes)",
+      "web_project/settings.py (ABMEM_CHECKPOINT_DIR from env), .gitignore (checkpoints/)"
+    ]
+  },
+  "invariants": [
+    "Round trip: for every learning algorithm, a policy restored from its checkpoint returns bit-identical select_action(obs, explore=False) and, given the same rng state and the same transitions, the same next update result as the original.",
+    "torch.load is called with weights_only=True (no arbitrary pickle execution).",
+    "A run without warm start behaves exactly as before (the result fingerprint test must stay green).",
+    "Deleting a run deletes its checkpoint files."
+  ],
+  "edge_cases": [
+    "Missing or corrupted file (sha256 mismatch) -> clear error, run not started.",
+    "Source run of another scenario, source run not FINISHED, source run without checkpoints -> 400.",
+    "Agent count or plant count changed since the source run -> per-agent shape mismatch -> that agent starts fresh with a warning only if the user did not request freeze; with freeze, error.",
+    "Baselines in the scenario: never saved, always fresh, not reported as unmatched.",
+    "CUDA-saved checkpoint loaded on CPU (map_location=device)."
+  ],
+  "test_plan": [
+    "Persistence round trip for DDPG, TD3, SAC, PPO, RDPG with small configs (actions equal, one update step equal).",
+    "Runtime: a FINISHED run writes one checkpoint per learning agent with correct metadata; HPO trial runs write none; failed runs write none.",
+    "Warm start: second run initialised from the first acts identically at t where the first run ended (greedy action equal for the same observation); freeze_policies -> no updates, no stored transitions.",
+    "Views: run dialog POST with warm_start_from creates the run with origin recorded; invalid source -> 400 and no run.",
+    "Signal: deleting a run removes its files."
+  ]
+}

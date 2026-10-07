@@ -1,0 +1,839 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <title>ABMEM SIMULATION - Analysis {{ simulation.name }}</title>
+  <link href="https://fonts.googleapis.com/css?family=Open+Sans:300,400,600,700" rel="stylesheet" />
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/7.2.0/mdb.min.css" rel="stylesheet" />
+  <link href="{% static 'assets/css/nucleo-icons.css' %}" rel="stylesheet" />
+  <link href="{% static 'assets/css/nucleo-svg.css' %}" rel="stylesheet" />
+  <link id="pagestyle" href="{% static 'assets/css/soft-ui-dashboard.css' %}" rel="stylesheet" />
+  <link href="{% static 'assets/css/abmem.css' %}" rel="stylesheet" />
+  <style>
+    .an-chart { position: relative; height: 340px; }
+    .an-chart-tall { position: relative; height: 420px; }
+    .an-scroll { max-height: 420px; overflow-y: auto; }
+    .an-table td, .an-table th { padding: 0.3rem 0.6rem; font-size: 0.8rem; }
+    .an-table th { position: sticky; top: 0; background: #fff; z-index: 1; }
+    .an-expand { cursor: pointer; }
+    .an-resource-row td { background: #f8f9fa; }
+    .an-num { text-align: right; font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+
+<body class="g-sidenav-show bg-gray-100">
+
+  <aside class="sidenav navbar navbar-vertical navbar-expand-xs border-0 border-radius-xl my-3 fixed-start ms-3"
+    id="sidenav-main">
+    {% include '../static/assets/components/sidebar.html' %}
+  </aside>
+
+  <main class="main-content position-relative max-height-vh-100 h-100 border-radius-lg">
+
+    {% include '../static/assets/components/navbar.html' with contextName="Simulation" pageName="Analysis" topPageName="ABMEM" %}
+
+    <div class="container-fluid py-4">
+
+      <!-- HEADER -->
+      <div class="row">
+        <div class="col-12 mb-4">
+          <div class="card">
+            <div class="card-body p-3">
+              <div class="d-flex flex-wrap align-items-center">
+                <h5 class="mb-0 me-3">Analysis: {{ simulation.name }} (#{{ simulation.id }})</h5>
+                <span class="text-sm me-3"><strong>Seed:</strong> {{ simulation.seed }}</span>
+                <span class="text-sm me-3"><strong>Periods:</strong> {{ simulation.periodNumber }}</span>
+                <div class="ms-auto">
+                  <a class="btn btn-sm bg-gradient-secondary mb-0 me-2" href="{{ watch_url }}">Back to run</a>
+                  {% if not unavailable %}
+                  <button class="btn btn-sm bg-gradient-primary mb-0 me-2" id="an-download-all" type="button" disabled>Download all charts</button>
+                  <a class="btn btn-sm btn-outline-secondary mb-0 me-1" href="{{ csv_urls.periods }}">Periods CSV</a>
+                  <a class="btn btn-sm btn-outline-secondary mb-0 me-1" href="{{ csv_urls.offers }}">Offers CSV</a>
+                  <a class="btn btn-sm btn-outline-secondary mb-0" href="{{ csv_urls.steps }}">Step logs CSV</a>
+                  {% endif %}
+                </div>
+              </div>
+              {% if unavailable %}
+              <div class="alert alert-warning text-white mt-3 mb-0" id="an-unavailable">{{ unavailable }}</div>
+              {% else %}
+              <div class="text-sm mt-2" id="an-message">Loading analysis ...</div>
+              {% endif %}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {% if not unavailable %}
+      <!-- SETTINGS + SCORES -->
+      <div class="row">
+        <div class="col-lg-6 mb-4">
+          <div class="card h-100">
+            <div class="card-header pb-0"><h6 class="mb-0">Run settings</h6></div>
+            <div class="card-body pt-2">
+              <table class="table table-sm an-table mb-3"><tbody id="an-settings"></tbody></table>
+              <div class="table-responsive">
+                <table class="table table-sm an-table mb-0">
+                  <thead>
+                    <tr><th>Agent</th><th>Algorithm</th><th>Fail-stack</th><th>Plants (resource: capacity)</th><th>Parameter overrides</th></tr>
+                  </thead>
+                  <tbody id="an-agent-settings"></tbody>
+                </table>
+              </div>
+              <div class="table-responsive mt-3">
+                <table class="table table-sm an-table mb-0">
+                  <thead>
+                    <tr><th>Saved policy</th><th>Algorithm</th><th class="an-num">File size</th><th class="an-num">Periods trained</th><th>Loaded from</th></tr>
+                  </thead>
+                  <tbody id="an-checkpoints"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="col-lg-6 mb-4">
+          <div class="card h-100">
+            <div class="card-header pb-0">
+              <h6 class="mb-0">Scores</h6>
+              <p class="text-xs text-secondary mb-0">Corrected: B9 definition (hpo.objective), price cap = upper bid bound,
+                profit = sum of offer profits, capacity = total plant capacity. Legacy: archived pre-B9 composite
+                score (compute_advanced_scores.py), price cap 200, capacity = first offer amount, profit = budget
+                after the last period minus budget after the first period.</p>
+            </div>
+            <div class="card-body pt-2">
+              <table class="table table-sm an-table mb-3">
+                <thead><tr><th>Score</th><th>Periods</th><th class="an-num">Agent score</th><th class="an-num">Market score</th></tr></thead>
+                <tbody id="an-scores"></tbody>
+              </table>
+              <table class="table table-sm an-table mb-0">
+                <thead><tr><th>Agent</th><th class="an-num">Legacy composite score</th></tr></thead>
+                <tbody id="an-legacy-agents"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CHARTS -->
+      <div class="row">
+        <div class="col-xl-6 mb-4">
+          <div class="card">
+            <div class="card-header pb-0 d-flex align-items-start">
+              <div>
+                <h6 class="mb-0">Market clearing price and demand</h6>
+                <p class="text-xs text-secondary mb-0">PTF (left axis), demand and met demand (right axis) per period.</p>
+              </div>
+              <button class="btn btn-sm btn-outline-secondary mb-0 ms-auto js-png" data-chart="market" type="button">PNG</button>
+            </div>
+            <div class="card-body p-3"><div class="an-chart"><canvas id="chart-market"></canvas></div></div>
+          </div>
+        </div>
+        <div class="col-xl-6 mb-4">
+          <div class="card">
+            <div class="card-header pb-0 d-flex align-items-start">
+              <div>
+                <h6 class="mb-0">Agent budgets</h6>
+                <p class="text-xs text-secondary mb-0">Budget after each period, period 0 = initial budget (reconstructed
+                  from the offer profits, ends at the stored final budget).</p>
+              </div>
+              <button class="btn btn-sm btn-outline-secondary mb-0 ms-auto js-png" data-chart="budgets" type="button">PNG</button>
+            </div>
+            <div class="card-body p-3"><div class="an-chart"><canvas id="chart-budgets"></canvas></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col-12 mb-4">
+          <div class="card">
+            <div class="card-header pb-0 d-flex align-items-start">
+              <div>
+                <h6 class="mb-0">All offers and PTF</h6>
+                <p class="text-xs text-secondary mb-0">Offer prices per period. Circles: accepted, crosses: rejected,
+                  dashed line: PTF. Click a legend entry to hide or show a series.</p>
+              </div>
+              <button class="btn btn-sm btn-outline-secondary mb-0 ms-auto js-png" data-chart="offers" type="button">PNG</button>
+            </div>
+            <div class="card-body p-3"><div class="an-chart-tall"><canvas id="chart-offers"></canvas></div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col-xl-6 mb-4">
+          <div class="card">
+            <div class="card-header pb-0 d-flex align-items-start flex-wrap">
+              <div>
+                <h6 class="mb-0">Agent panel</h6>
+                <p class="text-xs text-secondary mb-0">Offers of one agent per plant resource with the PTF.</p>
+              </div>
+              <div class="ms-auto d-flex align-items-center">
+                <select class="form-select form-select-sm me-2" id="an-panel-agent" aria-label="Agent"></select>
+                <button class="btn btn-sm btn-outline-secondary mb-0 js-png" data-chart="panel" type="button">PNG</button>
+              </div>
+            </div>
+            <div class="card-body p-3">
+              <div class="text-xs mb-2" id="an-panel-stats"></div>
+              <div class="an-chart"><canvas id="chart-panel"></canvas></div>
+            </div>
+          </div>
+        </div>
+        <div class="col-xl-6 mb-4">
+          <div class="card">
+            <div class="card-header pb-0 d-flex align-items-start flex-wrap">
+              <div>
+                <h6 class="mb-0">Learning diagnostics</h6>
+                <p class="text-xs text-secondary mb-0">Reward and mean Q (left), critic and actor loss (right), exploration
+                  scale (far right). Triangles: fail-stack interventions. Shaded: evaluation window.</p>
+              </div>
+              <div class="ms-auto d-flex align-items-center">
+                <select class="form-select form-select-sm me-2" id="an-learning-agent" aria-label="Agent"></select>
+                <button class="btn btn-sm btn-outline-secondary mb-0 js-png" data-chart="learning" type="button">PNG</button>
+              </div>
+            </div>
+            <div class="card-body p-3">
+              <div class="text-xs mb-2" id="an-learning-stats"></div>
+              <div class="an-chart"><canvas id="chart-learning"></canvas></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="col-xl-6 mb-4">
+          <div class="card">
+            <div class="card-header pb-0 d-flex align-items-start">
+              <div>
+                <h6 class="mb-0">Corrected and legacy scores</h6>
+                <p class="text-xs text-secondary mb-0">Mean agent score and market score. Legacy agent score = mean of the
+                  legacy composite scores.</p>
+              </div>
+              <button class="btn btn-sm btn-outline-secondary mb-0 ms-auto js-png" data-chart="scores" type="button">PNG</button>
+            </div>
+            <div class="card-body p-3"><div class="an-chart"><canvas id="chart-scores"></canvas></div></div>
+          </div>
+        </div>
+        <div class="col-xl-6 mb-4">
+          <div class="card">
+            <div class="card-header pb-0 d-flex align-items-start">
+              <div>
+                <h6 class="mb-0">Legacy composite agent scores</h6>
+                <p class="text-xs text-secondary mb-0">Archived pre-B9 definition, kept for comparison with earlier results.</p>
+              </div>
+              <button class="btn btn-sm btn-outline-secondary mb-0 ms-auto js-png" data-chart="legacy" type="button">PNG</button>
+            </div>
+            <div class="card-body p-3"><div class="an-chart"><canvas id="chart-legacy"></canvas></div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- AGENT SUMMARY -->
+      <div class="row">
+        <div class="col-12 mb-4">
+          <div class="card">
+            <div class="card-header pb-0">
+              <h6 class="mb-0">Agent summary</h6>
+              <p class="text-xs text-secondary mb-0">Click an agent row to show the per-resource rows. Acceptance in percent
+                of offers, prices in TL/MWh, energy in MWh, money in TL.</p>
+            </div>
+            <div class="card-body px-0 pt-2 pb-2 table-responsive">
+              <table class="table table-sm an-table mb-0">
+                <thead>
+                  <tr>
+                    <th class="ps-3">Agent / resource</th><th>Algorithm</th>
+                    <th class="an-num">Initial budget</th><th class="an-num">Final budget</th>
+                    <th class="an-num">Budget change</th><th class="an-num">Mean change / period</th>
+                    <th class="an-num">Offers</th><th class="an-num">Accepted</th><th class="an-num">Acceptance %</th>
+                    <th class="an-num">Mean offer price</th><th class="an-num">Mean accepted offer price</th>
+                    <th class="an-num">Accepted energy</th><th class="an-num">Revenue</th><th class="an-num">Profit</th>
+                  </tr>
+                </thead>
+                <tbody id="an-summary"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PERIODS + OFFERS -->
+      <div class="row">
+        <div class="col-xl-4 mb-4">
+          <div class="card">
+            <div class="card-header pb-0"><h6 class="mb-0">Periods</h6></div>
+            <div class="card-body px-0 pt-2 pb-2 an-scroll">
+              <table class="table table-sm an-table mb-0">
+                <thead>
+                  <tr><th class="ps-3">Period</th><th class="an-num">Demand</th><th class="an-num">Met demand</th>
+                    <th class="an-num">PTF</th><th class="an-num">Market volume</th></tr>
+                </thead>
+                <tbody id="an-periods"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="col-xl-8 mb-4">
+          <div class="card">
+            <div class="card-header pb-0">
+              <div class="d-flex flex-wrap align-items-center">
+                <h6 class="mb-0 me-3">Offers</h6>
+                <select class="form-select form-select-sm me-2" id="an-offer-agent" style="max-width: 200px;" aria-label="Agent filter"></select>
+                <input class="form-control form-control-sm me-2" id="an-offer-period" type="number" min="1" placeholder="Period"
+                  style="max-width: 120px;" aria-label="Period filter">
+                <div class="ms-auto d-flex align-items-center">
+                  <button class="btn btn-sm btn-outline-secondary mb-0 me-1" id="an-offer-prev" type="button">Previous</button>
+                  <span class="text-xs mx-2" id="an-offer-range"></span>
+                  <button class="btn btn-sm btn-outline-secondary mb-0" id="an-offer-next" type="button">Next</button>
+                </div>
+              </div>
+            </div>
+            <div class="card-body px-0 pt-2 pb-2 an-scroll">
+              <table class="table table-sm an-table mb-0">
+                <thead>
+                  <tr><th class="ps-3">Period</th><th>Agent</th><th>Resource</th><th class="an-num">Amount</th>
+                    <th class="an-num">Offer price</th><th>Accepted</th><th class="an-num">Accepted amount</th>
+                    <th class="an-num">Acceptance price</th><th class="an-num">Profit</th></tr>
+                </thead>
+                <tbody id="an-offers"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+    </div>
+  </main>
+
+  <script src="{% static 'assets/js/core/popper.min.js' %}"></script>
+  <script src="{% static 'assets/js/core/bootstrap.min.js' %}"></script>
+  <script src="{% static 'assets/js/plugins/perfect-scrollbar.min.js' %}"></script>
+  <script src="{% static 'assets/js/plugins/smooth-scrollbar.min.js' %}"></script>
+  <script src="{% static 'assets/js/plugins/chartjs.min.js' %}"></script>
+  <script src="{% static 'assets/js/zip-store.js' %}"></script>
+  <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/7.2.0/mdb.umd.min.js"></script>
+
+  {% if not unavailable %}
+  {{ page_config|json_script:"analysis-config" }}
+  <script>
+    (function () {
+      'use strict';
+      // Chart.js 3.7.1 API (bundled plugins/chartjs.min.js).
+      var CONFIG = JSON.parse(document.getElementById('analysis-config').textContent);
+      var OFFERS_PER_PAGE = 50;
+      // Agent colours of the legacy analysis script, by agent name.
+      var LEGACY_COLORS = { 'SOLAR': '#edf066', 'GEOTHERMAL': '#e26363', 'BİOFUEL': '#bad34d', 'BIOFUEL': '#bad34d',
+        'COAL': '#96633A', 'CCGT': '#53a553', 'WİND': '#888888', 'WIND': '#888888', 'NUCLEAR': '#976ebd', 'HYDRO': '#3f97d6' };
+      var PALETTE = ['#cb0c9f', '#17c1e8', '#82d616', '#fbcf33', '#ea0606', '#3a416f', '#f5365c', '#2dce89',
+        '#8392ab', '#fb6340', '#5e72e4', '#11cdef'];
+      var data = null;
+      var charts = {};
+      var agentColor = {};
+      var offerPage = 0;
+
+      function $(id) { return document.getElementById(id); }
+
+      function fmt(value, digits) {
+        if (value === null || value === undefined) { return '-'; }
+        if (typeof value !== 'number') { return String(value); }
+        if (!isFinite(value)) { return String(value); }
+        var abs = Math.abs(value);
+        if (abs !== 0 && (abs < 1e-3 || abs >= 1e9)) { return value.toExponential(3); }
+        return value.toFixed(digits === undefined ? 2 : digits);
+      }
+
+      function cell(text, className) {
+        var td = document.createElement('td');
+        if (className) { td.className = className; }
+        td.textContent = text;
+        return td;
+      }
+
+      function row(cells) {
+        var tr = document.createElement('tr');
+        cells.forEach(function (c) { tr.appendChild(c); });
+        return tr;
+      }
+
+      function showMessage(text, isError) {
+        var box = $('an-message');
+        box.textContent = text || '';
+        box.className = 'text-sm mt-2' + (isError ? ' text-danger' : '');
+        box.classList.toggle('d-none', !text);
+      }
+
+      // ---- Chart helpers -------------------------------------------------
+
+      // Paints a white background so downloaded PNGs are not transparent.
+      var whiteBackground = {
+        id: 'anWhiteBackground',
+        beforeDraw: function (chart) {
+          var ctx = chart.ctx;
+          ctx.save();
+          ctx.globalCompositeOperation = 'destination-over';
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, chart.width, chart.height);
+          ctx.restore();
+        }
+      };
+
+      // Shades the evaluation window [first, last] on the x axis.
+      var evaluationWindow = {
+        id: 'anEvaluationWindow',
+        beforeDatasetsDraw: function (chart, args, options) {
+          if (!options || !options.range) { return; }
+          var x = chart.scales.x;
+          var area = chart.chartArea;
+          var left = Math.max(area.left, x.getPixelForValue(options.range[0] - 0.5));
+          var right = Math.min(area.right, x.getPixelForValue(options.range[1] + 0.5));
+          if (!(right > left)) { return; }
+          var ctx = chart.ctx;
+          ctx.save();
+          ctx.fillStyle = 'rgba(23, 193, 232, 0.12)';
+          ctx.fillRect(left, area.top, right - left, area.bottom - area.top);
+          ctx.restore();
+        }
+      };
+
+      function baseOptions(xTitle, yTitle) {
+        return {
+          maintainAspectRatio: false,
+          animation: false,
+          interaction: { mode: 'nearest', intersect: true },
+          scales: {
+            x: { type: 'linear', title: { display: true, text: xTitle }, ticks: { precision: 0 } },
+            y: { title: { display: true, text: yTitle } }
+          },
+          plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, usePointStyle: true } } }
+        };
+      }
+
+      function makeChart(key, config) {
+        if (charts[key]) { charts[key].destroy(); }
+        config.plugins = (config.plugins || []).concat([whiteBackground]);
+        charts[key] = new Chart($('chart-' + key).getContext('2d'), config);
+        return charts[key];
+      }
+
+      function colorOf(name, index) {
+        return LEGACY_COLORS[String(name).toUpperCase()] || PALETTE[index % PALETTE.length];
+      }
+
+      function ptfPoints() {
+        return data.periods.map(function (p) { return { x: p.period, y: p.ptf }; });
+      }
+
+      function ptfDataset() {
+        return { label: 'PTF', type: 'line', data: ptfPoints(), borderColor: '#000000', backgroundColor: '#000000',
+          borderDash: [6, 4], borderWidth: 2, pointRadius: 0, showLine: true, order: 0, pointStyle: 'line' };
+      }
+
+      function offerDatasets(offers, keyOf, colorFor) {
+        var groups = {};
+        var order = [];
+        offers.forEach(function (o) {
+          var key = keyOf(o);
+          if (!groups[key]) { groups[key] = { accepted: [], rejected: [] }; order.push(key); }
+          groups[key][o.accepted ? 'accepted' : 'rejected'].push({ x: o.period, y: o.offer_price });
+        });
+        var sets = [];
+        order.forEach(function (key, index) {
+          var color = colorFor(key, index);
+          if (groups[key].accepted.length) {
+            sets.push({ label: key + ' (accepted)', data: groups[key].accepted, backgroundColor: color, borderColor: color,
+              pointStyle: 'circle', pointRadius: 4, showLine: false, order: 1 });
+          }
+          if (groups[key].rejected.length) {
+            sets.push({ label: key + ' (rejected)', data: groups[key].rejected, backgroundColor: color, borderColor: color,
+              pointStyle: 'crossRot', pointRadius: 5, borderWidth: 2, showLine: false, order: 1 });
+          }
+        });
+        return sets;
+      }
+
+      // ---- Charts --------------------------------------------------------
+
+      function marketChart() {
+        var options = baseOptions('Period', 'PTF (TL/MWh)');
+        options.scales.y1 = { position: 'right', title: { display: true, text: 'Energy (MWh)' }, grid: { drawOnChartArea: false } };
+        options.interaction = { mode: 'index', intersect: false };
+        makeChart('market', {
+          type: 'line',
+          data: { datasets: [
+            { label: 'PTF', data: ptfPoints(), borderColor: '#000000', backgroundColor: '#000000', pointRadius: 0, borderWidth: 2, yAxisID: 'y' },
+            { label: 'Demand', data: data.periods.map(function (p) { return { x: p.period, y: p.demand }; }),
+              borderColor: '#17c1e8', backgroundColor: '#17c1e8', pointRadius: 0, borderWidth: 2, yAxisID: 'y1' },
+            { label: 'Met demand', data: data.periods.map(function (p) { return { x: p.period, y: p.met_demand }; }),
+              borderColor: '#82d616', backgroundColor: '#82d616', pointRadius: 0, borderWidth: 2, borderDash: [4, 3], yAxisID: 'y1' }
+          ] },
+          options: options
+        });
+      }
+
+      function budgetChart() {
+        var datasets = data.agents.map(function (a) {
+          var color = agentColor[a.name];
+          return { label: a.name, data: data.budgets[a.name].map(function (b, t) { return { x: t, y: b }; }),
+            borderColor: color, backgroundColor: color, pointRadius: data.periods.length > 60 ? 0 : 2, borderWidth: 2 };
+        });
+        var options = baseOptions('Period', 'Budget (TL)');
+        options.interaction = { mode: 'index', intersect: false };
+        makeChart('budgets', { type: 'line', data: { datasets: datasets }, options: options });
+      }
+
+      function offersChart() {
+        var datasets = offerDatasets(data.offers, function (o) { return o.agent; }, function (name) { return agentColor[name]; });
+        datasets.push(ptfDataset());
+        makeChart('offers', { type: 'scatter', data: { datasets: datasets }, options: baseOptions('Period', 'Price (TL/MWh)') });
+      }
+
+      function panelChart(agent) {
+        var offers = data.offers.filter(function (o) { return o.agent === agent; });
+        var datasets = offerDatasets(offers, function (o) { return o.resource; }, function (name, index) {
+          return PALETTE[(index + 1) % PALETTE.length];
+        });
+        datasets.push(ptfDataset());
+        var options = baseOptions('Period', 'Price (TL/MWh)');
+        options.plugins.title = { display: true, text: agent };
+        makeChart('panel', { type: 'scatter', data: { datasets: datasets }, options: options });
+        var summary = data.agents.filter(function (a) { return a.name === agent; })[0];
+        var parts = ['Acceptance: ' + fmt(summary.stats.acceptance_rate, 1) + '%'];
+        Object.keys(summary.resources).forEach(function (resource) {
+          parts.push(resource + ': ' + fmt(summary.resources[resource].acceptance_rate, 1) + '%');
+        });
+        $('an-panel-stats').textContent = parts.join('  |  ');
+      }
+
+      function evaluationRange() {
+        var s = data.settings;
+        if (!s.evaluation_periods) { return null; }
+        return [s.period_number - s.evaluation_periods + 1, s.period_number];
+      }
+
+      function learningChart(agent) {
+        var rows = data.step_logs[agent] || [];
+        function series(field) { return rows.map(function (r) { return { x: r.period, y: r[field] }; }); }
+        var markers = rows.filter(function (r) { return r.intervened; }).map(function (r) {
+          return { x: r.period, y: r.reward === null ? 0 : r.reward };
+        });
+        var options = baseOptions('Period', 'Reward / mean Q');
+        options.scales.y1 = { position: 'right', title: { display: true, text: 'Loss' }, grid: { drawOnChartArea: false } };
+        options.scales.y2 = { position: 'right', title: { display: true, text: 'Exploration scale' }, grid: { drawOnChartArea: false } };
+        options.interaction = { mode: 'index', intersect: false };
+        options.plugins.title = { display: true, text: agent };
+        options.plugins.anEvaluationWindow = { range: evaluationRange() };
+        makeChart('learning', {
+          type: 'line',
+          data: { datasets: [
+            { label: 'Reward', data: series('reward'), borderColor: '#cb0c9f', backgroundColor: '#cb0c9f', pointRadius: 0, borderWidth: 1.5, yAxisID: 'y' },
+            { label: 'Mean Q', data: series('mean_q'), borderColor: '#3a416f', backgroundColor: '#3a416f', pointRadius: 0, borderWidth: 1.5, yAxisID: 'y' },
+            { label: 'Critic loss', data: series('critic_loss'), borderColor: '#fb6340', backgroundColor: '#fb6340', pointRadius: 0, borderWidth: 1.5, yAxisID: 'y1' },
+            { label: 'Actor loss', data: series('actor_loss'), borderColor: '#fbcf33', backgroundColor: '#fbcf33', pointRadius: 0, borderWidth: 1.5, yAxisID: 'y1' },
+            { label: 'Exploration scale', data: series('exploration_scale'), borderColor: '#17c1e8', backgroundColor: '#17c1e8', pointRadius: 0, borderWidth: 1.5, borderDash: [4, 3], yAxisID: 'y2' },
+            { label: 'Fail-stack intervention', data: markers, showLine: false, pointStyle: 'triangle', pointRadius: 6,
+              borderColor: '#ea0606', backgroundColor: '#ea0606', yAxisID: 'y' }
+          ] },
+          options: options,
+          plugins: [evaluationWindow]
+        });
+        var learning = rows.filter(function (r) { return r.learning_active; });
+        var interventions = markers.length;
+        var range = evaluationRange();
+        var parts = [rows.length ? rows.length + ' step-log rows' : 'No step logs (baseline agents do not log)'];
+        if (learning.length) { parts.push('learning active from period ' + learning[0].period); }
+        parts.push('fail-stack interventions in ' + interventions + ' period(s)');
+        parts.push(range ? 'evaluation window ' + range[0] + '-' + range[1] : 'no evaluation window');
+        $('an-learning-stats').textContent = parts.join('  |  ');
+      }
+
+      function scoresChart() {
+        var c = data.corrected;
+        var datasets = [{ label: 'Corrected, whole run', data: [c.whole_run.agent_score, c.whole_run.market_score],
+          backgroundColor: '#cb0c9f' }];
+        if (c.evaluation_window) {
+          datasets.push({ label: 'Corrected, evaluation window', data: [c.evaluation_window.agent_score, c.evaluation_window.market_score],
+            backgroundColor: '#17c1e8' });
+        }
+        datasets.push({ label: 'Legacy (pre-B9)', data: [data.legacy.mean_agent_score, data.legacy.market_score],
+          backgroundColor: '#8392ab' });
+        makeChart('scores', {
+          type: 'bar',
+          data: { labels: ['Agent score', 'Market score'], datasets: datasets },
+          options: { maintainAspectRatio: false, animation: false,
+            scales: { y: { title: { display: true, text: 'Score' } } },
+            plugins: { legend: { position: 'bottom' } } }
+        });
+      }
+
+      function legacyChart() {
+        var names = Object.keys(data.legacy.agent_scores);
+        makeChart('legacy', {
+          type: 'bar',
+          data: { labels: names, datasets: [{ label: 'Legacy composite score',
+            data: names.map(function (n) { return data.legacy.agent_scores[n]; }),
+            backgroundColor: names.map(function (n) { return agentColor[n] || '#8392ab'; }) }] },
+          options: { maintainAspectRatio: false, animation: false,
+            scales: { y: { min: 0, max: 1, title: { display: true, text: 'Composite score (0-1)' } } },
+            plugins: { legend: { display: false },
+              title: { display: true, text: 'Legacy market score: ' + fmt(data.legacy.market_score, 3) } } }
+        });
+      }
+
+      // ---- Tables --------------------------------------------------------
+
+      function settingsTable() {
+        var s = data.settings;
+        var body = $('an-settings');
+        body.innerHTML = '';
+        [['Run', s.name + ' (#' + s.simulation_id + ')'], ['Seed', String(s.seed)],
+          ['Periods', String(s.period_number)], ['Mode', s.mode], ['Market strategy', s.strategy],
+          ['Bid bounds (TL/MWh)', s.lower_bound + ' - ' + s.upper_bound],
+          ['Observation lags', s.observation_lags.join(', ')],
+          ['Evaluation periods', s.evaluation_periods ? String(s.evaluation_periods) : '0 (no evaluation window)'],
+          ['Initial policies', s.warm_start_from
+            ? 'Run #' + s.warm_start_from + (s.freeze_policies ? ' (evaluate only, no learning)' : '')
+            : 'Fresh (untrained)']
+        ].forEach(function (pair) { body.appendChild(row([cell(pair[0], 'font-weight-bold'), cell(pair[1])])); });
+        var saved = $('an-checkpoints');
+        saved.innerHTML = '';
+        if (!s.checkpoints.length) {
+          var empty = cell('No saved policies (baselines only, hyperparameter search run, or run before A9).');
+          empty.colSpan = 5;
+          saved.appendChild(row([empty]));
+        }
+        s.checkpoints.forEach(function (c) {
+          saved.appendChild(row([cell(c.agent || '-', 'font-weight-bold'), cell(c.algorithm),
+            cell(fmt(c.file_size / 1048576, 2) + ' MiB', 'an-num'), cell(String(c.periods_trained), 'an-num'),
+            cell(c.parent_run ? 'Run #' + c.parent_run : 'fresh')]));
+        });
+        var agents = $('an-agent-settings');
+        agents.innerHTML = '';
+        s.agents.forEach(function (a) {
+          var failstack = a.failstack_enabled
+            ? 'on (L=' + a.failstack_limit + ', delta=' + fmt(a.failstack_delta) + ', min margin=' + fmt(a.failstack_min_margin, 4) + ')'
+            : 'off';
+          var plants = a.plants.map(function (p) { return p.resource + ': ' + p.capacity; }).join(', ');
+          var params = Object.keys(a.algorithm_params).sort().map(function (k) {
+            return k + '=' + JSON.stringify(a.algorithm_params[k]);
+          }).join(', ');
+          agents.appendChild(row([cell(a.name, 'font-weight-bold'), cell(a.algorithm + (a.baseline ? ' (baseline)' : '')),
+            cell(failstack), cell(plants), cell(params || '-')]));
+        });
+      }
+
+      function scoreTables() {
+        var c = data.corrected;
+        var body = $('an-scores');
+        body.innerHTML = '';
+        function add(label, pair) {
+          var tr = row([cell(label), cell(pair.first_period + '-' + pair.last_period),
+            cell(fmt(pair.agent_score, 4), 'an-num'), cell(fmt(pair.market_score, 4), 'an-num')]);
+          if (pair.error) { tr.title = pair.error; tr.className = 'text-danger'; }
+          body.appendChild(tr);
+        }
+        add('Corrected, whole run', c.whole_run);
+        if (c.evaluation_window) { add('Corrected, evaluation window', c.evaluation_window); }
+        body.appendChild(row([cell('Legacy (pre-B9)'), cell('1-' + data.settings.period_number),
+          cell(fmt(data.legacy.mean_agent_score, 4), 'an-num'), cell(fmt(data.legacy.market_score, 4), 'an-num')]));
+        var legacy = $('an-legacy-agents');
+        legacy.innerHTML = '';
+        Object.keys(data.legacy.agent_scores).forEach(function (name) {
+          legacy.appendChild(row([cell(name), cell(fmt(data.legacy.agent_scores[name], 4), 'an-num')]));
+        });
+      }
+
+      function statCells(stats) {
+        return [cell(String(stats.offers), 'an-num'), cell(String(stats.accepted_offers), 'an-num'),
+          cell(fmt(stats.acceptance_rate, 1), 'an-num'), cell(fmt(stats.mean_offer_price), 'an-num'),
+          cell(fmt(stats.mean_accepted_offer_price), 'an-num'), cell(fmt(stats.accepted_energy, 3), 'an-num'),
+          cell(fmt(stats.revenue), 'an-num'), cell(fmt(stats.profit), 'an-num')];
+      }
+
+      function summaryTable() {
+        var body = $('an-summary');
+        body.innerHTML = '';
+        data.agents.forEach(function (a) {
+          var resources = Object.keys(a.resources);
+          var head = row([cell((resources.length ? '+ ' : '') + a.name, 'ps-3 font-weight-bold'), cell(a.algorithm),
+            cell(fmt(a.initial_budget), 'an-num'), cell(fmt(a.final_budget), 'an-num'), cell(fmt(a.budget_change), 'an-num'),
+            cell(fmt(a.mean_budget_change), 'an-num')].concat(statCells(a.stats)));
+          head.className = 'an-expand';
+          body.appendChild(head);
+          var children = resources.map(function (resource) {
+            var tr = row([cell(resource, 'ps-5'), cell(''), cell(''), cell(''), cell(''), cell('')]
+              .concat(statCells(a.resources[resource])));
+            tr.className = 'an-resource-row d-none';
+            body.appendChild(tr);
+            return tr;
+          });
+          head.addEventListener('click', function () {
+            var hidden = children.length && children[0].classList.contains('d-none');
+            children.forEach(function (tr) { tr.classList.toggle('d-none', !hidden); });
+            head.firstChild.textContent = (hidden ? '- ' : '+ ') + a.name;
+          });
+        });
+      }
+
+      function periodsTable() {
+        var body = $('an-periods');
+        body.innerHTML = '';
+        var fragment = document.createDocumentFragment();
+        data.periods.forEach(function (p) {
+          fragment.appendChild(row([cell(String(p.period), 'ps-3'), cell(fmt(p.demand, 3), 'an-num'),
+            cell(fmt(p.met_demand, 3), 'an-num'), cell(fmt(p.ptf), 'an-num'), cell(String(p.market_volume), 'an-num')]));
+        });
+        body.appendChild(fragment);
+      }
+
+      function filteredOffers() {
+        var agent = $('an-offer-agent').value;
+        var raw = $('an-offer-period').value.trim();
+        var period = raw === '' ? null : Number(raw);
+        return data.offers.filter(function (o) {
+          return (agent === '' || o.agent === agent) && (period === null || o.period === period);
+        });
+      }
+
+      function offersTable() {
+        var rows = filteredOffers();
+        var pages = Math.max(1, Math.ceil(rows.length / OFFERS_PER_PAGE));
+        offerPage = Math.min(Math.max(0, offerPage), pages - 1);
+        var start = offerPage * OFFERS_PER_PAGE;
+        var slice = rows.slice(start, start + OFFERS_PER_PAGE);
+        var body = $('an-offers');
+        body.innerHTML = '';
+        var fragment = document.createDocumentFragment();
+        slice.forEach(function (o) {
+          var tr = row([cell(String(o.period), 'ps-3'), cell(o.agent), cell(o.resource), cell(String(o.amount), 'an-num'),
+            cell(fmt(o.offer_price), 'an-num'), cell(o.accepted ? 'yes' : 'no', o.accepted ? 'text-success' : 'text-danger'),
+            cell(fmt(o.acceptance_amount, 3), 'an-num'), cell(fmt(o.acceptance_price), 'an-num'), cell(fmt(o.profit), 'an-num')]);
+          fragment.appendChild(tr);
+        });
+        body.appendChild(fragment);
+        $('an-offer-range').textContent = rows.length
+          ? (start + 1) + '-' + (start + slice.length) + ' of ' + rows.length
+          : '0 offers';
+        $('an-offer-prev').disabled = offerPage === 0;
+        $('an-offer-next').disabled = offerPage >= pages - 1;
+      }
+
+      function fillSelect(select, values, allLabel) {
+        select.innerHTML = '';
+        if (allLabel) {
+          var all = document.createElement('option');
+          all.value = '';
+          all.textContent = allLabel;
+          select.appendChild(all);
+        }
+        values.forEach(function (v) {
+          var option = document.createElement('option');
+          option.value = v;
+          option.textContent = v;
+          select.appendChild(option);
+        });
+      }
+
+      // ---- Downloads -----------------------------------------------------
+
+      function fileName(key, suffix) {
+        var safe = suffix ? '_' + String(suffix).replace(/[^A-Za-z0-9_-]+/g, '_') : '';
+        return 'simulation_' + CONFIG.simulation_id + '_' + key + safe + '.png';
+      }
+
+      function saveUrl(url, name) {
+        var link = document.createElement('a');
+        link.href = url;
+        link.download = name;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+
+      function downloadPng(key) {
+        var chart = charts[key];
+        if (!chart) { return; }
+        var suffix = key === 'panel' ? $('an-panel-agent').value : (key === 'learning' ? $('an-learning-agent').value : '');
+        saveUrl(chart.toBase64Image('image/png'), fileName(key, suffix));
+      }
+
+      function downloadAll() {
+        var entries = [];
+        function capture(key, suffix) {
+          entries.push({ name: fileName(key, suffix), data: ZipStore.dataUrlToBytes(charts[key].toBase64Image('image/png')) });
+        }
+        ['market', 'budgets', 'offers', 'scores', 'legacy'].forEach(function (key) { capture(key, ''); });
+        // One PNG per agent for the agent panel and the learning diagnostics.
+        var panelAgent = $('an-panel-agent').value;
+        data.agents.forEach(function (a) { panelChart(a.name); capture('panel', a.name); });
+        panelChart(panelAgent);
+        var learningAgent = $('an-learning-agent').value;
+        Object.keys(data.step_logs).forEach(function (name) {
+          if (data.step_logs[name].length) { learningChart(name); capture('learning', name); }
+        });
+        if (learningAgent) { learningChart(learningAgent); }
+        var url = URL.createObjectURL(ZipStore.toBlob(entries));
+        saveUrl(url, 'simulation_' + CONFIG.simulation_id + '_charts.zip');
+        window.setTimeout(function () { URL.revokeObjectURL(url); }, 10000);
+      }
+
+      // ---- Setup ---------------------------------------------------------
+
+      function render() {
+        data.agents.forEach(function (a, index) { agentColor[a.name] = colorOf(a.name, index); });
+        var names = data.agents.map(function (a) { return a.name; });
+        var learners = names.filter(function (n) { return (data.step_logs[n] || []).length > 0; });
+        fillSelect($('an-panel-agent'), names, null);
+        fillSelect($('an-learning-agent'), learners.length ? learners : names, null);
+        fillSelect($('an-offer-agent'), names, 'All agents');
+        $('an-offer-period').max = String(data.settings.period_number);
+        settingsTable();
+        scoreTables();
+        summaryTable();
+        periodsTable();
+        offersTable();
+        if (typeof Chart === 'undefined') {
+          showMessage('Chart.js could not be loaded, charts are not shown.', true);
+          return;
+        }
+        marketChart();
+        budgetChart();
+        offersChart();
+        if (names.length) { panelChart(names[0]); }
+        if ($('an-learning-agent').value) { learningChart($('an-learning-agent').value); }
+        scoresChart();
+        legacyChart();
+        $('an-download-all').disabled = false;
+        showMessage('');
+      }
+
+      $('an-panel-agent').addEventListener('change', function (e) { panelChart(e.target.value); });
+      $('an-learning-agent').addEventListener('change', function (e) { learningChart(e.target.value); });
+      $('an-offer-agent').addEventListener('change', function () { offerPage = 0; offersTable(); });
+      $('an-offer-period').addEventListener('input', function () { offerPage = 0; offersTable(); });
+      $('an-offer-prev').addEventListener('click', function () { offerPage -= 1; offersTable(); });
+      $('an-offer-next').addEventListener('click', function () { offerPage += 1; offersTable(); });
+      Array.prototype.forEach.call(document.querySelectorAll('.js-png'), function (button) {
+        button.addEventListener('click', function () { downloadPng(button.getAttribute('data-chart')); });
+      });
+      $('an-download-all').addEventListener('click', function () {
+        try { downloadAll(); } catch (error) { showMessage('Download failed: ' + error.message, true); }
+      });
+
+      fetch(CONFIG.data_url, { headers: { 'Accept': 'application/json' }, cache: 'no-store' })
+        .then(function (response) {
+          return response.json().then(function (body) { return { ok: response.ok, status: response.status, body: body }; });
+        })
+        .then(function (result) {
+          if (!result.ok) { showMessage(result.body.error || ('HTTP ' + result.status), true); return; }
+          data = result.body;
+          render();
+        })
+        .catch(function (error) { showMessage('Loading the analysis failed: ' + error.message, true); });
+    })();
+  </script>
+  {% endif %}
+</body>
+
+</html>

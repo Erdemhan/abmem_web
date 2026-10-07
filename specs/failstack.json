@@ -1,0 +1,129 @@
+{
+  "spec_id": "failstack",
+  "title": "Single, dimensionally consistent fail-stack rule outside the algorithms",
+  "status": "approved",
+  "phase": "Faz 1",
+  "wave": 2,
+  "plan_items": [
+    "1.5"
+  ],
+  "defects": [
+    "C7",
+    "B5"
+  ],
+  "decisions": [
+    "K3 (rule of item 1.5 approved as written)"
+  ],
+  "purpose": "Implement the approved rule as a pure module. runtime_core wires it into agent_service, rl_algorithms removes the legacy mechanisms inside TD3 and PPO, data_model adds the per-agent fields.",
+  "depends_on": [
+    "faz0_infra",
+    "observation_reward (OfferOutcome, offer_profit in abmem/services/market/accounting.py)"
+  ],
+  "rule": {
+    "failure": "f_i(t) = 1 if the bid of plant i at t was rejected (accepted_quantity == 0) or margin_i < m_min, with margin_i = g_i / (p_acc * q_acc) (TL/TL, unitless).",
+    "counter": "n_i <- n_i + 1 if f_i(t) = 1, else n_i <- 0.",
+    "intervention": "If n_i >= L at the decision for t+1: price_i ~ U[max(low, PTF(t) - delta), PTF(t)), clipped to [low, high], then n_i <- 0. delta in TL/MWh.",
+    "buffer_action": "The applied price, converted with action_space.from_price, is the stored action. The intervened flag is recorded per plant.",
+    "ppo": "Intervened steps are masked out of the clipped policy loss and kept in the value loss (implemented in rl_algorithms, package ppo).",
+    "parameters": {
+      "failstack_enabled": "default False",
+      "failstack_limit L": "default 6",
+      "failstack_delta delta": "default 15 TL/MWh",
+      "failstack_min_margin m_min": "default 0"
+    },
+    "scope": "Learning algorithms only. Baselines (RANDOM, MARGINAL_COST, FIXED_MARKUP) never get interventions."
+  },
+  "files": {
+    "create": [
+      "abmem/services/agent/failstack.py",
+      "tests/agent/test_failstack.py"
+    ],
+    "modify": [],
+    "delete": []
+  },
+  "public_interfaces": [
+    {
+      "module": "abmem/services/agent/failstack.py",
+      "signature": "@dataclass(frozen=True)\nclass FailStackParams:\n    limit: int\n    delta: Decimal\n    min_margin: Decimal\n\n    def __post_init__(self) -> None",
+      "description": "Validates limit >= 1, delta >= 0, min_margin finite. Raises ValueError otherwise."
+    },
+    {
+      "module": "abmem/services/agent/failstack.py",
+      "signature": "@classmethod\ndef FailStackParams.from_agent(cls, agent: 'Agent') -> 'FailStackParams | None'",
+      "description": "Returns None if agent.failstack_enabled is False or the agent's algorithm is a baseline. Reads only attributes, no query. Uses getattr defaults so it works before data_model lands."
+    },
+    {
+      "module": "abmem/services/agent/failstack.py",
+      "signature": "@dataclass\nclass FailStackState:\n    counters: list[int]\n\n    @classmethod\n    def zeros(cls, n_plants: int) -> 'FailStackState'",
+      "description": "One counter per plant in Plant.id order. n_plants >= 1."
+    },
+    {
+      "module": "abmem/services/agent/failstack.py",
+      "signature": "def margin(outcome: OfferOutcome, profit: Decimal) -> Decimal | None",
+      "description": "profit / (acceptance_price * accepted_quantity). None if that revenue is 0."
+    },
+    {
+      "module": "abmem/services/agent/failstack.py",
+      "signature": "def is_failure(outcome: OfferOutcome, profit: Decimal, min_margin: Decimal) -> bool",
+      "description": "True if rejected or margin < min_margin. The revenue-zero case follows OQ-13 (proposal: failure iff profit < 0)."
+    },
+    {
+      "module": "abmem/services/agent/failstack.py",
+      "signature": "def update_counters(state: FailStackState, failures: Sequence[bool]) -> None",
+      "description": "In-place update. len(failures) must equal len(state.counters), else ValueError."
+    },
+    {
+      "module": "abmem/services/agent/failstack.py",
+      "signature": "def intervention_price(ptf_prev: Decimal, delta: Decimal, low: Decimal, high: Decimal, rng: np.random.Generator) -> Decimal",
+      "description": "Draws from U[a, b) with a = max(low, ptf_prev - delta), b = ptf_prev, clips to [low, high], quantises to Decimal('0.01'). If b <= a it returns min(max(ptf_prev, low), high). Uses only the passed generator (seeded per agent)."
+    },
+    {
+      "module": "abmem/services/agent/failstack.py",
+      "signature": "def apply_interventions(state: FailStackState, params: FailStackParams, prices: Sequence[Decimal], ptf_prev: Decimal | None, low: Decimal, high: Decimal, rng: np.random.Generator) -> tuple[list[Decimal], list[bool]]",
+      "description": "For each plant with counters[i] >= limit: replace the price with intervention_price and reset counters[i] to 0. Returns (applied_prices, intervened_flags). If ptf_prev is None no intervention happens and counters stay unchanged."
+    }
+  ],
+  "data_model_changes": "none in this spec (fields added by data_model)",
+  "migrations": "none",
+  "invariants": [
+    "Unit invariance: scaling all prices, costs, PTF, delta and bounds by the same factor (TL to kurus) does not change any failure decision, counter value or intervention flag.",
+    "An intervention for plant i happens only after L consecutive failures of plant i since its last reset.",
+    "Intervened prices satisfy low <= p <= high, and p < PTF(t-1) whenever PTF(t-1) - delta < PTF(t-1) and PTF(t-1) > low.",
+    "The module holds no global state, reads no settings and does not import django."
+  ],
+  "edge_cases": [
+    "limit = 1: intervention after every failure.",
+    "delta = 0: interval empty, returns PTF(t-1) clipped to [low, high].",
+    "ptf_prev <= low: returns low.",
+    "ptf_prev > high (cannot happen with validated bounds): clipped to high.",
+    "accepted_quantity > 0 and acceptance_price == 0: margin undefined, OQ-13.",
+    "Length mismatch between prices, counters and failures: ValueError.",
+    "Decimal('NaN') or infinite input: ValueError."
+  ],
+  "test_plan": [
+    "Counter sequence: F,F,S,F,F,F,F,F,F with L = 6 triggers exactly one intervention at the ninth decision and resets the counter.",
+    "Unit invariance property test with 100 random outcomes and scale factor 100.",
+    "intervention_price bounds over 10 000 draws with a fixed seed, empty interval, ptf below low.",
+    "Determinism: same generator seed gives the same intervention prices.",
+    "from_agent returns None for failstack_enabled False and for baseline algorithm types."
+  ],
+  "research_debug": {
+    "bug_type": "C (C7) and B (B5)",
+    "bug_impact_required": true,
+    "bug_impact_note": "Previous runs mixed three different rules depending on the algorithm. The note is carried by the runtime_core commit that removes the legacy mechanisms."
+  },
+  "acceptance_criteria": [
+    "All tests green",
+    "No import of django or abmem.models at module level in failstack.py (Agent is referenced only as a string type hint)"
+  ],
+  "out_of_scope": [
+    "UI toggle (algorithm_selection_ui)",
+    "Model fields (data_model)",
+    "Removal of TD3/PPO internal failstack (rl_algorithms)"
+  ],
+  "blocked_by_open_questions": [],
+  "approval_note": "Approved by the user on 2026-10-06. Open questions OQ-1..OQ-19 are resolved in ARCHITECTURE.md section 11. The entries in resolved_open_questions are binding and override any wording below that says \"proposal\", \"per OQ-x\" or \"if approved\".",
+  "resolved_open_questions": {
+    "OQ-13": "If accepted revenue p_acc * q_acc == 0 for an accepted offer, the offer is a failure only if profit < 0."
+  }
+}

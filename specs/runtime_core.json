@@ -1,0 +1,186 @@
+{
+  "spec_id": "runtime_core",
+  "title": "SimulationContext-based runtime: agent step, market period, run loop, seeding, diagnostics, entry points, performance and dead-code removal",
+  "status": "approved",
+  "phase": "Faz 1",
+  "wave": 3,
+  "plan_items": [
+    "1.1 (wiring)",
+    "1.2",
+    "1.3 (wiring, prev=(obs, action) transitions, K2 policy)",
+    "1.4 (sigma decay once per period)",
+    "1.5 (wiring, removal of legacy counter and random-price rule, learning_starts)",
+    "1.8",
+    "1.9",
+    "1.10 (seed, evaluation mode, baselines in runtime)",
+    "1.12",
+    "2.1 (service part: AgentService builds the policy from agent.algorithm_type, copy carries fields)"
+  ],
+  "defects": [
+    "C1",
+    "C2",
+    "C7",
+    "C9",
+    "B1",
+    "B2",
+    "B5",
+    "B6",
+    "B10",
+    "A2",
+    "A3",
+    "A4",
+    "A10"
+  ],
+  "decisions": [
+    "K1",
+    "K2",
+    "K3"
+  ],
+  "purpose": "Replace the global-state runtime with a per-run SimulationContext and wire the pure components (observation, normaliser, action mapping, reward, fail-stack, clearing, accounting) and the BaseAgentAlgorithm policies into one per-period flow (ARCHITECTURE.md section 6).",
+  "depends_on": [
+    "market_clearing",
+    "observation_reward",
+    "failstack",
+    "rl_core",
+    "rl_algorithms",
+    "data_model"
+  ],
+  "files": {
+    "create": [
+      "abmem/services/simulation/context.py",
+      "abmem/services/simulation/seeding.py",
+      "abmem/services/diagnostics/__init__.py",
+      "abmem/services/diagnostics/step_logger.py",
+      "tests/runtime/__init__.py",
+      "tests/runtime/test_agent_step.py",
+      "tests/runtime/test_market_period.py",
+      "tests/runtime/test_simulation_run.py",
+      "tests/runtime/test_two_runs_same_process.py",
+      "tests/runtime/test_reproducibility.py",
+      "tests/runtime/test_web_run_integration.py",
+      "tests/perf/test_run_benchmark.py (marked slow, not in default run)"
+    ],
+    "modify": [
+      "abmem/services/agent/agent_service.py (rewrite: step(ctx, rt, t), remove FAILSTACK_LIMIT global, compute_composite_reward, calculateRandomOffers, relearn, predict, to_safe_history)",
+      "abmem/services/market/market_service.py (rewrite: run_period(ctx, t), remove module globals marketData and agents, estimatePTF, startPool, saveOffers counter logic, payasptf replaced by clearing.acceptance_prices)",
+      "abmem/services/simulation/simulation_service.py (rewrite run loop around SimulationContext, set_seed replaced by seeding, JSON export kept for UI runs and skipped when export_json is False)",
+      "abmem/services/starter/starter_service.py (remove YAML helpers readStarterData, createSimulation, initSimulation, checkResources)",
+      "abmem/services/agent/portfolio_factory.py (remove the dict-based createPlant duplicate, A3)",
+      "abmem/services/file_reader/reader_service.py (remove YAML readers openFile/readData if no caller remains)",
+      "abmem/views.py (delete the 'start' view only)",
+      "abmem/urls.py (delete the 'start' route only)",
+      "abmem/models/agent.py is NOT modified here (runtime_policy already renamed by data_model)"
+    ],
+    "delete": [
+      "abmem/main.py",
+      "abmem/services/simulation/serial_service.py",
+      "abmem/services/simulation/parallel_service.py",
+      "abmem/services/algorithms/agent_algorithm.py",
+      "abmem/services/algorithms/actor_critic.py",
+      "abmem/services/algorithms/algorithm_utils.py",
+      "abmem/services/algorithms/MPIP.py",
+      "abmem/services/visualization/ (whole package)",
+      "abmem/services/starter/resource_factory.py",
+      "abmem/services/starter/resource_service.py",
+      "abmem/data/agents.yml, market.yml, resources.yml, simulation.yml (YAML start path unused, PLAN 1.9 'remove if unused')",
+      "abmem/services/algorithms/optimization/multi_objective_abc.py",
+      "abmem/constants entries that only served the YAML path (keys and paths), after grep confirms no caller"
+    ]
+  },
+  "public_interfaces": [
+    {
+      "module": "abmem/services/simulation/seeding.py",
+      "signature": "def seed_everything(seed: int, deterministic: bool = True) -> None\ndef spawn_agent_rngs(seed: int, n_agents: int) -> list[np.random.Generator]",
+      "description": "seed_everything seeds random, numpy legacy global, torch.manual_seed and torch.cuda.manual_seed_all (C9), and if deterministic calls torch.use_deterministic_algorithms(True) (on CUDA it first sets CUBLAS_WORKSPACE_CONFIG=':4096:8' if unset). spawn_agent_rngs uses np.random.SeedSequence(seed).spawn(n_agents) and returns np.random.default_rng(child) per agent, in Agent.id order."
+    },
+    {
+      "module": "abmem/services/simulation/context.py",
+      "signature": "class RunPhase(enum.Enum): TRAIN = 'train'; EVALUATE = 'evaluate'\n\n@dataclass\nclass PendingDecision:\n    obs_norm: np.ndarray\n    action: ActionResult\n    u_applied: np.ndarray\n    intervened: bool\n\n@dataclass\nclass AgentRuntimeState:\n    agent: Agent\n    policy: BaseAgentAlgorithm\n    rng: np.random.Generator\n    plants: tuple[Plant, ...]\n    total_capacity: Decimal\n    failstack: FailStackState\n    failstack_params: FailStackParams | None\n    prev: PendingDecision | None = None\n    last_outcomes: tuple[OfferOutcome, ...] = ()\n\n@dataclass\nclass SimulationContext:\n    simulation: Simulation\n    market: Market\n    seed: int\n    price_low: Decimal\n    price_high: Decimal\n    demand: DemandSeries\n    normalizer: ObservationNormalizer\n    agents: list[AgentRuntimeState]\n    ptf_history: dict[int, Decimal]\n    phase: RunPhase\n    step_logger: StepLogger\n    export_json: bool = True\n\n    @classmethod\n    def build(cls, simulation: Simulation, algorithm_overrides: Mapping[str, Any] | None = None, *, forced_algorithm: AlgorithmType | None = None, export_json: bool = True) -> 'SimulationContext'\n    def phase_for(self, t: int) -> RunPhase",
+      "description": "build: (1) validates market.upperBidBound > lowerBidBound, DemandSeries.validate_horizon(periodNumber), every agent has >= 1 plant with capacity > 0, (2) seed_everything(simulation.seed), (3) normaliser from DemandSeries training portion (OQ-2) and bounds, (4) for each agent ordered by id: PolicySpec from plants ordered by id, params = algorithm_overrides if given else None (OQ-9 later adds agent params), policy = registry.build_policy(forced_algorithm or agent.algorithm_type, ...), agent.runtime_policy = policy, FailStackParams.from_agent(agent). forced_algorithm and algorithm_overrides are used by HPO (K7). Raises SimulationValidationError with a readable message before any Period is created. phase_for returns TRAIN unless OQ-5 defines an evaluation window."
+    },
+    {
+      "module": "abmem/services/agent/agent_service.py",
+      "signature": "def step(ctx: SimulationContext, rt: AgentRuntimeState, t: int) -> list[Offer]",
+      "description": "Implements ARCHITECTURE.md 6.1 exactly: build_observation once (C2), reward of t-1 over all plants with compute_reward (C1, B2), fail-stack counter update from rt.last_outcomes, Transition(prev.obs_norm, prev.u_applied, r, obs_norm, ...) only if prev exists, obs is complete, phase is TRAIN and the policy is learning, then policy.update(). Action: policy.select_action(obs_norm, explore=phase is TRAIN) if obs is complete or the policy is a baseline, otherwise the pre-learning action of OQ-1. Prices via action_space.to_price with market bounds (B6). Interventions via failstack.apply_interventions when failstack_params is not None. u_applied = from_price(applied prices). rt.prev updated. policy.end_period() once (1.4). Returns unsaved Offer objects (amount = plant capacity) in plant order. Writes one StepLogger row for t >= 2."
+    },
+    {
+      "module": "abmem/services/market/market_service.py",
+      "signature": "def run_period(ctx: SimulationContext, t: int) -> Period",
+      "description": "Creates Period(t, demand = ctx.demand.at(t), ptf = -1 sentinel kept for the status view), sets Market.state WAITINGAGENTS (update_fields), calls agent_service.step for every agent in ctx.agents order, builds clearing.Bid list, calls clear_market and acceptance_prices, fills acceptance, acceptancePrice, acceptanceAmount, computes offer_profit per offer and updates Agent.budget in Decimal, Offer.objects.bulk_create, Period.save(update_fields=['ptf','metDemand','marketVolume']), Agent.objects.bulk_update(agents, ['budget','state']), StepLogger.flush(), ctx.ptf_history[t] = ptf, rt.last_outcomes set from the cleared offers, Market.state PERIODEND (update_fields). Wrapped in transaction.atomic per period."
+    },
+    {
+      "module": "abmem/services/simulation/simulation_service.py",
+      "signature": "def run(simulation: Simulation | int, *, algorithm_overrides: Mapping[str, Any] | None = None, forced_algorithm: AlgorithmType | None = None, export_json: bool = True) -> Simulation",
+      "description": "Loads the simulation if an id is given. Requires state CREATED and market CREATED, else raises. Builds the context, sets currentPeriod and day as today (day increments every 24 periods), loops t = 1..periodNumber, honours PERIODBYPERIOD waiting on Market.state PERIODEND with 0.2 s polling, calls market_service.run_period, sets STARTED after the first period and FINISHED at the end. On SimulationValidationError or runtime exception: logs the traceback and sets the failure state of OQ-8 (proposal STOPPED). Returns the simulation. Called by bootstrap.run_simulation_process and directly by HPO workers."
+    },
+    {
+      "module": "abmem/services/diagnostics/step_logger.py",
+      "signature": "class StepLogger:\n    def __init__(self) -> None\n    def add(self, agent: Agent, period: Period, reward: float | None, stats: UpdateStats | None, exploration_scale: float | None, intervened: Sequence[bool], learning_active: bool, evaluation_phase: bool) -> None\n    def flush(self) -> int",
+      "description": "Buffers AgentStepLog instances and bulk_creates them in flush (returns row count). Non-finite floats are stored as None and listed in extra['non_finite'] with a logging.WARNING."
+    }
+  ],
+  "data_model_changes": "none (consumes data_model 0010 and 0012)",
+  "migrations": "none",
+  "invariants": [
+    "No module-level mutable state in agent_service, market_service, simulation_service (B10). grep test asserts no 'global' statement in these modules.",
+    "The observation stored as next_obs at step t is the same array object content used for the decision at t (C2).",
+    "Rewards reach the buffer as float32 equal to compute_reward output (C1).",
+    "With failstack disabled for all agents, no intervention happens and AgentStepLog.intervened_plants is all False.",
+    "Agents are processed in Agent.id order. Plants in Plant.id order. Same seed gives identical offers, PTFs and budgets on CPU (1.10).",
+    "Every policy starts training in the same period for the same learning_starts (off-policy algorithms).",
+    "Per period: exactly one Offer per plant, one AgentStepLog per agent for t >= 2, Period.ptf set and > lowerBidBound - 1.",
+    "Database writes per period are O(1) bulk statements, not O(agents x states)."
+  ],
+  "edge_cases": [
+    "periodNumber = 1: one period, no reward, no transition, no log row.",
+    "Simulation shorter than 170 periods: no transition stored (K2), runs to FINISHED, learning_active False everywhere.",
+    "Agent with one plant and agent with five plants in the same market.",
+    "All agents baselines: no learning, still FINISHED.",
+    "Demand horizon too short: SimulationValidationError before Period 1, failure state set, no Period rows.",
+    "upperBidBound <= lowerBidBound: validation error.",
+    "Market not in CREATED (re-run of a finished simulation): ValueError, the view clones a new run instead.",
+    "PERIODBYPERIOD: user never presses next, the process keeps polling (unchanged behaviour).",
+    "Exception inside a policy update: period transaction rolled back, failure state set, traceback logged."
+  ],
+  "test_plan": [
+    "test_agent_step.py: fake context with stub policy recording observe() calls. At t = 171 the observed transition has obs equal to the obs passed to select_action at t = 170 and next_obs equal to the obs at t = 171 (C2). Reward equals compute_reward over all plants (B2). With failstack enabled and forced failures, intervention after L steps only (1.5). Stub baseline policy never gets interventions.",
+    "test_market_period.py: two agents, deterministic stub policies, check bulk-created offers, budgets equal initial + sum offer_profit, ptf_history updated, Period fields, Market.state PERIODEND.",
+    "test_simulation_run.py: 5-period run with RANDOM and MARGINAL_COST agents reaches FINISHED. 200-period run with one DDPG agent: AgentStepLog has 199 rows per agent, learning_active True from the first period with len(buffer) >= learning_starts.",
+    "test_two_runs_same_process.py: run two different scenarios back to back in one process, agent counts and Offer.period.market == agent.market for all offers (1.8, the 18 840 inconsistent offers case).",
+    "test_reproducibility.py: same seed twice -> identical offer prices, PTFs and budgets. Different seeds -> different prices for RANDOM.",
+    "test_web_run_integration.py: Django test client creates a proxy scenario (2 agents), GET /dev/simulation/run/<id>/ with starter patched to run synchronously, run reaches FINISHED with 5 periods (1.9).",
+    "test_run_benchmark.py (slow): 8 agents x 336 periods wall time recorded before (baseline commit) and after (1.12), result written to the test report only."
+  ],
+  "research_debug": {
+    "bug_type": "C and B (wiring of C1, C2, C7, B1, B2, B5, B6, B10)",
+    "bug_impact_required": true,
+    "bug_impact_note": "This is the commit that changes simulation outputs. BUG-IMPACT must state that every DRL result before it had zero reward and mismatched transitions, fail-stack differed per algorithm, and runs in one process could leak agents."
+  },
+  "acceptance_criteria": [
+    "Web run works again (A2)",
+    "All runtime tests green",
+    "No import of deleted modules anywhere (python -m compileall and pytest import scan)"
+  ],
+  "out_of_scope": [
+    "UI changes for algorithm and fail-stack (algorithm_selection_ui)",
+    "Copy consolidation in views (agent_library ui package)",
+    "HPO (hpo)"
+  ],
+  "blocked_by_open_questions": [],
+  "approval_note": "Approved by the user on 2026-10-06. Open questions OQ-1..OQ-19 are resolved in ARCHITECTURE.md section 11. The entries in resolved_open_questions are binding and override any wording below that says \"proposal\", \"per OQ-x\" or \"if approved\".",
+  "resolved_open_questions": {
+    "OQ-1": "Lag set per simulation (Simulation.observation_lags), default [1, 24], [1, 24, 168] opt-in. Until all configured lags exist a learning agent bids u ~ Uniform[-1, 1]^n from its own rng and the step is NOT stored in the buffer.",
+    "OQ-2": "Demand scaling constants DEMAND_SCALING_MEAN / DEMAND_SCALING_STD computed once from all 8808 valid DEMAND values of marketData.xlsx, a test checks them against the file.",
+    "OQ-5": "Simulation.evaluation_periods: the last N periods run with explore=False and no learning (RunPhase.EVALUATE).",
+    "OQ-7": "Smoke tests use 60 periods with default lags [1, 24]. Expected AgentStepLog rows per agent = T - 1. Learning-path smoke runs use a TEST-ONLY config override batch_size = 8, learning_starts = 8 so that updates happen within 60 periods. Production defaults (OQ-3) are unchanged.",
+    "OQ-8": "New SimulationState.FAILED enum value plus Simulation.error text field. Any exception in a run sets FAILED and stores the message.",
+    "OQ-9": "Agent.algorithm_params (JSON) plus AlgorithmDefault model, both added by data_model (migration 0012). Effective params = AlgorithmDefault for the type, overridden by Agent.algorithm_params, overridden by HPO overrides."
+  },
+  "resolved_behaviour": [
+    "build: params = algorithm_overrides if given, else AlgorithmDefault merged with Agent.algorithm_params (OQ-9). lags = Simulation.observation_lags. normaliser = ObservationNormalizer.for_market(lags, low, high) (OQ-2).",
+    "step: when the observation is incomplete, a learning agent bids u ~ Uniform[-1, 1]^n from rt.rng and no transition is stored (OQ-1).",
+    "phase_for(t) returns EVALUATE for t > periodNumber - evaluation_periods, else TRAIN (OQ-5).",
+    "run_simulation: any exception sets SimulationState.FAILED and Simulation.error before re-raising (OQ-8).",
+    "No migration in this spec: seed, observation_lags, evaluation_periods and error come from data_model 0010."
+  ]
+}

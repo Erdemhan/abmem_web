@@ -1,0 +1,156 @@
+{
+  "spec_id": "faz0_infra",
+  "title": "Faz 0 infrastructure: git baseline, tracked migrations, dependencies, settings, import side effects, test harness, FORMULATION outline",
+  "status": "approved",
+  "phase": "Faz 0",
+  "wave": 0,
+  "plan_items": [
+    "0.1",
+    "0.2",
+    "0.3",
+    "0.4",
+    "0.5",
+    "0.6",
+    "0.7"
+  ],
+  "defects": [
+    "A5",
+    "A6",
+    "A9 (tests, requirements)"
+  ],
+  "decisions": [
+    "K11"
+  ],
+  "purpose": "Make the repository reproducible and testable without changing simulation behaviour. Every later spec depends on this one because it removes import-time side effects in about 20 modules and introduces the pytest harness and the process entry points.",
+  "depends_on": [],
+  "behaviour_change": "none (refactor and infrastructure only). Characterization tests pin the current behaviour, including known defects.",
+  "work_steps": [
+    "0.1 Create branch from 'serial' (proposed name 'refactor/plan-2026-10'), run 'git status', 'git check-ignore -v' on every untracked path, stage everything except abc_log/, abc_logs/ and git-ignored files, commit 'chore: baseline of uncommitted work before PLAN.md fixes'.",
+    "0.2 Determine why abmem/migrations/ is ignored: the repository .gitignore has no 'migrations' entry, so check '.git/info/exclude' and 'git config core.excludesFile' with 'git check-ignore -v abmem/migrations/0001_initial.py'. Remove the rule at its source or add '!abmem/migrations/' to .gitignore. Track 0001-0003. Run 'python manage.py makemigrations --check --dry-run' and record the result. If model and DB differ, stop and report (do not generate a migration in this spec).",
+    "0.3 Generate requirements.txt from E:/Anaconda/envs/rlearning with pinned versions for the packages actually imported (torch, Django, django-enumfield, psycopg2 or psycopg2-binary, pandas, openpyxl, numpy, PyYAML, channels and channels-redis while K10 is pending, pytest, pytest-django). Add an installation section to README.md (create README.md if absent).",
+    "0.4 settings.py reads SECRET_KEY, DEBUG, DB_NAME, DB_USER, DB_PASSWORD, DB_HOST, DB_PORT, ALLOWED_HOSTS from environment variables via os.environ with documented defaults only for non-secret values. Add .env.example. Keep .env ignored. A missing SECRET_KEY raises ImproperlyConfigured unless DEBUG is true.",
+    "0.5 Remove every sys.path.append(...) and every import-time django.setup(). Create abmem/bootstrap.py with setup_django() and process entry functions. Replace script-style imports in services/algorithms/optimization ('from moabc import MOABC', 'from abc_logger import ABCLogger', 'from hyperparam_optimization import ...') with package imports. Replace DATAPATH and other CWD-relative paths with pathlib paths anchored at settings.BASE_DIR.",
+    "0.6 Add pytest.ini, conftest.py, tests/ package, tests/factories.py (plain builder functions, no new dependency) and characterization tests.",
+    "0.7 Create .claude/context/FORMULATION.md from ~/.claude/templates/FORMULATION.md with only the section outline of ARCHITECTURE.md section 10. No equations or values are written without explicit user approval."
+  ],
+  "files": {
+    "create": [
+      "abmem/bootstrap.py",
+      "requirements.txt",
+      ".env.example",
+      "README.md (if absent, otherwise modify)",
+      "pytest.ini",
+      "conftest.py",
+      "tests/__init__.py",
+      "tests/factories.py",
+      "tests/characterization/__init__.py",
+      "tests/characterization/test_clearing_current.py",
+      "tests/characterization/test_budget_current.py",
+      "tests/characterization/test_period_creation_current.py",
+      "tests/test_bootstrap.py",
+      ".claude/context/FORMULATION.md (outline only)"
+    ],
+    "modify": [
+      ".gitignore (only if needed for migrations negation)",
+      "web_project/settings.py",
+      "web_project/asgi.py (remove duplicate DJANGO_SETTINGS_MODULE line ordering issue only)",
+      "manage.py (verify it is the only setup point for CLI)",
+      "abmem/constants/__init__.py",
+      "abmem/constants/paths.py",
+      "abmem/services/__init__.py",
+      "abmem/services/agent/__init__.py",
+      "abmem/models/agent.py (lines 1-2 only)",
+      "abmem/models/market.py (lines 1-2 only)",
+      "abmem/models/simulation.py (lines 2-3 only)",
+      "abmem/services/visualization/visualization_service.py (sys.path only)",
+      "abmem/services/starter/resource_service.py (sys.path only)",
+      "abmem/services/starter/resource_factory.py (sys.path only)",
+      "abmem/services/starter/starter_service.py (remove django.setup at line 17, use bootstrap.run_simulation_process as Process target with spawn context, pass simulation id)",
+      "abmem/services/market/market_factory.py (sys.path only)",
+      "abmem/services/simulation/simulation_factory.py (sys.path only)",
+      "abmem/services/simulation/simulation_service.py (lines 1-2 only)",
+      "abmem/services/simulation/serial_service.py (lines 9-12 only)",
+      "abmem/services/simulation/parallel_service.py (lines 9-12 only)",
+      "abmem/services/agent/offer_factory.py (sys.path only)",
+      "abmem/services/agent/portfolio_factory.py (sys.path only)",
+      "abmem/services/agent/agent_service.py (lines 1-5 only)",
+      "abmem/services/file_reader/reader_service.py (DATAPATH resolution only)",
+      "abmem/services/algorithms/optimization/hyperparam_optimization.py (sys.path, django.setup, imports)",
+      "abmem/services/algorithms/optimization/moabc.py (imports only)",
+      "abmem/services/algorithms/optimization/optimizer.py (imports and setup via bootstrap)"
+    ],
+    "delete": [],
+    "git_tracked_after": [
+      "abmem/migrations/0001_initial.py",
+      "abmem/migrations/0002_remove_agent_seed.py",
+      "abmem/migrations/0003_remove_agent_seed.py"
+    ]
+  },
+  "public_interfaces": [
+    {
+      "module": "abmem/bootstrap.py",
+      "signature": "def setup_django(settings_module: str = \"web_project.settings\") -> None",
+      "description": "Idempotent. Sets DJANGO_SETTINGS_MODULE via os.environ.setdefault and calls django.setup() once per process. Safe to call twice."
+    },
+    {
+      "module": "abmem/bootstrap.py",
+      "signature": "def run_simulation_process(simulation_id: int) -> None",
+      "description": "Top-level picklable Process target. Calls setup_django(), then imports abmem.services.simulation.simulation_service lazily and runs the simulation with the given id. Must not import abmem.models at module import time."
+    },
+    {
+      "module": "abmem/bootstrap.py",
+      "signature": "def init_hpo_worker() -> None",
+      "description": "Pool initializer: setup_django(), torch.set_num_threads(1), django.db.connections.close_all(). Used by hpo.service."
+    },
+    {
+      "module": "abmem/services/starter/starter_service.py",
+      "signature": "def start(simulation: Simulation) -> int",
+      "description": "Unchanged name and return value (simulation id). For non-proxy simulations closes DB connections and starts multiprocessing.get_context('spawn').Process(target=bootstrap.run_simulation_process, args=(simulation.id,)). Proxy simulations are not started (current behaviour)."
+    },
+    {
+      "module": "abmem/constants/paths.py",
+      "signature": "DATA_DIR: Final[pathlib.Path]",
+      "description": "Absolute path to abmem/data resolved from Path(__file__). All file readers use it."
+    }
+  ],
+  "data_model_changes": "none",
+  "migrations": "none created. 0001-0003 become tracked.",
+  "invariants": [
+    "No module under abmem/ calls sys.path.append or django.setup() at import time (enforced by tests/test_bootstrap.py scanning source with ast).",
+    "Importing abmem.services.simulation.simulation_service inside a configured Django process has no side effect besides module definitions.",
+    "No secret value is present in tracked files after 0.4.",
+    "Simulation behaviour is byte-identical to the baseline commit for a fixed seed (characterization tests)."
+  ],
+  "edge_cases": [
+    "setup_django called twice in one process: second call is a no-op.",
+    "Missing environment variables: non-secret defaults apply, missing SECRET_KEY with DEBUG false raises ImproperlyConfigured.",
+    "Spawned child on Windows: target is module-level function in a module without ORM imports at top level.",
+    "Paths: DATA_DIR resolves correctly when the CWD is not the repository root (test changes CWD to a temp dir).",
+    "Test database: pytest-django creates 'test_abmem' on PostgreSQL. If the DB role lacks CREATEDB, tests fail with a clear message documented in README."
+  ],
+  "test_plan": [
+    "tests/test_bootstrap.py: AST scan asserts no sys.path.append and no top-level django.setup() call in abmem/**/*.py. setup_django idempotence.",
+    "tests/characterization/test_clearing_current.py: current marketClearing on (a) distinct prices example from analiz.md 3.5 (A=400@50, B=300@70, C=500@90, D=200@120, D=1000 -> 400/300/300/0, PTF=90), (b) the B4 example (A=100, B=10 same price, D=60) asserting the CURRENT result (B=10, A=20, 30 MWh accepted) with marker 'characterization_changes_in_1_7', (c) supply shortfall, (d) zero demand.",
+    "tests/characterization/test_budget_current.py: budgetCalculation accepted and rejected cases with explicit costs.",
+    "tests/characterization/test_period_creation_current.py: createPeriod uses marketData['demand'][currentPeriod] (current indexing, pinned until 1.7).",
+    "Manual: 'python manage.py check' passes, 'python manage.py makemigrations --check --dry-run' result recorded in the commit message."
+  ],
+  "research_debug": {
+    "bug_type": "A",
+    "bug_impact_required": false
+  },
+  "acceptance_criteria": [
+    "pytest runs green on the rlearning environment.",
+    "git ls-files shows the three migrations and requirements.txt.",
+    "settings.py contains no literal secret or password."
+  ],
+  "out_of_scope": [
+    "Any behaviour change of the simulation",
+    "Removal of channels (websocket_removal spec)"
+  ],
+  "blocked_by_open_questions": [],
+  "approval_note": "Approved by the user on 2026-10-06. Open questions OQ-1..OQ-19 are resolved in ARCHITECTURE.md section 11. The entries in resolved_open_questions are binding and override any wording below that says \"proposal\", \"per OQ-x\" or \"if approved\".",
+  "resolved_open_questions": {
+    "OQ-10": "FORMULATION.md lives at the repository root."
+  }
+}

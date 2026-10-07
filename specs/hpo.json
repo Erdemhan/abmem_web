@@ -1,0 +1,223 @@
+{
+  "spec_id": "hpo",
+  "title": "Standard ABC optimizer, DB-backed HPO service with multi-seed evaluation and retention, HPO UI and watch screen",
+  "status": "approved",
+  "phase": "Faz 1 (1.11) and Faz 2 (2.4)",
+  "wave": "1 (package abc), 4 (package service), 6 (package ui)",
+  "plan_items": [
+    "1.8 (per-study bounds copy)",
+    "1.11",
+    "2.4"
+  ],
+  "defects": [
+    "C8",
+    "C9 (multi-seed)",
+    "B9",
+    "B10 (PARAM_BOUNDS.update)"
+  ],
+  "decisions": [
+    "K7",
+    "K8",
+    "K9"
+  ],
+  "purpose": "Replace MOABC (single-objective in practice, onlookers identical to employed bees, single seed, JSON-file scoring) by a standard ABC (Karaboga 2005) with an optional Pareto mode (Deb 2001), evaluate candidates on several seeds from the database, keep summary rows and purge evaluation data per K9, and provide a web UI to create, watch, cancel and apply studies.",
+  "depends_on": {
+    "abc": [
+      "faz0_infra"
+    ],
+    "service": [
+      "data_model (HPOStudy, HPOTrial)",
+      "runtime_core (simulation_service.run with forced_algorithm and algorithm_overrides)",
+      "agent_library.service (clone_scenario_for_run)",
+      "rl_core (AlgorithmConfig.default_search_bounds, CONFIG_CLASSES)"
+    ],
+    "ui": [
+      "service",
+      "agent_library.ui (views.py and urls.py edited in wave 5)"
+    ]
+  },
+  "work_packages": [
+    {
+      "id": "hpo.abc",
+      "wave": 1,
+      "files": {
+        "create": [
+          "abmem/services/hpo/__init__.py",
+          "abmem/services/hpo/param_space.py",
+          "abmem/services/hpo/abc_optimizer.py",
+          "abmem/services/hpo/pareto.py",
+          "tests/hpo/__init__.py",
+          "tests/hpo/test_param_space.py",
+          "tests/hpo/test_abc_optimizer.py",
+          "tests/hpo/test_pareto.py"
+        ],
+        "modify": [],
+        "delete": []
+      },
+      "notes": "Pure numpy, no Django, no torch. Evaluation is injected as a callable so the optimizer can be tested on synthetic functions."
+    },
+    {
+      "id": "hpo.service",
+      "wave": 4,
+      "files": {
+        "create": [
+          "abmem/services/hpo/hpo_service.py",
+          "abmem/services/hpo/worker.py",
+          "abmem/services/hpo/objective.py",
+          "abmem/services/hpo/retention.py",
+          "abmem/management/commands/run_hpo.py",
+          "abmem/hpo_urls.py (urlpatterns = [] placeholder, filled by hpo.ui)",
+          "tests/hpo/test_objective.py",
+          "tests/hpo/test_hpo_service.py",
+          "tests/hpo/test_retention.py"
+        ],
+        "modify": [
+          "abmem/urls.py (single line: path('hpo/', include('abmem.hpo_urls')))",
+          "abmem/services/algorithms/optimization/optimizer.py (thin wrapper calling the run_hpo command logic, PLAN 2.4)"
+        ],
+        "delete": [
+          "abmem/services/algorithms/optimization/hyperparam_optimization.py",
+          "abmem/services/algorithms/optimization/moabc.py",
+          "abmem/services/algorithms/optimization/abc_logger.py"
+        ]
+      }
+    },
+    {
+      "id": "hpo.ui",
+      "wave": 6,
+      "files": {
+        "create": [
+          "abmem/views_hpo.py",
+          "abmem/forms_hpo.py",
+          "abmem/templates/pages/hpo-list.html",
+          "abmem/templates/pages/hpo-create.html",
+          "abmem/templates/pages/hpo-watch.html",
+          "tests/views/test_hpo_views.py"
+        ],
+        "modify": [
+          "abmem/hpo_urls.py",
+          "abmem/static/assets/components/sidebar.html (new 'Hyperparameter Search' entry)",
+          "abmem/views.py (simulation_list excludes HPO evaluation runs: filter(proxy=False, hpo_trial__isnull=True), dashboard counts likewise)"
+        ],
+        "delete": []
+      },
+      "notes": "Apply-best-parameters target depends on OQ-9. If approved, this package adds the model field(s) and migration 0012 (or the next free number) and registry.build_policy parameter resolution."
+    }
+  ],
+  "public_interfaces": [
+    {
+      "module": "abmem/services/hpo/param_space.py",
+      "signature": "@dataclass(frozen=True)\nclass ParamSpec:\n    name: str\n    low: float\n    high: float\n    scale: Literal['linear', 'log', 'int']\n\n    def to_unit(self, value: float) -> float\n    def from_unit(self, u: float) -> float | int\n\n@dataclass(frozen=True)\nclass ParamSpace:\n    specs: tuple[ParamSpec, ...]\n    def decode(self, x: np.ndarray) -> dict[str, float | int]\n    def sample(self, rng: np.random.Generator) -> np.ndarray\n    @classmethod\n    def from_bounds(cls, bounds: Mapping[str, Mapping[str, Any]]) -> 'ParamSpace'",
+      "description": "Search happens in the unit cube [0,1]^D. 'log' maps through log10 (requires low > 0), 'int' rounds on decode. Validation: low < high, finite, names unique. Each study builds its own ParamSpace from HPOStudy.param_bounds (no module-level dict, B10)."
+    },
+    {
+      "module": "abmem/services/hpo/abc_optimizer.py",
+      "signature": "@dataclass(frozen=True)\nclass ABCSettings:\n    colony_size: int\n    max_iter: int\n    limit: int\n    mode: Literal['weighted', 'pareto']\n    weights: tuple[float, float] = (1.0, 0.0)\n\nEvaluateBatch = Callable[[Sequence[CandidateRequest]], Sequence[CandidateScore]]\n\n@dataclass(frozen=True)\nclass CandidateRequest:\n    iteration: int\n    phase: HPOPhaseName\n    source_index: int\n    x: np.ndarray\n\n@dataclass(frozen=True)\nclass CandidateScore:\n    request: CandidateRequest\n    objectives: tuple[float, float]\n\nclass ArtificialBeeColony:\n    def __init__(self, space: ParamSpace, settings: ABCSettings, evaluate: EvaluateBatch, rng: np.random.Generator, should_stop: Callable[[], bool] = lambda: False) -> None\n    def run(self) -> 'ABCResult'",
+      "description": "Karaboga (2005), Karaboga and Basturk (2007). SN = colony_size food sources initialised uniformly. Employed phase: for each i, pick k != i and one random dimension j, v_ij = x_ij + phi * (x_ij - x_kj), phi ~ U[-1, 1], clip to [0, 1], greedy selection, trial counter update. Onlooker phase: SN onlookers choose sources with probability p_i = fit_i / sum fit (roulette wheel) and apply the same move and greedy selection. Scout phase: the single source with the largest trial counter is replaced by a uniform random source if its counter exceeds limit. Weighted mode: score = w1 * agent + w2 * market, cost c = -score, fit = 1 / (1 + c) if c >= 0 else 1 + |c|. Pareto mode: greedy replacement only if the candidate Pareto-dominates the current source (Deb 2001), fit_i = 1 / rank_i from fast non-dominated sorting of current sources, external archive of all non-dominated evaluated candidates. Evaluations of one phase are submitted as one batch (synchronous variant, OQ-19). should_stop is checked before every batch (cancel). Fully determined by rng."
+    },
+    {
+      "module": "abmem/services/hpo/abc_optimizer.py",
+      "signature": "@dataclass(frozen=True)\nclass ABCResult:\n    best_x: np.ndarray\n    best_objectives: tuple[float, float]\n    archive: tuple[CandidateScore, ...]\n    history: tuple[tuple[int, float], ...]\n    stopped: bool",
+      "description": "history holds (iteration, best scalar score so far) for the watch chart. In Pareto mode best is selected per OQ-11."
+    },
+    {
+      "module": "abmem/services/hpo/pareto.py",
+      "signature": "def dominates(a: Sequence[float], b: Sequence[float]) -> bool\ndef non_dominated_sort(points: Sequence[Sequence[float]]) -> list[int]\ndef pareto_front(points: Sequence[Sequence[float]]) -> list[int]",
+      "description": "Maximisation. dominates: a >= b in all objectives and > in at least one (Deb 2001). non_dominated_sort returns rank per point (1 = first front)."
+    },
+    {
+      "module": "abmem/services/hpo/objective.py",
+      "signature": "@dataclass(frozen=True)\nclass TrialScores:\n    agent_score: float\n    market_score: float\n\ndef score_simulation(simulation: Simulation, periods: range | None = None) -> TrialScores",
+      "description": "Computed from the database (1.11), not from JSON. Per agent over the scored periods: profit_total = sum offer_profit (equals final minus true initial budget, B9), capacity = total plant capacity (B9), P_max = Market.upperBidBound (not 200). Default definitions are the legacy agent_score and market_score of docs/legacy_rewards.md with these B9 corrections. The study objective combines them with per-study weights (OQ-11). periods defaults to all periods (or the evaluation window Simulation.evaluation_periods, OQ-5)."
+    },
+    {
+      "module": "abmem/services/hpo/hpo_service.py",
+      "signature": "def validate_study_input(data: Mapping[str, Any]) -> dict[str, Any]\ndef create_study(data: Mapping[str, Any]) -> HPOStudy\ndef start(study: HPOStudy) -> None\ndef request_cancel(study: HPOStudy) -> None\ndef run_study(study_id: int) -> None\ndef param_space_payload(algorithm_type: AlgorithmType) -> dict[str, Any]",
+      "description": "validate_study_input: scenario is a proxy Simulation, bounds keys are fields of the algorithm's config class (or failstack_limit / failstack_delta when fail-stack is enabled), low < high within dataclass validation ranges, colony_size >= 2, seeds non-empty, distinct, search and evaluation seeds disjoint. start: closes DB connections, spawns multiprocessing.get_context('spawn').Process(target=bootstrap.run_hpo_process, args=(study.id,)). run_study (in that process): status RUNNING, builds ParamSpace and ArtificialBeeColony with an evaluate callback that expands each candidate into (candidate, seed) tasks for all search seeds, runs them in Pool(processes=min(cpu_count(), n_tasks), initializer=bootstrap.init_hpo_worker, maxtasksperchild=1), writes HPOTrial rows, averages per candidate, applies retention, checks cancel_requested between batches. After the search: FINAL_EVAL phase on evaluation_seeds for the best candidate, best_params and best_score from FINAL_EVAL, status FINISHED. Any exception: status FAILED, error = last 4000 characters of the traceback. Cancel: pool.terminate(), status CANCELED. param_space_payload returns defaults and default bounds from AlgorithmConfig for the create form."
+    },
+    {
+      "module": "abmem/services/hpo/worker.py",
+      "signature": "def evaluate_task(task: EvaluationTask) -> TrialOutcome",
+      "description": "Top-level picklable. Clones the scenario with library_service.clone_scenario_for_run(seed=task.seed, forced_algorithm=study.algorithm_type (K7), algorithm_overrides=decoded algorithm params, fixed_agent_fields=fail-stack settings from fixed_params and searched failstack_limit/failstack_delta), runs simulation_service.run(sim, export_json=False) in-process, scores with score_simulation, updates the HPOTrial row (status, scores, duration, simulation). Failures mark the trial FAILED with error text and return objectives (-inf, -inf) so the candidate is never selected (documented in FORMULATION)."
+    },
+    {
+      "module": "abmem/services/hpo/retention.py",
+      "signature": "def purge_simulation_details(simulation: Simulation) -> None\ndef apply_retention(study: HPOStudy, best_candidate_key: tuple[int, int, int] | None) -> None",
+      "description": "K9: purge deletes Period (cascades Offer and AgentStepLog) of a scored evaluation simulation and keeps the Simulation, Market and Agent rows. apply_retention keeps full data only for the trials of the current best candidate and purges everything else that is FINISHED, including the previous best when it is displaced."
+    },
+    {
+      "module": "abmem/bootstrap.py (extended by hpo.service)",
+      "signature": "def run_hpo_process(study_id: int) -> None",
+      "description": "setup_django() then hpo_service.run_study(study_id)."
+    },
+    {
+      "module": "abmem/views_hpo.py",
+      "signature": "def study_list(request: HttpRequest) -> HttpResponse\ndef study_create(request: HttpRequest) -> HttpResponse\ndef param_space(request: HttpRequest) -> JsonResponse\ndef study_watch(request: HttpRequest, study_id: int) -> HttpResponse\ndef study_status(request: HttpRequest, study_id: int) -> JsonResponse\ndef study_cancel(request: HttpRequest, study_id: int) -> JsonResponse\ndef study_apply(request: HttpRequest, study_id: int) -> JsonResponse",
+      "description": "URL map in ARCHITECTURE.md section 8. study_status JSON: {status, started_at, finished_at, progress: {done, total}, best_score, best_params, history: [[iteration, best]], scatter: [[agent_score, market_score, phase, is_archive]], trials: [{iteration, phase, source_index, seed, params, agent_score, market_score, status, duration_s}], error}. total = colony_size + max_iter * 2 * colony_size + scouts (counted as they occur) times len(search_seeds), plus len(evaluation_seeds). POST views require CSRF tokens. study_apply is blocked by OQ-9."
+    }
+  ],
+  "ui_contract": {
+    "sidebar": "New entry 'Hyperparameter Search' linking to /dev/hpo/.",
+    "create_form": "Scenario select (proxy simulations only), algorithm select, fail-stack on/off (when on: optional inclusion of failstack_limit and failstack_delta in the searched parameters, otherwise fixed values), dynamic parameter bound rows loaded from /dev/hpo/param-space/?algorithm= (min, max, scale, include checkbox, default shown), ABC settings (colony size, iterations, limit), search seeds and evaluation seeds (comma-separated integers), objective settings (mode weighted/pareto and weights).",
+    "watch": "Polling of study_status every 2 s while RUNNING. Progress bar, best-score-per-iteration line chart and agent-score versus market-score scatter (Chart.js already bundled at static/assets/js/plugins/chartjs.min.js), trial table, cancel button (RUNNING only), apply-best button (FINISHED only, OQ-9)."
+  },
+  "data_model_changes": "none (all schema changes are in data_model 0011 and 0012)",
+  "migrations": "none (all schema changes are in data_model)",
+  "invariants": [
+    "No module-level mutable dict of bounds or algorithm type (B10).",
+    "Every (candidate, seed) evaluation has exactly one HPOTrial row.",
+    "Reported best_score comes from evaluation seeds that were not used in the search (1.11).",
+    "After a FINISHED study only the best candidate's evaluation simulations keep Period/Offer/AgentStepLog rows (K9).",
+    "All scenario agents of an evaluation run use the study algorithm (K7).",
+    "ABC with a fixed rng seed and a deterministic evaluate callback is reproducible."
+  ],
+  "edge_cases": [
+    "colony_size 2: k != i always the other source.",
+    "max_iter 0 rejected (validation), limit larger than possible trial counts: scouts never trigger (logged, not an error).",
+    "All fitness values equal: uniform onlooker probabilities.",
+    "Negative scores in weighted mode: fit = 1 + |c| branch.",
+    "Evaluation failure in a worker: trial FAILED, objectives -inf, study continues. If all evaluations of a batch fail, the study is FAILED.",
+    "Cancel during a batch: the running batch is terminated, its unfinished trials marked FAILED with 'canceled', status CANCELED.",
+    "Server restart while RUNNING: OQ-17.",
+    "Scenario deleted while a study references it: PROTECT error shown in the UI.",
+    "Seeds out of the 0..2^32-1 range: validation error.",
+    "Log-scale bound with low <= 0: validation error."
+  ],
+  "test_plan": [
+    "test_param_space.py: unit-cube round trip, log scale, int rounding, invalid bounds.",
+    "test_abc_optimizer.py: on the negated sphere function in 4-D (known optimum at the origin, a standard benchmark in Karaboga and Basturk 2007) with colony 10, 50 iterations, the best value is within 1e-2 of the optimum (PLAN 1.11 validation). Onlooker selection frequencies follow p_i (chi-square check on a fixed population). Scout triggers when trial > limit. Only one dimension changes per move. Pareto mode keeps a correct archive on a two-objective toy problem.",
+    "test_pareto.py: dominance cases, ranks on a hand example.",
+    "test_objective.py: hand-built simulation with known offers, B9 corrections (initial budget, total capacity, P_max from market).",
+    "test_hpo_service.py: small study (2 sources, 1 iteration, 1 search seed, 1 evaluation seed, 10-period scenario with baselines to keep it fast) run synchronously with the Pool replaced by a serial map: trial count, status FINISHED, best from FINAL_EVAL. Cancel flag set before the second batch -> CANCELED. Injected worker exception -> trial FAILED, study continues.",
+    "test_retention.py: only best candidate keeps periods, displaced best gets purged.",
+    "test_hpo_views.py: create form validation errors, status JSON shape, cancel endpoint, CSRF required."
+  ],
+  "research_debug": {
+    "bug_type": "C (C8, C9) and B (B9)",
+    "bug_impact_required": true,
+    "bug_impact_note": "Results in abc_log/ and abc_logs/ came from about 10 single-seed simulations with zero reward and a non-standard ABC. They must be recomputed."
+  },
+  "acceptance_criteria": [
+    "PLAN 2.4 validation: a 2-source, 1-iteration study started and watched from the UI, cancel and failure paths tested",
+    "PLAN 1.11 validation: synthetic benchmark test green"
+  ],
+  "out_of_scope": [
+    "Celery/RQ (K8 chose processes)",
+    "Storing policies of the best trial (no checkpointing in PLAN)"
+  ],
+  "blocked_by_open_questions": [],
+  "approval_note": "Approved by the user on 2026-10-06. Open questions OQ-1..OQ-19 are resolved in ARCHITECTURE.md section 11. The entries in resolved_open_questions are binding and override any wording below that says \"proposal\", \"per OQ-x\" or \"if approved\".",
+  "resolved_open_questions": {
+    "OQ-5": "Simulation.evaluation_periods: the last N periods run with explore=False and no learning (RunPhase.EVALUATE).",
+    "OQ-9": "Agent.algorithm_params (JSON) plus AlgorithmDefault model, both added by data_model (migration 0012). Effective params = AlgorithmDefault for the type, overridden by Agent.algorithm_params, overridden by HPO overrides.",
+    "OQ-11": "HPO objective = weighted single objective with per-study weights. Pareto front is shown on the watch screen as information only and never used for selection.",
+    "OQ-17": "HPOStudy.heartbeat_at (added by data_model in 0011). Stale RUNNING studies become FAILED after settings.ABMEM_HPO_HEARTBEAT_TIMEOUT.",
+    "OQ-19": "Batch-synchronous parallel ABC accepted. It must be documented in FORMULATION.md as a variant of Karaboga (2005), not as classic ABC."
+  },
+  "resolved_behaviour": [
+    "Objective: weighted single objective, weights per study. The Pareto front is computed for the watch screen only (OQ-11).",
+    "HPOStudy.heartbeat_at comes from data_model 0011, Agent.algorithm_params and AlgorithmDefault from data_model 0012. The hpo ui package adds NO migration (OQ-9, OQ-17).",
+    "The FINAL_EVAL phase uses Simulation.evaluation_periods (OQ-5).",
+    "ABC is the batch-synchronous parallel variant, documented in FORMULATION.md (OQ-19)."
+  ]
+}
