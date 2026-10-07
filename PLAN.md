@@ -262,9 +262,9 @@ Spec: `specs/pluggable_algorithms.json`. Starts after 2.9 is merged (migration 0
 
 ### 2.11 Watch progress, offers table and chart zoom in analysis (request 11, approved 2026-10-07)
 Spec: `specs/watch_analysis_ui.json`. Independent of 2.10.
-- [ ] **Watch:** the per-period offer tables are removed. The page shows the run progress as a chart in percent (completed periods / periodNumber), with period counter, elapsed time and an estimate of the remaining time.
-- [ ] **Analysis offers table:** filter by agent, period range and acceptance, server-side pagination, 10 rows per page by default, page size selectable. The Offers CSV stays.
-- [ ] **Analysis charts:** zoom in/out (wheel, pinch, drag) with a reset button, and a full-screen pop-up button on every chart.
+- [x] **Watch:** the per-period offer tables are removed. The page shows the run progress as a chart in percent (completed periods / periodNumber), with period counter, elapsed time and an estimate of the remaining time.
+- [x] **Analysis offers table:** filter by agent, period range and acceptance, server-side pagination, 10 rows per page by default, page size selectable. The Offers CSV stays.
+- [x] **Analysis charts:** zoom in/out (wheel, pinch, drag) with a reset button, and a full-screen pop-up button on every chart.
 
 ### 2.12 Algorithms tab (request 12, approved 2026-10-07, after 2.10)
 Spec: `specs/algorithms_tab.json`.
