@@ -1,0 +1,65 @@
+{
+  "spec_id": "demand_profile_library",
+  "title": "Demand profile library, demand generator page and demand profile YAML",
+  "status": "approved",
+  "approval_note": "Elaborates PLAN.md 2.9, approved by the user on 2026-10-07: one shared code path with PLAN 2.8, a DB profile library, YAML with settings only, generate in the wizard or import, deletion blocked while a scenario uses a profile (runs do not block).",
+  "plan_items": ["2.9"],
+  "reuse_rule": "No duplicated generator, validation or preview code. Profiles are parsed and validated only by abmem/services/market/demand_generator.py (DemandProfile.from_dict / to_dict / validate). The editor UI is only components/demand_profile_form.html + components/demand_segment_fields.html + components/demand_preview.html + static/assets/js/demand-profile.js (window.DemandProfileForm). Previews only use the existing endpoint simulation/demand-preview/ (name demand_preview). Extend these shared pieces when needed, do not copy them.",
+  "model": {
+    "DemandProfileTemplate": "New model in abmem/models (export it from abmem.models). Fields: name CharField(max_length=100), description TextField(blank=True, default=''), profile JSONField (normalised DemandProfile.to_dict()), plus the Base timestamps if Base provides them. UniqueConstraint(Lower('name'), name='uniq_demand_profile_name_ci'). Ordering by name.",
+    "Simulation.demand_profile_source": "ForeignKey(DemandProfileTemplate, null=True, blank=True, on_delete=SET_NULL, related_name='simulations'). Informational link to the library profile a scenario copy came from. Simulation.demand_profile stays the single source of truth used by runs (the scenario keeps its own copy, editing the library profile later does not change scenarios). duplicate_scenario and clone_scenario_for_run copy the link.",
+    "migration": "0016_demand_profile_template (one migration for both changes)."
+  },
+  "service": {
+    "module": "abmem/services/market/demand_library.py",
+    "interfaces": [
+      "class DemandLibraryError(ValidationError) with field-keyed message_dict, same style as library_service.LibraryValidationError",
+      "def create_profile(name: str, profile: Mapping[str, Any], description: str = '') -> DemandProfileTemplate  (name stripped, non-empty, <=100, case-insensitive unique -> error on 'name'; profile validated through DemandProfile.from_dict, stored as to_dict())",
+      "def update_profile(template: DemandProfileTemplate, name: str, profile: Mapping[str, Any], description: str = '') -> DemandProfileTemplate  (same validation, excluding itself from the name check, does not touch scenarios)",
+      "def duplicate_profile(template: DemandProfileTemplate) -> DemandProfileTemplate  (name '<name> (copy)', then '<name> (copy 2)', ... until free, same pattern as library_service.copy_scenario_name if reusable)",
+      "def scenarios_using(template: DemandProfileTemplate) -> list[Simulation]  (proxy scenarios only, distinct, ordered by id)",
+      "@transaction.atomic def delete_profile(template: DemandProfileTemplate) -> None  (raises DemandLibraryError({'profile': [...]}, code='in_use') naming the scenarios when scenarios_using is not empty; runs never block, their link becomes NULL)",
+      "def find_by_name(name: str) -> DemandProfileTemplate | None  (case-insensitive)"
+    ]
+  },
+  "yaml": {
+    "module": "abmem/demand_profile_yaml.py (reuse helpers of abmem/scenario_yaml.py such as safe loading and error formatting instead of copying them; move a helper to a shared place if needed)",
+    "export_format": {
+      "format_version": 1,
+      "kind": "demand_profile",
+      "name": "library name",
+      "description": "optional text",
+      "demand": "DemandProfile.to_dict() (settings only, never generated values)"
+    },
+    "import_rules": [
+      "Reject unknown format_version, kind other than demand_profile, missing or invalid demand (errors from DemandProfile.from_dict), file too large or invalid YAML, with clear field errors.",
+      "Same name (case-insensitive) and equal normalised profile -> the existing profile is reused (preview says 'already in library').",
+      "Same name and different profile -> error, nothing is written.",
+      "New name -> created on confirm.",
+      "Flow: upload -> preview (name, settings summary, status new/reuse/conflict, chart via the shared preview) -> confirm. Same two-step pattern as the scenario YAML import of PLAN 2.7."
+    ],
+    "scenario_yaml": "scenario.demand of PLAN 2.8 stays unchanged. Optionally accept a 'demand_profile' key with the library name for information, not required."
+  },
+  "pages": {
+    "sidebar": "New entry 'Demand Profiles' next to the existing library entries (agents, resources).",
+    "dashboard": "A 'Demand Profiles' card with the profile count and a 'New profile' button, in the style of the existing dashboard cards.",
+    "list": "demand-profiles/ : table or cards with name, description, day hours, day/night distribution, number of scenarios using it; actions edit, duplicate, export YAML, delete (delete via fetch with Accept JSON, show the in-use error inline like agent-list.html). An 'Import YAML' button.",
+    "create_edit": "demand-profiles/new/ and demand-profiles/<id>/edit/ : name, description, the shared editor, live preview with a selectable number of periods (e.g. 24, 168, 336, 720, default 168) using the shared loader. Server-side validation errors shown per field through DemandProfileForm.showErrors.",
+    "urls": "Named routes demand_profile_list, demand_profile_create, demand_profile_edit, demand_profile_duplicate, demand_profile_delete, demand_profile_export, demand_profile_import_preview, demand_profile_import_confirm, demand_profile_detail_json (returns {id, name, description, profile} for the wizard)."
+  },
+  "wizard": {
+    "source": "Demand source in Advanced becomes File / Generate / From library. 'From library' shows a select of library profiles. Choosing one loads its settings into the shared editor read-only-by-default (with an 'Edit copy' toggle that switches the source to Generate and clears the link). On save the scenario stores a copy in Simulation.demand_profile and sets demand_profile_source. File clears both. Generate sets demand_profile and clears demand_profile_source.",
+    "import": "An 'Import demand YAML' action in the demand section parses a demand_profile YAML on the server (validation only, nothing written) and fills the editor with source Generate.",
+    "save_to_library": "A 'Save to library' action posts the current editor profile with a name (and optional description) to create_profile and shows field errors inline. After saving, the source switches to From library with the new profile selected.",
+    "edit": "Editing an existing scenario shows the stored source (File, Generate or From library with the linked profile when demand_profile_source is set and still equal to the stored copy, otherwise Generate)."
+  },
+  "tests": [
+    "tests/market/test_demand_library.py: create/update/duplicate/delete, case-insensitive name uniqueness, invalid profile errors per field, delete blocked by a scenario and allowed when only runs use it (run link becomes NULL), scenario copy does not change when the library profile is updated.",
+    "tests/views/test_demand_profile_library_views.py: list/create/edit/duplicate/delete pages and JSON errors, export YAML round trip (export -> import of the same file reuses), import conflict (same name, different settings) writes nothing, invalid YAML errors, wizard save with source library stores the copy and the link, File clears both, wizard demand YAML parse endpoint, save-to-library endpoint.",
+    "Migration test or check that 0016 applies on the test DB. Full suite must stay green, including the result fingerprint test."
+  ],
+  "out_of_scope": [
+    "No change to the generator mathematics (FORMULATION EQ-02c) or the observation scaling (EQ-02b).",
+    "No generated values stored anywhere."
+  ]
+}
