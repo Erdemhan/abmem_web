@@ -1,5 +1,5 @@
 from django.urls import include, path
-from . import views, views_analysis
+from . import views, views_analysis, views_scenario
 
 
 urlpatterns = [
@@ -23,6 +23,8 @@ urlpatterns = [
     path('simulation/create/', views.create_simulation, name='create_simulation'),
     path('simulation/run/<int:simulation_id>/', views.run_simulation, name='run_simulation'),
     path('simulation/update/<int:simulation_id>/', views.update_simulation, name='update_simulation'),
+    path('simulation/<int:simulation_id>/duplicate/', views_scenario.duplicate_scenario, name='duplicate_scenario'),
+    path('simulation/demand-stats/', views_scenario.demand_stats, name='demand_stats'),
     path('simulation/watch/<str:simulation_id>/', views.watch_simulation, name='watch_simulation'),
     path('simulation/status/', views.get_simulation_status, name='get_simulation_status'),
     path('simulation/next/', views.nextPeriod, name='nextPeriod'),

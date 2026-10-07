@@ -27,6 +27,7 @@ from abmem.services.agent.library_service import (
     PlantInput,
 )
 from tests.factories import make_agent_with_plants, make_market, make_resource
+from tests.views.wizard_helpers import wizard_config
 
 pytestmark = pytest.mark.django_db
 
@@ -465,22 +466,27 @@ def test_update_page_renders_scenario_rows(client: Client, fossil: Resource) -> 
     html = client.get(
         reverse("update_simulation", args=[simulation.id])
     ).content.decode()
-    assert (
-        f'data-mode="scenario" data-agent-id="{copy.id}" data-source-id="{lib_a.id}"'
-        in html
+    # The wizard renders scenario agents from JSON as "scenario" rows (PLAN 2.6).
+    config = wizard_config(html)
+    (row,) = config["initial"]["agents"]
+    assert (row["mode"], row["agent_id"], row["source_id"], row["source_name"]) == (
+        "scenario",
+        copy.id,
+        lib_a.id,
+        "LibA",
     )
-    assert "Copy of library agent LibA" in html
-    assert 'id="library-modal"' in html
-    assert reverse("agent_library_json") in html
+    assert "Copy of library agent " in html
+    assert 'id="library-cards"' in html
+    assert config["library_url"] == reverse("agent_library_json")
     assert reverse("agent_check_name") in html
 
 
 def test_create_page_renders_library_dialog(client: Client) -> None:
     html = client.get(reverse("create_simulation")).content.decode()
-    assert 'id="library-modal"' in html
-    assert "openLibraryModal()" in html
+    assert 'id="library-cards"' in html
+    assert 'id="library-search"' in html and 'id="library-type-filter"' in html
     assert "addAgent()" not in html
-    assert reverse("agent_library_json") in html
+    assert wizard_config(html)["library_url"] == reverse("agent_library_json")
     assert reverse("agent_check_name") in html
 
 

@@ -70,6 +70,12 @@ SCENARIO_AGENT_MODES: Final[tuple[str, ...]] = (MODE_NEW, MODE_LIBRARY, MODE_SCE
 # check constraint simulation_seed_range (< 2**32) can apply.
 SEED_UPPER_BOUND: Final[int] = 2**31
 
+# Defaults of a new scenario in the wizard (PLAN 2.6): one week of hourly
+# periods and bid bounds of 0-200 TL/MWh.
+WIZARD_DEFAULT_PERIODS: Final[int] = 168
+WIZARD_DEFAULT_LOWER_BOUND: Final[int] = 0
+WIZARD_DEFAULT_UPPER_BOUND: Final[int] = 200
+
 
 def _add_errors(
     errors: dict[str, list[str]], exc: ValidationError, default_key: str, prefix: str
@@ -1051,12 +1057,140 @@ def _parse_scenario_settings(
     return period_number, _parse_run_settings(data, period_number, current)
 
 
+# Upper limit of Simulation.name (varchar column).
+SIMULATION_NAME_MAX_LENGTH: Final[int] = (
+    Simulation._meta.get_field("name").max_length or 20
+)
+
+
+@dataclass(frozen=True)
+class ScenarioHeader:
+    """Validated scenario fields outside the agents and run settings.
+
+    Attributes:
+        name: Scenario name (stripped, at most ``SIMULATION_NAME_MAX_LENGTH``).
+        mode: Simulation mode.
+        period_type: Period type.
+        strategy: Market pricing strategy.
+        lower_bound: Lower bid bound in TL/MWh.
+        upper_bound: Upper bid bound in TL/MWh, greater than ``lower_bound``.
+    """
+
+    name: str
+    mode: enums.SimulationMode
+    period_type: enums.PeriodType
+    strategy: enums.MarketStrategy
+    lower_bound: int
+    upper_bound: int
+
+
+@dataclass(frozen=True)
+class ScenarioPayload:
+    """A completely validated scenario payload (nothing written yet).
+
+    Attributes:
+        header: Name, mode, period type and market settings.
+        period_number: Number of periods.
+        run_settings: Seed, evaluation periods and observation lags.
+        entries: Validated agent entries in payload order.
+    """
+
+    header: ScenarioHeader
+    period_number: int
+    run_settings: RunSettings
+    entries: list[ScenarioAgentEntry]
+
+
+def _coerce_payload_enum(
+    raw_value: Any, enum_cls: Any, field: str, label: str
+) -> Any:
+    """Convert a JSON integer or digit string to a member of ``enum_cls``.
+
+    Args:
+        raw_value: Payload value.
+        enum_cls: Enum class with integer values.
+        field: Error key.
+        label: Human-readable field name for the message.
+
+    Returns:
+        The enum member.
+
+    Raises:
+        ValidationError: With key ``field`` for a missing or unknown value.
+    """
+    value = _coerce_payload_int(raw_value)
+    try:
+        return enum_cls(value)
+    except ValueError:
+        choices = ", ".join(f"{member.value} ({member.name})" for member in enum_cls)
+        raise ValidationError(
+            {field: [f"{label} must be one of {choices}."]}
+        ) from None
+
+
+def _parse_scenario_header(data: Mapping[str, Any]) -> ScenarioHeader:
+    """Validate name, mode, period type, strategy and bid bounds of a payload.
+
+    Args:
+        data: Decoded scenario payload.
+
+    Returns:
+        The validated header.
+
+    Raises:
+        ValidationError: With field keys ``simulation_name``,
+            ``simulationMode``, ``periodType``, ``strategy``, ``lowerBound``
+            and ``upperBound``.
+    """
+    errors: dict[str, list[str]] = {}
+    values: dict[str, Any] = {}
+
+    raw_name = data.get("simulation_name")
+    name = raw_name.strip() if isinstance(raw_name, str) else ""
+    if not name:
+        errors["simulation_name"] = ["Scenario name is required."]
+    elif len(name) > SIMULATION_NAME_MAX_LENGTH:
+        errors["simulation_name"] = [
+            f"Scenario name must have at most {SIMULATION_NAME_MAX_LENGTH} "
+            f"characters ({len(name)} given)."
+        ]
+    for key, field, enum_cls, label in (
+        ("mode", "simulationMode", enums.SimulationMode, "Simulation mode"),
+        ("period_type", "periodType", enums.PeriodType, "Period type"),
+        ("strategy", "strategy", enums.MarketStrategy, "Pricing strategy"),
+    ):
+        try:
+            values[key] = _coerce_payload_enum(data.get(field), enum_cls, field, label)
+        except ValidationError as exc:
+            _add_errors(errors, exc, field, "")
+    lower = _coerce_payload_int(data.get("lowerBound"))
+    upper = _coerce_payload_int(data.get("upperBound"))
+    if lower is None:
+        errors["lowerBound"] = ["Lower bid bound must be an integer (TL/MWh)."]
+    if upper is None:
+        errors["upperBound"] = ["Upper bid bound must be an integer (TL/MWh)."]
+    elif lower is not None and upper <= lower:
+        errors["upperBound"] = [
+            "Upper bid bound must be greater than the lower bid bound."
+        ]
+    if errors:
+        raise ValidationError(errors)
+    return ScenarioHeader(
+        name=name,
+        mode=values["mode"],
+        period_type=values["period_type"],
+        strategy=values["strategy"],
+        lower_bound=lower,
+        upper_bound=upper,
+    )
+
+
 def _validate_scenario_payload(
     data: Mapping[str, Any], current: Simulation | None, market: Market | None
-) -> tuple[int, RunSettings, list[ScenarioAgentEntry]] | JsonResponse:
-    """Validate the settings and the agents of a scenario payload together.
+) -> ScenarioPayload | JsonResponse:
+    """Validate the header, the settings and the agents of a scenario payload.
 
-    Errors of both parts are merged into one HTTP 400 response, so the page
+    Errors of all parts are merged into one HTTP 400 response, so the page
     can show every field error at once. Nothing is written.
 
     Args:
@@ -1065,12 +1199,17 @@ def _validate_scenario_payload(
         market: Market of the edited scenario, or None on create.
 
     Returns:
-        ``(period_number, run_settings, entries)``, or the HTTP 400
-        ``JsonResponse`` with ``{"errors": {field: [messages]}}``.
+        The validated payload, or the HTTP 400 ``JsonResponse`` with
+        ``{"errors": {field: [messages]}}``.
     """
     errors: dict[str, list[str]] = {}
+    header: ScenarioHeader | None = None
     settings: tuple[int, RunSettings] | None = None
     entries: list[ScenarioAgentEntry] = []
+    try:
+        header = _parse_scenario_header(data)
+    except ValidationError as exc:
+        _add_errors(errors, exc, "settings", "")
     try:
         settings = _parse_scenario_settings(data, current)
     except ValidationError as exc:
@@ -1079,9 +1218,9 @@ def _validate_scenario_payload(
         entries = _parse_scenario_agents(data.get("agents", []), market=market)
     except ValidationError as exc:
         _add_errors(errors, exc, "plants", "")
-    if errors or settings is None:
+    if errors or settings is None or header is None:
         return JsonResponse({"errors": errors}, status=400)
-    return settings[0], settings[1], entries
+    return ScenarioPayload(header, settings[0], settings[1], entries)
 
 
 def _plant_form_errors(plant_forms: list[PlantForm]) -> dict[str, list[str]]:
@@ -1421,15 +1560,24 @@ def _user_runs():
     return Simulation.objects.filter(proxy=False, hpo_trial__isnull=True)
 
 
-def dashboard(request):
+def dashboard(request: HttpRequest) -> HttpResponse:
+    """Render the dashboard with counters and the latest runs.
+
+    Args:
+        request: The request.
+
+    Returns:
+        The page. ``num_library_agents`` counts library agents only
+        (``proxy=True``, ``market`` NULL), not scenario or run copies.
+    """
     num_resources = Resource.objects.count()
-    num_agents = Agent.objects.count()
+    num_library_agents = Agent.objects.filter(proxy=True, market__isnull=True).count()
     num_simulations = _user_runs().count()
     num_proxy_simulations = Simulation.objects.filter(proxy=True).count()
     latest_simulations = _user_runs().order_by("-created_at")[:5]
     context = {
         "num_resources": num_resources,
-        "num_agents": num_agents,
+        "num_library_agents": num_library_agents,
         "num_simulations": num_simulations,
         "num_proxy_simulations": num_proxy_simulations,
         "latest_simulations": latest_simulations,
@@ -1667,107 +1815,210 @@ def _lags_value(lags: list[int]) -> str:
     return ",".join(str(lag) for lag in lags)
 
 
-def _scenario_page_context(
-    simulation: Simulation | None = None, **extra: Any
-) -> dict[str, Any]:
-    """Return the template context shared by the scenario create/update pages.
+def _enum_int(value: Any) -> Any:
+    """Return the integer value of an enum member, or ``value`` unchanged."""
+    return getattr(value, "value", value)
+
+
+def _scenario_agent_payload(agent: Agent) -> dict[str, Any]:
+    """Serialise an agent of the edited scenario for the wizard (mode ``scenario``).
 
     Args:
-        simulation: The edited scenario (update page), or None (create page,
-            the run settings take the model defaults).
-        **extra: Additional context entries.
+        agent: Agent of the scenario market (``source`` selected, plants
+            prefetched).
+
+    Returns:
+        The ``_library_agent_payload`` fields plus ``mode``, ``agent_id``,
+        ``source_id`` and ``source_name``.
+    """
+    payload = _library_agent_payload(agent)
+    payload.update(
+        mode=MODE_SCENARIO,
+        agent_id=agent.id,
+        source_id=agent.source_id,
+        source_name=agent.source.name if agent.source is not None else "",
+    )
+    return payload
+
+
+def _wizard_context(simulation: Simulation | None = None) -> dict[str, Any]:
+    """Return the template context of the scenario wizard (create and update).
+
+    Args:
+        simulation: The edited proxy scenario, or None for the create page
+            (the fields take the wizard defaults and the model defaults).
 
     Returns:
         Context with ``resources``, ``allowed_energy_types``, the run settings
         ``run_seed``, ``run_evaluation_periods``, ``run_observation_lags``
-        (option value) and ``observation_lag_choices`` (value, label pairs).
-        ``simulation`` is included when given.
+        (option value), ``observation_lag_choices`` (value, label pairs),
+        ``wizard_config`` (JSON for the page script) and ``simulation`` when
+        editing.
     """
+    resources = list(Resource.objects.all().order_by("name", "id"))
     if simulation is not None:
-        seed = simulation.seed
-        evaluation_periods = simulation.evaluation_periods
-        lags = list(simulation.observation_lags)
-        extra["simulation"] = simulation
+        market = simulation.market
+        agents = (
+            market.agent_set.select_related("source", "portfolio")
+            .prefetch_related("portfolio__plant_set__resource")
+            .order_by("id")
+        )
+        initial = {
+            "simulation_name": simulation.name,
+            "simulationMode": _enum_int(simulation.mode),
+            "periodType": _enum_int(simulation.periodType),
+            "periodNumber": simulation.periodNumber,
+            "strategy": _enum_int(market.strategy),
+            "lowerBound": market.lowerBidBound,
+            "upperBound": market.upperBidBound,
+            "seed": simulation.seed,
+            "evaluation_periods": simulation.evaluation_periods,
+            "observation_lags": list(simulation.observation_lags),
+            "agents": [_scenario_agent_payload(agent) for agent in agents],
+        }
+        save_url = reverse("update_simulation", args=[simulation.id])
+        draft_key = f"abmem.scenarioWizard.update.{simulation.id}"
     else:
-        seed = DEFAULT_SEED
-        evaluation_periods = 0
-        lags = default_observation_lags()
-    return {
-        "resources": Resource.objects.all(),
+        initial = {
+            "simulation_name": "",
+            "simulationMode": enums.SimulationMode.ONLYRESULT.value,
+            "periodType": enums.PeriodType.HOUR.value,
+            "periodNumber": WIZARD_DEFAULT_PERIODS,
+            "strategy": enums.MarketStrategy.PAYASPTF.value,
+            "lowerBound": WIZARD_DEFAULT_LOWER_BOUND,
+            "upperBound": WIZARD_DEFAULT_UPPER_BOUND,
+            "seed": DEFAULT_SEED,
+            "evaluation_periods": 0,
+            "observation_lags": default_observation_lags(),
+            "agents": [],
+        }
+        save_url = reverse("create_simulation")
+        draft_key = "abmem.scenarioWizard.create"
+    config = {
+        "is_update": simulation is not None,
+        "simulation_id": simulation.id if simulation is not None else None,
+        "save_url": save_url,
+        "list_url": reverse("simulation_list_proxy"),
+        "library_url": reverse("agent_library_json"),
+        "check_name_url": reverse("agent_check_name"),
+        "demand_stats_url": reverse("demand_stats"),
+        "draft_key": draft_key,
+        "seed_upper_bound": SEED_UPPER_BOUND,
+        "name_max_length": SIMULATION_NAME_MAX_LENGTH,
+        "agent_name_max_length": NAME_MAX_LENGTH,
+        "initial": initial,
+        "resources": {
+            str(resource.id): {
+                "name": resource.name,
+                "energy_type": _enum_int(resource.energyType),
+            }
+            for resource in resources
+        },
+        "agent_types": {
+            str(member.value): member.name.title() for member in enums.AgentType
+        },
+        "algorithms": {
+            str(member.value): {
+                "name": member.name,
+                "baseline": member in BASELINE_TYPES,
+            }
+            for member in enums.AlgorithmType
+        },
+    }
+    context: dict[str, Any] = {
+        "resources": resources,
         "allowed_energy_types": allowed_energy_types_by_agent_type(),
-        "run_seed": seed,
-        "run_evaluation_periods": evaluation_periods,
-        "run_observation_lags": _lags_value(lags),
+        "run_seed": initial["seed"],
+        "run_evaluation_periods": initial["evaluation_periods"],
+        "run_observation_lags": _lags_value(initial["observation_lags"]),
         "observation_lag_choices": [
             (_lags_value(allowed), ", ".join(str(lag) for lag in allowed))
             for allowed in ALLOWED_OBSERVATION_LAGS
         ],
-        **extra,
+        "wizard_config": config,
     }
+    if simulation is not None:
+        context["simulation"] = simulation
+    return context
+
+
+def _scenario_saved_response(simulation: Simulation) -> JsonResponse:
+    """Build the success response of a scenario save.
+
+    Args:
+        simulation: The saved proxy scenario.
+
+    Returns:
+        ``{"status": "success", "simulation_id", "edit_url", "run_url"}``.
+    """
+    return JsonResponse(
+        {
+            "status": "success",
+            "simulation_id": simulation.id,
+            "edit_url": reverse("update_simulation", args=[simulation.id]),
+            "run_url": reverse(
+                "run_simulation", kwargs={"simulation_id": simulation.id}
+            ),
+        },
+        status=200,
+    )
 
 
 @csrf_exempt
 def create_simulation(request: HttpRequest) -> HttpResponse:
-    """Render the scenario form (GET) or create a proxy scenario (POST, JSON).
+    """Render the scenario wizard (GET) or create a proxy scenario (POST, JSON).
 
     Agent entries follow ``_parse_scenario_agents`` (modes ``new`` and
-    ``library``). Everything is written in one transaction.
+    ``library``). Everything is validated first and written in one
+    transaction.
 
     Args:
         request: The request.
 
     Returns:
-        The page, ``{"status": "success", "simulation_id": id}``, or HTTP 400
-        ``{"errors": {...}}``.
+        The page, ``_scenario_saved_response``, or HTTP 400 ``{"errors": {...}}``.
     """
     if request.method != "POST":
-        return render(request, "pages/simulation-create.html", _scenario_page_context())
+        return render(request, "pages/scenario-wizard.html", _wizard_context())
     try:
         data = json.loads(request.body)
     except json.JSONDecodeError:
         return JsonResponse({"errors": {"body": ["Invalid JSON."]}}, status=400)
-    simulation_name = data.get("simulation_name")
-    simulationMode = int(data["simulationMode"])
-    periodType = int(data["periodType"])
+    if not isinstance(data, dict):
+        return JsonResponse({"errors": {"body": ["Invalid JSON."]}}, status=400)
 
-    marketStrategy = int(data["strategy"])
-    lowerBound = int(data["lowerBound"])
-    upperBound = int(data["upperBound"])
-
-    # Validate the settings and every agent before the first write (PLAN 2.2,
-    # 2.3, OQ-16).
+    # Validate the header, the settings and every agent before the first
+    # write (PLAN 2.2, 2.3, 2.6, OQ-16).
     validated = _validate_scenario_payload(data, current=None, market=None)
     if isinstance(validated, JsonResponse):
         return validated
-    periodNumber, run_settings, entries = validated
+    header = validated.header
 
     created: dict[str, Simulation] = {}
 
     def write() -> None:
         simulation = SimulationFactory.create(
-            name=simulation_name,
-            mode=enums.SimulationMode(simulationMode),
-            periodType=enums.PeriodType(periodType),
-            periodNumber=periodNumber,
+            name=header.name,
+            mode=header.mode,
+            periodType=header.period_type,
+            periodNumber=validated.period_number,
             proxy=True,
         )
-        run_settings.apply(simulation)
+        validated.run_settings.apply(simulation)
         simulation.save()
         market = MarketFactory.create(
             sim=simulation,
-            lowerBound=lowerBound,
-            upperBound=upperBound,
-            strategy=enums.MarketStrategy(marketStrategy),
+            lowerBound=header.lower_bound,
+            upperBound=header.upper_bound,
+            strategy=header.strategy,
         )
-        _write_scenario_agents(market, entries)
+        _write_scenario_agents(market, validated.entries)
         created["simulation"] = simulation
 
-    error_response = _save_scenario(write, entries)
+    error_response = _save_scenario(write, validated.entries)
     if error_response is not None:
         return error_response
-    return JsonResponse(
-        {"status": "success", "simulation_id": created["simulation"].id}, status=200
-    )
+    return _scenario_saved_response(created["simulation"])
 
 
 def delete_simulation(request, simulation_id):
@@ -1782,7 +2033,7 @@ def delete_simulation(request, simulation_id):
 
 @csrf_exempt
 def update_simulation(request: HttpRequest, simulation_id: int) -> HttpResponse:
-    """Render the scenario edit page (GET) or update a proxy scenario (POST, JSON).
+    """Render the prefilled scenario wizard (GET) or update a proxy scenario (POST).
 
     Agent entries follow ``_parse_scenario_agents`` (modes ``new``,
     ``library`` and ``scenario``). Agents of the scenario that the payload
@@ -1793,17 +2044,14 @@ def update_simulation(request: HttpRequest, simulation_id: int) -> HttpResponse:
         simulation_id: Id of the proxy simulation.
 
     Returns:
-        The page, ``{"status": "success"}``, or HTTP 400.
+        The page, ``_scenario_saved_response``, or HTTP 400.
     """
+    simulation = get_object_or_404(Simulation, id=simulation_id)
     if request.method == "GET":
-        simulation = get_object_or_404(Simulation, id=simulation_id)
-        agents = list(
-            simulation.market.agent_set.select_related("source").order_by("id")
-        )
+        if not simulation.proxy:
+            return HttpResponseBadRequest("Only scenario templates can be edited.")
         return render(
-            request,
-            "pages/simulation-update.html",
-            _scenario_page_context(simulation=simulation, agents=agents),
+            request, "pages/scenario-wizard.html", _wizard_context(simulation)
         )
 
     if request.method != "POST":
@@ -1812,51 +2060,41 @@ def update_simulation(request: HttpRequest, simulation_id: int) -> HttpResponse:
         data = json.loads(request.body)
     except json.JSONDecodeError:
         return JsonResponse({"errors": {"body": ["Invalid JSON."]}}, status=400)
-
-    simulation_name = data.get("simulation_name")
-    simulationMode = int(data["simulationMode"])
-    periodType = int(data["periodType"])
-
-    marketStrategy = int(data["strategy"])
-    lowerBound = int(data["lowerBound"])
-    upperBound = int(data["upperBound"])
-
-    simulation = get_object_or_404(Simulation, id=simulation_id)
-    if not simulation.proxy:
+    if not isinstance(data, dict) or not simulation.proxy:
         return HttpResponseBadRequest()
 
-    # Validate the settings and every agent before the first write (PLAN 2.2,
-    # 2.3, OQ-16).
+    # Validate the header, the settings and every agent before the first
+    # write (PLAN 2.2, 2.3, 2.6, OQ-16).
     validated = _validate_scenario_payload(
         data, current=simulation, market=simulation.market
     )
     if isinstance(validated, JsonResponse):
         return validated
-    periodNumber, run_settings, entries = validated
+    header = validated.header
 
     def write() -> None:
-        simulation.name = simulation_name
-        simulation.mode = enums.SimulationMode(simulationMode)
-        simulation.periodNumber = periodNumber
-        simulation.periodType = enums.PeriodType(periodType)
+        simulation.name = header.name
+        simulation.mode = header.mode
+        simulation.periodNumber = validated.period_number
+        simulation.periodType = header.period_type
         simulation.state = enums.SimulationState.CREATED
         simulation.currentPeriod = -1
         simulation.proxy = True
-        run_settings.apply(simulation)
+        validated.run_settings.apply(simulation)
         simulation.save()
 
         market = simulation.market
-        market.lowerBidBound = lowerBound
-        market.upperBidBound = upperBound
-        market.strategy = enums.MarketStrategy(marketStrategy)
+        market.lowerBidBound = header.lower_bound
+        market.upperBidBound = header.upper_bound
+        market.strategy = header.strategy
         market.save()
 
-        _write_scenario_agents(market, entries)
+        _write_scenario_agents(market, validated.entries)
 
-    error_response = _save_scenario(write, entries)
+    error_response = _save_scenario(write, validated.entries)
     if error_response is not None:
         return error_response
-    return JsonResponse({"status": "success"}, status=200)
+    return _scenario_saved_response(simulation)
 
 
 def simulation_view(request, sim_id):

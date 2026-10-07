@@ -601,6 +601,74 @@ def _copy_row_values(instance: Any, exclude: frozenset[str]) -> dict[str, Any]:
     }
 
 
+COPY_NAME_SUFFIX: Final[str] = " (copy)"
+
+
+def copy_scenario_name(name: str) -> str:
+    """Return the name of a duplicated scenario, ``'<name> (copy)'``.
+
+    The original name is shortened so that the result fits the
+    ``Simulation.name`` column.
+
+    Args:
+        name: Name of the original scenario.
+
+    Returns:
+        The name of the copy.
+    """
+    max_length = Simulation._meta.get_field("name").max_length or 20
+    base = name.strip()[: max(max_length - len(COPY_NAME_SUFFIX), 0)].rstrip()
+    return f"{base}{COPY_NAME_SUFFIX}"
+
+
+@transaction.atomic
+def duplicate_scenario(proxy_sim: Simulation, *, name: str | None = None) -> Simulation:
+    """Deep-copy a proxy scenario into a new proxy scenario (PLAN 2.6).
+
+    Simulation settings, market settings and every agent with its portfolio
+    and plants are copied. Agent copies keep the library agent they descend
+    from (``source``) and their names (names are unique per market only).
+    Run bookkeeping (state, current period, error, scenario and warm-start
+    links) starts fresh.
+
+    Args:
+        proxy_sim: Proxy simulation to copy.
+        name: Name of the copy, ``copy_scenario_name(proxy_sim.name)`` when None.
+
+    Returns:
+        The new proxy simulation (state ``CREATED``, ``currentPeriod=-1``).
+
+    Raises:
+        ValueError: ``proxy_sim`` is not a proxy simulation.
+        LibraryValidationError: An agent could not be copied.
+    """
+    if not proxy_sim.proxy:
+        raise ValueError(f"Simulation {proxy_sim.pk} is not a proxy simulation.")
+    sim_values = _copy_row_values(proxy_sim, _NOT_COPIED_ROW_FIELDS)
+    sim_values.update(
+        name=copy_scenario_name(proxy_sim.name) if name is None else name,
+        proxy=True,
+        state=SimulationState.CREATED,
+        currentPeriod=-1,
+        error="",
+        scenario_id=None,
+        warm_start_from_id=None,
+        freeze_policies=False,
+    )
+    new_sim = Simulation.objects.create(**sim_values)
+
+    proxy_market = proxy_sim.market
+    market_values = _copy_row_values(
+        proxy_market, _NOT_COPIED_ROW_FIELDS | {"simulation"}
+    )
+    market_values.update(proxy=True, state=MarketState.CREATED, simulation=new_sim)
+    new_market = Market.objects.create(**market_values)
+
+    for agent in proxy_market.agent_set.order_by("id"):
+        copy_agent(agent, new_market, proxy=True)
+    return new_sim
+
+
 @transaction.atomic
 def clone_scenario_for_run(
     proxy_sim: Simulation,

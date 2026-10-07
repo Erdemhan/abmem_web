@@ -143,6 +143,18 @@
                             </div>
 
                             <div class="col-2 mx-2">
+                              <!-- Duplicate: deep copy as '<name> (copy)', then open it in the wizard (PLAN 2.6) -->
+                              <form action="{% url 'duplicate_scenario' simulation_id=simulation.id %}" method="POST" class="js-duplicate-form">
+                                {% csrf_token %}
+                                <button type="submit"
+                                  class="center icon icon-shape bg-gradient-secondary shadow text-center border-radius-md zoom4-1"
+                                  style="border:none" title="Duplicate" aria-label="Duplicate {{ simulation.name }}">
+                                  <i class="fas fa-copy" aria-hidden="true"></i>
+                                </button>
+                              </form>
+                            </div>
+
+                            <div class="col-2 mx-2">
                               <form action="delete/{{ simulation.id }}" method="DELETE">
                                 <button type="submit"
                                   class=" center icon icon-shape bg-gradient-danger text-center border-radius-md zoom4-1"

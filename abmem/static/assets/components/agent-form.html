@@ -4,13 +4,15 @@
         <form role="form text-left" id="agent-form" method="post" action="{% url 'agent_create' %}"
             data-create-url="{% url 'agent_create' %}" data-check-name-url="{% url 'agent_check_name' %}" data-agent-id="">
             {% csrf_token %}
-            <!-- Agent bilgileri için alanlar -->
+            <!-- Agent fields -->
             <div class="mb-3">
-                <input type="text" id="agent_name" name="name" class="form-control" placeholder="Name" aria-label="Name" aria-describedby="agent-name-feedback" maxlength="20" required>
+                <label for="agent_name" class="form-label">Name</label>
+                <input type="text" id="agent_name" name="name" class="form-control" aria-describedby="agent-name-feedback" maxlength="20" required>
                 <div id="agent-name-feedback" class="invalid-feedback"></div>
             </div>
             <div class="mb-3">
-                <input type="number" id="budget" name="budget" class="form-control" placeholder="Budget" aria-label="Budget" aria-describedby="password-addon" required>
+                <label for="budget" class="form-label">Budget (TL)</label>
+                <input type="number" id="budget" name="budget" class="form-control" step="any" required>
             </div>
             <div class="mb-3">
                 <div class="form-group">
@@ -27,21 +29,21 @@
                     <label for="algorithm_type">Algorithm</label>
                     {% algorithm_fields form_names=True %}
                 </div>
-                <!-- Plant bilgileri için tablo -->
+                <!-- Plants -->
                 <div class="card-body px-0 pb-2 pt-0">
                     <div class="table-responsive row">
                         <table class="table align-items-center mb-0" id="plant_table">
                             <thead>
                                 <tr>
                                     <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Resource</th>
-                                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">Capacity</th>
+                                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">Capacity (MW)</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <tr id="row_template" style="display: none;">
                                     <td>
                                         <div class="form-group">
-                                            <select class="form-control" id="resource_dd" name="resources[]" disabled>
+                                            <select class="form-control" id="resource_dd" name="resources[]" aria-label="Resource" disabled>
                                                 <option value="">Select Resource</option>
                                                 {% for resource in resources %}
                                                 <option value="{{ resource.id }}" data-energy-type="{{ resource.energyType.value }}">{{ resource.name }}</option>
@@ -51,12 +53,12 @@
                                     </td>
                                     <td>
                                         <div class="mb-3">
-                                            <input type="number" name="capacities[]" class="form-control" placeholder="Capacity" min="1" step="1" required disabled>
+                                            <input type="number" name="capacities[]" class="form-control" aria-label="Capacity (MW)" min="1" step="1" required disabled>
                                         </div>
                                     </td>
                                     <td>
                                         <div class="col mb-3">
-                                            <button type="button" onclick="deleteRow(this)" class=" center icon icon-shape bg-gradient-danger text-center border-radius-md zoom4-1 " style="border:none;">
+                                            <button type="button" onclick="deleteRow(this)" aria-label="Remove plant" class=" center icon icon-shape bg-gradient-danger text-center border-radius-md zoom4-1 " style="border:none;">
                                                 <i class="fa-solid fa-trash mb-5"></i>
                                             </button>
                                         </div>
@@ -68,14 +70,14 @@
                         <div id="agent-form-warning" class="alert alert-warning text-white d-none mx-3" role="status"></div>
                         <div id="agent-form-errors" class="alert alert-danger text-white d-none mx-3" role="alert"></div>
 
-                        <!-- Yeni Plant ekleme butonu -->
+                        <!-- Add a plant row -->
                         <button type="button" class="mt-4 col bg-gradient-primary  border-radius-md mx-3 mb-2 zoom4-1" style="border: none;" onclick="addPlantRow()">
                             <i class="fa-solid fa-pencil"></i>
                             Add Plant
                         </button>
 
-                        <!-- Formu gönderme butonu -->
-                        <button type="button" class="mt-4 col bg-gradient-success border-radius-md mx-3 mb-2 zoom4-1" style="border: none;" onclick="submitForm()" id="submit-button">
+                        <!-- Submit -->
+                        <button type="button" class="mt-4 col bg-gradient-success border-radius-md mx-3 mb-2 zoom4-1" style="border: none;" onclick="agentFormSubmit()" id="submit-button">
                             <i class="fas fa-plus"></i>
                             <span>Create Agent and Related</span>
                         </button>
@@ -91,6 +93,21 @@
 <script>
     // Agent type -> allowed energy types, rendered from resource_rules.allowed_energy_types (PLAN 2.2).
     var AGENT_FORM_ALLOWED_ENERGY_TYPES = JSON.parse(document.getElementById("allowed-energy-types").textContent);
+
+    // Submit behaviour. By default the form creates or updates a library agent on the server
+    // (agent list page). A page can instead receive the values with agentFormConfigure({onSubmit: fn})
+    // (scenario wizard, PLAN 2.6). checkLibraryName enables the live library name check and
+    // extraNameCheck(name) may return a message that blocks the submit (for example a duplicate name).
+    var agentFormConfig = { onSubmit: null, checkLibraryName: true, extraNameCheck: null };
+
+    function agentFormConfigure(config) {
+        agentFormConfig = {
+            onSubmit: (config && config.onSubmit) || null,
+            checkLibraryName: !config || config.checkLibraryName !== false,
+            extraNameCheck: (config && config.extraNameCheck) || null
+        };
+        agentFormClearErrors();
+    }
 
     function agentFormAllowed(agentType) {
         if (agentType === null || agentType === undefined || agentType === "") {
@@ -188,11 +205,62 @@
 
         table.appendChild(newRow);
         agentFormFilterSelect(selectElement, document.getElementById("type").value, false);
+        return newRow;
     }
 
     function deleteRow(button) {
         var row = button.closest("tr");
         row.remove();
+    }
+
+    // Empty form with the model defaults of the algorithm inputs.
+    function agentFormReset() {
+        document.getElementById("agent_name").value = "";
+        document.getElementById("budget").value = "";
+        document.getElementById("type").value = "";
+        agentFormPlantRows().forEach(function (row) { row.remove(); });
+        resetAlgorithmFields($("#agent-form"));
+        agentFormSetTarget(null, null);
+    }
+
+    // Fill the form from payload-shaped values {name, budget, type, algorithm_type, failstack, plants}.
+    // plants: [{resource | resource_id, capacity}]. Stored plants stay selectable even when the type filter
+    // would hide them, the server validates the combination.
+    function agentFormFill(values) {
+        agentFormReset();
+        document.getElementById("agent_name").value = values.name || "";
+        document.getElementById("budget").value = values.budget === undefined || values.budget === null ? "" : values.budget;
+        document.getElementById("type").value = values.type === undefined || values.type === null ? "" : String(values.type);
+        var failstack = values.failstack || {};
+        setAlgorithmFields($("#agent-form"), {
+            algorithm_type: values.algorithm_type,
+            failstack_enabled: Boolean(failstack.enabled),
+            failstack_limit: failstack.limit,
+            failstack_delta: failstack.delta,
+            failstack_min_margin: failstack.min_margin
+        });
+        (values.plants || []).forEach(function (plant) {
+            var row = addPlantRow();
+            row.querySelector('select[name="resources[]"]').value = String(plant.resource !== undefined ? plant.resource : plant.resource_id);
+            row.querySelector('input[name="capacities[]"]').value = plant.capacity;
+        });
+        agentFormFilterRows(true);
+    }
+
+    // Payload-shaped values of the form (scenario payload agent entry without mode).
+    function agentFormRead() {
+        var entry = $.extend({
+            name: document.getElementById("agent_name").value.trim(),
+            type: document.getElementById("type").value,
+            budget: document.getElementById("budget").value.trim()
+        }, readAlgorithmFields($("#agent-form")));
+        entry.plants = agentFormPlantRows().map(function (row) {
+            return {
+                resource: row.querySelector('select[name="resources[]"]').value,
+                capacity: row.querySelector('input[name="capacities[]"]').value
+            };
+        });
+        return entry;
     }
 
     // Live name check against the library (PLAN 2.3): GET agent/check-name, case-insensitive like the DB constraint.
@@ -239,8 +307,17 @@
     $(document).on("input", "#agent_name", function () {
         agentNameCheckState = { name: null, available: null, message: "" };
         clearTimeout(agentNameCheckTimer);
+        agentFormShowNameResult({ available: null, message: "" });
         agentNameCheckTimer = setTimeout(function () {
-            agentFormCheckName().catch(function () { /* the server validates again on submit */ });
+            var name = document.getElementById("agent_name").value.trim();
+            var extra = agentFormConfig.extraNameCheck ? agentFormConfig.extraNameCheck(name) : "";
+            if (extra) {
+                agentFormShowNameResult({ available: false, message: extra });
+                return;
+            }
+            if (agentFormConfig.checkLibraryName) {
+                agentFormCheckName().catch(function () { /* the server validates again on submit */ });
+            }
         }, 300);
     });
 
@@ -271,8 +348,9 @@
         }
     }
 
-    // Create or update the library agent on the server (agent/create or agent/<id>/), then reload the list.
-    function submitForm() {
+    // Validate the form, then hand the values to agentFormConfig.onSubmit, or create/update the
+    // library agent on the server (agent/create or agent/<id>/) and reload the list.
+    function agentFormSubmit() {
         var form = document.getElementById("agent-form");
         var agentName = document.getElementById("agent_name").value.trim();
         var budget = document.getElementById("budget").value.trim();
@@ -295,15 +373,30 @@
                 agentFormShowErrors({ __all__: ["Please fill in all resource details."] });
                 return;
             }
+            if (!/^\d+$/.test(capacityInput.value) || Number(capacityInput.value) < 1) {
+                agentFormShowErrors({ __all__: ["Plant capacities must be positive whole numbers (MW)."] });
+                return;
+            }
+        }
+        var extra = agentFormConfig.extraNameCheck ? agentFormConfig.extraNameCheck(agentName) : "";
+        if (extra) {
+            agentFormShowErrors({ name: [extra] });
+            return;
         }
 
         var submitButton = document.getElementById("submit-button");
         submitButton.disabled = true;
-        agentFormCheckName().catch(function () {
-            return { available: null };
-        }).then(function (nameResult) {
+        var nameCheck = agentFormConfig.checkLibraryName
+            ? agentFormCheckName().catch(function () { return { available: null }; })
+            : Promise.resolve({ available: true });
+        nameCheck.then(function (nameResult) {
             if (nameResult.available === false) {
                 submitButton.disabled = false;
+                return;
+            }
+            if (agentFormConfig.onSubmit) {
+                submitButton.disabled = false;
+                agentFormConfig.onSubmit(agentFormRead());
                 return;
             }
             var data = new FormData(form);

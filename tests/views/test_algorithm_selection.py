@@ -28,6 +28,7 @@ from abmem.services.simulation.context import SimulationContext
 from abmem.services.starter import starter_service
 from abmem.templatetags.abmem_choices import algorithm_choices, failstack_defaults
 from tests.factories import make_agent_with_plants, make_market, make_resource
+from tests.views.wizard_helpers import wizard_config
 
 
 @pytest.fixture
@@ -301,16 +302,16 @@ def test_update_page_prefills_algorithm(client: Client, fossil: Resource) -> Non
     response = client.get(reverse("update_simulation", args=[simulation.id]))
     assert response.status_code == 200
     html = response.content.decode()
-    assert (
-        f'<option value="{AlgorithmType.SAC.value}" data-baseline="0" selected>SAC'
-        in html
-    )
-    assert (
-        'class="form-check-input agent-failstack-enabled" type="checkbox" value="on" data-default="0" checked'
-        in html
-    )
-    assert 'class="form-control failstack-limit" value="4" data-default="6"' in html
+    # The wizard renders the stored agent from JSON (PLAN 2.6); the agent form
+    # dialog fills the algorithm inputs from it.
+    (agent,) = wizard_config(html)["initial"]["agents"]
+    assert agent["algorithm_type"] == AlgorithmType.SAC.value
+    assert agent["algorithm_name"] == "SAC"
+    assert agent["failstack"]["enabled"] is True
+    assert agent["failstack"]["active"] is True
+    assert agent["failstack"]["limit"] == 4
     assert "function readAlgorithmFields" in html
+    assert "function setAlgorithmFields" in html
 
 
 # create_agent_and_related / update_agent (AgentForm)
