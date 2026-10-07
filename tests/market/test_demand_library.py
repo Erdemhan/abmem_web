@@ -24,6 +24,9 @@ PROFILE: dict[str, Any] = {
     "day_start_hour": 7,
     "day_end_hour": 21,
     "autocorrelation": 0.8,
+    "morning_ramp_hours": 0,
+    "evening_ramp_hours": 0,
+    "seasons": None,
     "day": {
         "distribution": "NORMAL",
         "mean": 900.0,

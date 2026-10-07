@@ -311,6 +311,7 @@ def demand_preview(request: HttpRequest) -> JsonResponse:
     if profile is not None:
         values = generate_demand(profile, periods)
         start, end = profile.day_start_hour, profile.day_end_hour
+        mask = profile.night_mask(periods)
     else:
         try:
             values, available = _file_window(periods)
@@ -318,7 +319,7 @@ def demand_preview(request: HttpRequest) -> JsonResponse:
             return exc.response
         body["available_periods"] = available
         start, end = _file_day_hours(params)
-    mask = night_mask(periods, start, end)
+        mask = night_mask(periods, start, end)
     stats: dict[str, Any] = dict(_series_stats(values) or {})
     stats["day"] = _series_stats(values[~mask])
     stats["night"] = _series_stats(values[mask])

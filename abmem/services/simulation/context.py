@@ -137,14 +137,15 @@ def demand_for(simulation: Simulation, periods: int) -> DemandSeries:
     return DemandSeries.from_excel(DATA_DIR / MARKET_DATA_FILE, column=DEMAND_COLUMN)
 
 
-def demand_scaling_for(simulation: Simulation) -> tuple[float, float]:
+def demand_scaling_for(simulation: Simulation, periods: int) -> tuple[float, float]:
     """Return the demand observation scaling of a simulation.
 
     Args:
         simulation: Run or scenario.
+        periods: Number of periods of the run (used by seasonal profiles).
 
     Returns:
-        ``DemandProfile.scaling()`` of the stored profile (EQ-02b), or
+        ``DemandProfile.scaling(periods)`` of the stored profile (EQ-02b), or
         ``(DEMAND_SCALING_MEAN, DEMAND_SCALING_STD)`` of the demand file
         (EQ-02) when the profile is NULL.
 
@@ -154,7 +155,7 @@ def demand_scaling_for(simulation: Simulation) -> tuple[float, float]:
     profile = _stored_profile(simulation)
     if profile is None:
         return DEMAND_SCALING_MEAN, DEMAND_SCALING_STD
-    return profile.scaling()
+    return profile.scaling(periods)
 
 
 def _stored_profile(simulation: Simulation) -> DemandProfile | None:
@@ -359,7 +360,7 @@ class SimulationContext:
             if demand is None:
                 demand = demand_for(simulation, period_number)
             demand.validate_horizon(period_number)
-            demand_mean, demand_std = demand_scaling_for(simulation)
+            demand_mean, demand_std = demand_scaling_for(simulation, period_number)
         except DemandDataError as error:
             raise SimulationValidationError(str(error)) from error
 
