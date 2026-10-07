@@ -12,9 +12,13 @@ import math
 import pathlib
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
+
+if TYPE_CHECKING:
+    from .demand_generator import DemandProfile
 
 __all__ = ["DemandDataError", "DemandSeries"]
 
@@ -83,6 +87,22 @@ class DemandSeries:
         valid = np.flatnonzero(~np.isnan(array))
         stop = int(valid[-1]) + 1 if valid.size else 0
         return cls(values=array[:stop], source=source)
+
+    @classmethod
+    def from_profile(cls, profile: DemandProfile, periods: int) -> DemandSeries:
+        """Generate a synthetic demand series from a scenario profile (PLAN 2.8).
+
+        Args:
+            profile: Validated demand profile.
+            periods: Number of periods to generate.
+
+        Returns:
+            The series of ``generate_demand(profile, periods)`` with source
+            ``'generated'``.
+        """
+        from .demand_generator import generate_demand
+
+        return cls(values=generate_demand(profile, periods), source="generated")
 
     def validate_horizon(self, period_count: int) -> None:
         """Check that periods ``1..period_count`` have usable demand values.

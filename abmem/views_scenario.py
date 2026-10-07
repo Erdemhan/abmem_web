@@ -1,7 +1,11 @@
 """Helper endpoints of the scenario wizard (PLAN 2.6).
 
-* ``demand_stats``: min, mean and max demand of periods ``1..N``, used by the
-  wizard's capacity-versus-demand warning.
+* ``demand_stats``: min, mean and max demand of periods ``1..N`` of the
+  demand file.
+* ``demand_preview``: the demand series of periods ``1..N`` for the demand
+  file or a synthetic demand profile, with night mask and statistics
+  (PLAN 2.8). The one preview endpoint of every page with the
+  demand-profile component (chart, statistics, capacity warning).
 * ``duplicate_scenario``: deep copy of a scenario template ("Duplicate" on
   the templates list).
 * ``export_scenario_yaml``, ``import_scenario_preview`` and
@@ -12,21 +16,31 @@
 from __future__ import annotations
 
 import functools
+import json
 import logging
+from collections.abc import Mapping
+from typing import Any
 
+import numpy as np
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError
 from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
 from django.utils.text import slugify
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from . import scenario_yaml
 from .constants.paths import DATA_DIR
 from .models import Simulation
 from .services.agent import library_service
 from .services.market.demand import DemandDataError, DemandSeries
+from .services.market.demand_generator import (
+    DemandProfile,
+    generate_demand,
+    night_mask,
+    normalize_profile,
+)
 from .services.simulation.context import DEMAND_COLUMN, MARKET_DATA_FILE
 
 logger = logging.getLogger(__name__)
@@ -83,30 +97,9 @@ def demand_stats(request: HttpRequest) -> JsonResponse:
     except ValidationError as exc:
         return JsonResponse({"errors": exc.message_dict}, status=400)
     try:
-        series = load_demand_series()
-    except DemandDataError as exc:
-        logger.warning("Demand data could not be read: %s", exc)
-        return JsonResponse(
-            {"errors": {"__all__": ["The demand data could not be read."]}},
-            status=503,
-        )
-    available = len(series.values)
-    try:
-        series.validate_horizon(periods)
-    except DemandDataError:
-        return JsonResponse(
-            {
-                "errors": {
-                    "periods": [
-                        f"The demand data covers {available} periods; "
-                        f"{periods} were requested."
-                    ]
-                },
-                "available_periods": available,
-            },
-            status=400,
-        )
-    window = series.window(1, periods + 1)
+        window, available = _file_window(periods)
+    except _DemandError as exc:
+        return exc.response
     return JsonResponse(
         {
             "periods": periods,
@@ -116,6 +109,227 @@ def demand_stats(request: HttpRequest) -> JsonResponse:
             "max": float(window.max()),
         }
     )
+
+
+class _DemandError(Exception):
+    """A demand request cannot be served; carries the HTTP error response."""
+
+    def __init__(self, response: JsonResponse) -> None:
+        """Store the response.
+
+        Args:
+            response: The HTTP 400 or 503 response.
+        """
+        super().__init__(response.status_code)
+        self.response = response
+
+
+def _file_window(periods: int) -> tuple[np.ndarray, int]:
+    """Return the file demand of periods ``1..periods`` (the rows a run uses).
+
+    Args:
+        periods: Positive horizon.
+
+    Returns:
+        ``(window, available_periods)``.
+
+    Raises:
+        _DemandError: HTTP 503 when the file cannot be read, HTTP 400 with
+            key ``periods`` when the horizon is not covered by valid rows.
+    """
+    try:
+        series = load_demand_series()
+    except DemandDataError as exc:
+        logger.warning("Demand data could not be read: %s", exc)
+        raise _DemandError(
+            JsonResponse(
+                {"errors": {"__all__": ["The demand data could not be read."]}},
+                status=503,
+            )
+        ) from exc
+    available = len(series.values)
+    try:
+        series.validate_horizon(periods)
+    except DemandDataError as exc:
+        raise _DemandError(
+            JsonResponse(
+                {
+                    "errors": {
+                        "periods": [
+                            f"The demand data covers {available} periods; "
+                            f"{periods} were requested."
+                        ]
+                    },
+                    "available_periods": available,
+                },
+                status=400,
+            )
+        ) from exc
+    return series.window(1, periods + 1), available
+
+
+# Day hours used to shade a file preview when the request names none.
+DEFAULT_DAY_START_HOUR: int = 8
+DEFAULT_DAY_END_HOUR: int = 20
+# Largest preview horizon (one year of hours plus a margin).
+MAX_PREVIEW_PERIODS: int = 10_000
+
+
+def _series_stats(values: np.ndarray) -> dict[str, float | int] | None:
+    """Return count, min, mean, max and population std of a series.
+
+    Args:
+        values: Demand values in MWh.
+
+    Returns:
+        The statistics, or None for an empty series.
+    """
+    if values.size == 0:
+        return None
+    return {
+        "count": int(values.size),
+        "min": float(values.min()),
+        "mean": float(values.mean()),
+        "max": float(values.max()),
+        "std": float(values.std()),
+    }
+
+
+def _preview_params(request: HttpRequest) -> Mapping[str, Any]:
+    """Return the parameters of a preview request.
+
+    Args:
+        request: GET (query parameters, ``profile`` as a JSON string) or POST
+            (a JSON object).
+
+    Returns:
+        Mapping with the optional keys ``periods``, ``source``, ``profile``,
+        ``day_start_hour`` and ``day_end_hour``.
+
+    Raises:
+        _DemandError: HTTP 400 for a body or ``profile`` that is not JSON.
+    """
+
+    def invalid(key: str) -> _DemandError:
+        return _DemandError(JsonResponse({"errors": {key: ["Invalid JSON."]}}, status=400))
+
+    if request.method == "POST":
+        try:
+            data = json.loads(request.body or b"{}")
+        except json.JSONDecodeError:
+            raise invalid("body") from None
+        if not isinstance(data, dict):
+            raise invalid("body")
+        return data
+    params: dict[str, Any] = {key: request.GET.get(key) for key in request.GET}
+    if params.get("profile") not in (None, ""):
+        try:
+            params["profile"] = json.loads(params["profile"])
+        except json.JSONDecodeError:
+            raise invalid("demand_profile") from None
+    else:
+        params.pop("profile", None)
+    return params
+
+
+def _file_day_hours(params: Mapping[str, Any]) -> tuple[int, int]:
+    """Return the day hours that shade a file preview.
+
+    Args:
+        params: Preview parameters.
+
+    Returns:
+        ``(day_start_hour, day_end_hour)`` of the request when valid, else
+        ``(8, 20)``.
+    """
+    try:
+        start = int(str(params.get("day_start_hour")))
+        end = int(str(params.get("day_end_hour")))
+    except ValueError:
+        return DEFAULT_DAY_START_HOUR, DEFAULT_DAY_END_HOUR
+    if 0 <= start < end <= 24 and end - start <= 23:
+        return start, end
+    return DEFAULT_DAY_START_HOUR, DEFAULT_DAY_END_HOUR
+
+
+@require_http_methods(["GET", "POST"])
+def demand_preview(request: HttpRequest) -> JsonResponse:
+    """Return the demand of periods ``1..periods`` with night mask and statistics.
+
+    The request (GET query or POST JSON) has ``periods`` and either
+    ``source=file`` or a version-1 ``profile``; ``source`` defaults to
+    ``generated`` when a profile is given, else ``file``. A file preview is
+    shaded with ``day_start_hour``/``day_end_hour`` when given, else
+    08:00-20:00 is day. The series is generated exactly like a run
+    (``demand_generator``); nothing is written.
+
+    Args:
+        request: GET or POST.
+
+    Returns:
+        ``{"source", "periods", "values", "night_mask", "day_start_hour",
+        "day_end_hour", "stats": {"count", "min", "mean", "max", "std",
+        "day": {...} | None, "night": {...} | None}}`` in MWh; a file
+        preview also has ``available_periods``. HTTP 400 ``{"errors":
+        {...}}`` with keys ``periods``, ``source``, ``body`` or
+        ``demand_profile[.<field>]``; HTTP 503 when the demand file cannot be
+        read.
+    """
+    try:
+        params = _preview_params(request)
+    except _DemandError as exc:
+        return exc.response
+    errors: dict[str, list[str]] = {}
+    periods = 0
+    raw_periods = params.get("periods")
+    try:
+        periods = _parse_periods(None if raw_periods is None else str(raw_periods))
+    except ValidationError as exc:
+        errors.update(exc.message_dict)
+    else:
+        if periods > MAX_PREVIEW_PERIODS:
+            errors["periods"] = [
+                f"A preview covers at most {MAX_PREVIEW_PERIODS} periods."
+            ]
+    raw_profile = params.get("profile")
+    source = params.get("source") or ("generated" if raw_profile is not None else "file")
+    profile: DemandProfile | None = None
+    if source == "generated":
+        if raw_profile is None:
+            errors["demand_profile"] = ["A generated preview needs a demand profile."]
+        else:
+            try:
+                profile = DemandProfile.from_dict(normalize_profile(raw_profile))
+            except ValidationError as exc:
+                errors.update(exc.message_dict)
+    elif source != "file":
+        errors["source"] = ["source must be 'file' or 'generated'."]
+    if errors:
+        return JsonResponse({"errors": errors}, status=400)
+
+    body: dict[str, Any] = {"source": source, "periods": periods}
+    if profile is not None:
+        values = generate_demand(profile, periods)
+        start, end = profile.day_start_hour, profile.day_end_hour
+    else:
+        try:
+            values, available = _file_window(periods)
+        except _DemandError as exc:
+            return exc.response
+        body["available_periods"] = available
+        start, end = _file_day_hours(params)
+    mask = night_mask(periods, start, end)
+    stats: dict[str, Any] = dict(_series_stats(values) or {})
+    stats["day"] = _series_stats(values[~mask])
+    stats["night"] = _series_stats(values[mask])
+    body.update(
+        values=[float(value) for value in values],
+        night_mask=[bool(flag) for flag in mask],
+        day_start_hour=start,
+        day_end_hour=end,
+        stats=stats,
+    )
+    return JsonResponse(body)
 
 
 @require_POST

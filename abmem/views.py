@@ -44,6 +44,7 @@ from .services.agent.resource_rules import (
 )
 from .services.algorithms.registry import BASELINE_TYPES
 from .services.market import market_factory as MarketFactory
+from .services.market.demand_generator import PAYLOAD_KEY, normalize_profile
 from .services.simulation import checkpoints
 from .services.simulation import simulation_factory as SimulationFactory
 from .services.starter import starter_service as StarterService
@@ -886,11 +887,15 @@ class RunSettings:
         evaluation_periods: Number of final periods without exploration and
             learning (0 or less than ``periodNumber``).
         observation_lags: One of ``ALLOWED_OBSERVATION_LAGS``.
+        demand_profile: Validated synthetic demand profile
+            (``DemandProfile.to_dict``), or None for the demand file
+            (PLAN 2.8).
     """
 
     seed: int
     evaluation_periods: int
     observation_lags: list[int]
+    demand_profile: dict[str, Any] | None = None
 
     def apply(self, simulation: Simulation) -> None:
         """Set the settings on a simulation (the caller saves it).
@@ -901,6 +906,9 @@ class RunSettings:
         simulation.seed = self.seed
         simulation.evaluation_periods = self.evaluation_periods
         simulation.observation_lags = list(self.observation_lags)
+        simulation.demand_profile = (
+            None if self.demand_profile is None else dict(self.demand_profile)
+        )
 
 
 def _coerce_payload_int(raw_value: Any) -> int | None:
@@ -948,10 +956,14 @@ def _coerce_observation_lags(raw_value: Any) -> list[int] | None:
     return None
 
 
+DEMAND_PROFILE_KEY: Final[str] = PAYLOAD_KEY
+
+
 def _parse_run_settings(
     data: Mapping[str, Any], period_number: int, current: Simulation | None
 ) -> RunSettings:
-    """Validate ``seed``, ``evaluation_periods`` and ``observation_lags`` (OQ-16).
+    """Validate ``seed``, ``evaluation_periods``, ``observation_lags`` (OQ-16)
+    and ``demand_profile`` (PLAN 2.8).
 
     A missing key takes the value of ``current`` (update page) or the model
     default (create page). The rules mirror the check constraints of
@@ -966,8 +978,8 @@ def _parse_run_settings(
         The validated settings.
 
     Raises:
-        ValidationError: With field keys ``seed``, ``evaluation_periods`` and
-            ``observation_lags``.
+        ValidationError: With field keys ``seed``, ``evaluation_periods``,
+            ``observation_lags`` and ``demand_profile[.<field>]``.
     """
     errors: dict[str, list[str]] = {}
 
@@ -1012,9 +1024,18 @@ def _parse_run_settings(
     else:
         observation_lags = default_observation_lags()
 
+    demand_profile: dict[str, Any] | None = None
+    if DEMAND_PROFILE_KEY in data:
+        try:
+            demand_profile = normalize_profile(data[DEMAND_PROFILE_KEY])
+        except ValidationError as exc:
+            _add_errors(errors, exc, DEMAND_PROFILE_KEY, "")
+    elif current is not None and current.demand_profile is not None:
+        demand_profile = dict(current.demand_profile)
+
     if errors:
         raise ValidationError(errors)
-    return RunSettings(seed, evaluation_periods, observation_lags)
+    return RunSettings(seed, evaluation_periods, observation_lags, demand_profile)
 
 
 def _parse_period_number(data: Mapping[str, Any]) -> int:
@@ -1874,6 +1895,7 @@ def _wizard_context(simulation: Simulation | None = None) -> dict[str, Any]:
             "seed": simulation.seed,
             "evaluation_periods": simulation.evaluation_periods,
             "observation_lags": list(simulation.observation_lags),
+            "demand_profile": simulation.demand_profile,
             "agents": [_scenario_agent_payload(agent) for agent in agents],
         }
         save_url = reverse("update_simulation", args=[simulation.id])
@@ -1890,6 +1912,7 @@ def _wizard_context(simulation: Simulation | None = None) -> dict[str, Any]:
             "seed": DEFAULT_SEED,
             "evaluation_periods": 0,
             "observation_lags": default_observation_lags(),
+            "demand_profile": None,
             "agents": [],
         }
         save_url = reverse("create_simulation")
@@ -1902,6 +1925,7 @@ def _wizard_context(simulation: Simulation | None = None) -> dict[str, Any]:
         "library_url": reverse("agent_library_json"),
         "check_name_url": reverse("agent_check_name"),
         "demand_stats_url": reverse("demand_stats"),
+        "demand_preview_url": reverse("demand_preview"),
         "draft_key": draft_key,
         "seed_upper_bound": SEED_UPPER_BOUND,
         "name_max_length": SIMULATION_NAME_MAX_LENGTH,

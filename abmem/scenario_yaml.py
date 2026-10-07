@@ -4,13 +4,24 @@ File format, version 1 (exact keys)::
 
     format_version: 1
     scenario: {name, mode, period_type, periods, seed, evaluation_periods,
-               observation_lags}
+               observation_lags, demand}
     market: {strategy, bid_bounds: [low, high]}
     resources: [{name, energy_type, fuel_cost, om_cost, investment_cost,
                  co2_cost, emission}]
     agents: [{name, type, budget, algorithm, algorithm_params: {},
               failstack: {enabled, limit, delta, min_margin},
               plants: [{resource: <resource name>, capacity}]}]
+
+``scenario.demand`` is optional (PLAN 2.8). Absent or null means the demand
+file ``marketData.xlsx``; otherwise it is the synthetic demand profile as
+stored in ``Simulation.demand_profile`` (``version`` may be left out)::
+
+    demand: {version: 1, seed, day_start_hour, day_end_hour, autocorrelation,
+             day: {distribution, mean, std, min, max}, night: {...}}
+
+``distribution`` is NORMAL, UNIFORM or LOGNORMAL (UNIFORM has no mean and
+std). Import validates it with ``DemandProfile`` (the wizard's rules);
+export writes it whenever the scenario has a profile.
 
 Enum values are written as member names (``ONLYRESULT``, ``FOSSIL``, ...).
 Decimal values are written as plain YAML numbers when a float holds them
@@ -95,6 +106,7 @@ SCENARIO_KEYS: Final[tuple[str, ...]] = (
     "seed",
     "evaluation_periods",
     "observation_lags",
+    "demand",
 )
 SCENARIO_REQUIRED_KEYS: Final[tuple[str, ...]] = ("name", "mode", "period_type", "periods")
 MARKET_KEYS: Final[tuple[str, ...]] = ("strategy", "bid_bounds")
@@ -294,6 +306,11 @@ def scenario_document(simulation: Simulation) -> dict[str, Any]:
             "seed": int(simulation.seed),
             "evaluation_periods": int(simulation.evaluation_periods),
             "observation_lags": [int(lag) for lag in simulation.observation_lags],
+            **(
+                {"demand": copy.deepcopy(simulation.demand_profile)}
+                if simulation.demand_profile is not None
+                else {}
+            ),
         },
         "market": {
             "strategy": MarketStrategy(market.strategy).name,
@@ -611,6 +628,7 @@ class ImportPlan:
                 "seed": self.run_settings.seed,
                 "evaluation_periods": self.run_settings.evaluation_periods,
                 "observation_lags": list(self.run_settings.observation_lags),
+                "demand": self.run_settings.demand_profile,
                 "strategy": MarketStrategy(self.header.strategy).name,
                 "bid_bounds": [self.header.lower_bound, self.header.upper_bound],
                 "agents": [spec.name for spec in self.agents],
@@ -645,6 +663,26 @@ def _format_value(value: Any) -> str:
     return str(value)
 
 
+def _settings_keys(exc: ValidationError) -> dict[str, str]:
+    """Return the document paths of the field names of a settings error.
+
+    ``demand_profile`` and ``demand_profile.<field>`` map to
+    ``scenario.demand`` and ``scenario.demand.<field>``.
+
+    Args:
+        exc: Error of ``_parse_scenario_settings``.
+
+    Returns:
+        ``_WIZARD_KEYS`` extended by the demand profile fields of ``exc``.
+    """
+    keys = dict(_WIZARD_KEYS)
+    prefix = wizard.DEMAND_PROFILE_KEY
+    for name in getattr(exc, "error_dict", {}):
+        if name == prefix or name.startswith(prefix + "."):
+            keys[name] = "scenario.demand" + name[len(prefix):]
+    return keys
+
+
 def _parse_header(document: dict[str, Any], errors: _Errors) -> tuple[Any, int | None, Any]:
     """Validate ``scenario`` and ``market`` with the wizard rules.
 
@@ -668,6 +706,8 @@ def _parse_header(document: dict[str, Any], errors: _Errors) -> tuple[Any, int |
     for key in ("seed", "evaluation_periods", "observation_lags"):
         if key in scenario:
             payload[key] = scenario[key]
+    if "demand" in scenario:
+        payload[wizard.DEMAND_PROFILE_KEY] = scenario["demand"]
     enum_ok = True
     for yaml_key, source, wizard_key, enum_cls in (
         ("scenario.mode", scenario, "simulationMode", SimulationMode),
@@ -693,7 +733,7 @@ def _parse_header(document: dict[str, Any], errors: _Errors) -> tuple[Any, int |
     try:
         settings = wizard._parse_scenario_settings(payload, None)
     except ValidationError as exc:
-        errors.merge(exc, _WIZARD_KEYS, "scenario")
+        errors.merge(exc, _settings_keys(exc), "scenario")
     if not enum_ok or header is None or settings is None:
         return None, None, None
     return header, settings[0], settings[1]

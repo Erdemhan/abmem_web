@@ -1,0 +1,50 @@
+{% comment %}
+One segment panel (day or night) of components/demand_profile_form.html.
+Parameters: prefix, segment ("day" or "night"), title.
+{% endcomment %}
+<div class="col-12 col-lg-6 mb-3">
+    <fieldset class="border border-radius-lg p-3 h-100" id="{{ prefix }}-{{ segment }}">
+        <legend class="float-none w-auto px-1 mb-0 text-sm font-weight-bold">{{ title }} hours</legend>
+        <div class="row">
+            <div class="col-12 mb-2">
+                <label for="{{ prefix }}-{{ segment }}-distribution" class="form-label">Distribution
+                    <button type="button" class="btn btn-link p-0 ms-1 mb-0 info-tip" data-bs-toggle="tooltip"
+                        title="Normal and Log-normal use the mean and standard deviation and are truncated to [min, max]; Uniform spreads evenly between min and max. Truncation can move the realised mean away from the requested mean; the preview shows the realised values."
+                        aria-label="Help: {{ title|lower }} distribution"><i class="fas fa-circle-info" aria-hidden="true"></i></button>
+                </label>
+                <select id="{{ prefix }}-{{ segment }}-distribution" class="form-control"
+                    aria-describedby="{{ prefix }}-{{ segment }}-distribution-feedback">
+                    <option value="NORMAL">Normal</option>
+                    <option value="UNIFORM">Uniform</option>
+                    <option value="LOGNORMAL">Log-normal</option>
+                </select>
+                <div class="invalid-feedback" id="{{ prefix }}-{{ segment }}-distribution-feedback"></div>
+            </div>
+            <div class="col-6 mb-2" id="{{ prefix }}-{{ segment }}-mean-group">
+                <label for="{{ prefix }}-{{ segment }}-mean" class="form-label">Mean (MWh)</label>
+                <input type="number" id="{{ prefix }}-{{ segment }}-mean" class="form-control" min="0" step="any"
+                    aria-describedby="{{ prefix }}-{{ segment }}-mean-feedback">
+                <div class="invalid-feedback" id="{{ prefix }}-{{ segment }}-mean-feedback"></div>
+            </div>
+            <div class="col-6 mb-2" id="{{ prefix }}-{{ segment }}-std-group">
+                <label for="{{ prefix }}-{{ segment }}-std" class="form-label">Std. deviation (MWh)</label>
+                <input type="number" id="{{ prefix }}-{{ segment }}-std" class="form-control" min="0" step="any"
+                    aria-describedby="{{ prefix }}-{{ segment }}-std-feedback">
+                <div class="invalid-feedback" id="{{ prefix }}-{{ segment }}-std-feedback"></div>
+            </div>
+            <div class="col-6 mb-2">
+                <label for="{{ prefix }}-{{ segment }}-min" class="form-label">Minimum (MWh)</label>
+                <input type="number" id="{{ prefix }}-{{ segment }}-min" class="form-control" min="0" step="any"
+                    aria-describedby="{{ prefix }}-{{ segment }}-min-feedback">
+                <div class="invalid-feedback" id="{{ prefix }}-{{ segment }}-min-feedback"></div>
+            </div>
+            <div class="col-6 mb-2">
+                <label for="{{ prefix }}-{{ segment }}-max" class="form-label">Maximum (MWh)</label>
+                <input type="number" id="{{ prefix }}-{{ segment }}-max" class="form-control" min="0" step="any"
+                    aria-describedby="{{ prefix }}-{{ segment }}-max-feedback">
+                <div class="invalid-feedback" id="{{ prefix }}-{{ segment }}-max-feedback"></div>
+            </div>
+        </div>
+        <div class="invalid-feedback" id="{{ prefix }}-{{ segment }}-feedback"></div>
+    </fieldset>
+</div>

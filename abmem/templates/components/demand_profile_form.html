@@ -1,0 +1,75 @@
+{% comment %}
+Demand-profile editor (PLAN 2.8). Reusable: include with
+    {% include 'components/demand_profile_form.html' with prefix="demand" initial_profile=profile %}
+and load static assets/js/demand-profile.js, then call DemandProfileForm.init(container) on the
+element with data-prefix. Ids are "<prefix>-<field>", feedback ids "<prefix>-<field>-feedback".
+initial_profile is a profile mapping or None (demand file).
+{% endcomment %}
+{% with json_id=prefix|add:"-initial" %}{{ initial_profile|json_script:json_id }}{% endwith %}
+<div class="demand-profile" id="{{ prefix }}-component" data-prefix="{{ prefix }}">
+    <fieldset class="mb-3" id="{{ prefix }}-source">
+        <legend class="form-label text-sm mb-1">Demand source
+            <button type="button" class="btn btn-link p-0 ms-1 mb-0 info-tip" data-bs-toggle="tooltip"
+                title="File: the hourly DEMAND column of marketData.xlsx. Generated: synthetic hourly demand from the profile below, with its own seed, so runs with different run seeds see the same demand."
+                aria-label="Help: demand source"><i class="fas fa-circle-info" aria-hidden="true"></i></button>
+        </legend>
+        <div class="d-flex flex-wrap gap-2" role="radiogroup" aria-label="Demand source">
+            <input type="radio" class="btn-check" name="{{ prefix }}-source" id="{{ prefix }}-source-file" value="file" autocomplete="off" checked>
+            <label class="btn btn-outline-primary btn-sm mb-0" for="{{ prefix }}-source-file">File (marketData.xlsx)</label>
+            <input type="radio" class="btn-check" name="{{ prefix }}-source" id="{{ prefix }}-source-generated" value="generated" autocomplete="off">
+            <label class="btn btn-outline-primary btn-sm mb-0" for="{{ prefix }}-source-generated">Generated</label>
+        </div>
+        <div class="invalid-feedback" id="{{ prefix }}-source-feedback"></div>
+    </fieldset>
+
+    <div id="{{ prefix }}-generated" hidden>
+        <div class="row">
+            <div class="col-12 col-md-6 col-lg-3 mb-3">
+                <label for="{{ prefix }}-seed" class="form-label">Demand seed
+                    <button type="button" class="btn btn-link p-0 ms-1 mb-0 info-tip" data-bs-toggle="tooltip"
+                        title="Seed of the demand generator only. The same profile, seed and number of periods always give the same demand; the run seed does not change it."
+                        aria-label="Help: demand seed"><i class="fas fa-circle-info" aria-hidden="true"></i></button>
+                </label>
+                <div class="input-group">
+                    <input type="number" id="{{ prefix }}-seed" class="form-control" min="0" max="2147483647" step="1"
+                        aria-describedby="{{ prefix }}-seed-feedback">
+                    <button class="btn btn-outline-secondary mb-0" type="button" id="{{ prefix }}-seed-random">Random</button>
+                </div>
+                <div class="invalid-feedback" id="{{ prefix }}-seed-feedback"></div>
+            </div>
+            <div class="col-6 col-md-3 col-lg-2 mb-3">
+                <label for="{{ prefix }}-day_start_hour" class="form-label">Day start hour
+                    <button type="button" class="btn btn-link p-0 ms-1 mb-0 info-tip" data-bs-toggle="tooltip"
+                        title="Day hours are [start, end) on the 24-hour clock, for example 8 to 20 is 08:00-20:00. The other hours are night."
+                        aria-label="Help: day hours"><i class="fas fa-circle-info" aria-hidden="true"></i></button>
+                </label>
+                <input type="number" id="{{ prefix }}-day_start_hour" class="form-control" min="0" max="23" step="1"
+                    aria-describedby="{{ prefix }}-day_start_hour-feedback {{ prefix }}-night-text">
+                <div class="invalid-feedback" id="{{ prefix }}-day_start_hour-feedback"></div>
+            </div>
+            <div class="col-6 col-md-3 col-lg-2 mb-3">
+                <label for="{{ prefix }}-day_end_hour" class="form-label">Day end hour</label>
+                <input type="number" id="{{ prefix }}-day_end_hour" class="form-control" min="1" max="24" step="1"
+                    aria-describedby="{{ prefix }}-day_end_hour-feedback {{ prefix }}-night-text">
+                <div class="invalid-feedback" id="{{ prefix }}-day_end_hour-feedback"></div>
+            </div>
+            <div class="col-12 col-md-6 col-lg-2 mb-3 d-flex align-items-end">
+                <p class="text-sm text-secondary mb-2" id="{{ prefix }}-night-text" aria-live="polite">Night: -</p>
+            </div>
+            <div class="col-12 col-md-6 col-lg-3 mb-3">
+                <label for="{{ prefix }}-autocorrelation" class="form-label">Autocorrelation (phi)
+                    <button type="button" class="btn btn-link p-0 ms-1 mb-0 info-tip" data-bs-toggle="tooltip"
+                        title="How strongly an hour follows the previous hour (AR(1) coefficient, 0 to 0.99). 0: independent hours; 0.9: smooth, persistent demand."
+                        aria-label="Help: autocorrelation"><i class="fas fa-circle-info" aria-hidden="true"></i></button>
+                </label>
+                <input type="number" id="{{ prefix }}-autocorrelation" class="form-control" min="0" max="0.99" step="0.01"
+                    aria-describedby="{{ prefix }}-autocorrelation-feedback">
+                <div class="invalid-feedback" id="{{ prefix }}-autocorrelation-feedback"></div>
+            </div>
+        </div>
+        <div class="row">
+            {% include 'components/demand_segment_fields.html' with prefix=prefix segment="day" title="Day" %}
+            {% include 'components/demand_segment_fields.html' with prefix=prefix segment="night" title="Night" %}
+        </div>
+    </div>
+</div>

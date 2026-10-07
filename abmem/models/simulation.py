@@ -36,6 +36,11 @@ class Simulation(Base):
     was cloned from (NULL for scenarios and older runs). ``warm_start_from``
     is the finished run whose saved policies initialised this run, and
     ``freeze_policies`` runs those loaded policies without learning.
+
+    ``demand_profile`` (PLAN 2.8) is the synthetic demand profile of the
+    scenario (``demand_generator.DemandProfile.to_dict``); NULL means the
+    demand column of ``marketData.xlsx``. The generated series is never
+    stored, it is regenerated from the profile and ``periodNumber``.
     """
 
     name = models.CharField(max_length=20, null=False)
@@ -64,6 +69,7 @@ class Simulation(Base):
         related_name="warm_started_runs",
     )
     freeze_policies = models.BooleanField(default=False)
+    demand_profile = models.JSONField(null=True, blank=True)
 
     class Meta:
         constraints = [

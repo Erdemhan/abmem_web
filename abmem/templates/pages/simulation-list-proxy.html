@@ -487,6 +487,10 @@
         planBox.appendChild(el('div', 'font-weight-bold mb-1', 'New scenario "' + s.name + '"'));
         planBox.appendChild(el('div', '', s.periods + ' ' + s.period_type + ' periods, ' + s.mode + ', seed ' + s.seed +
           ', evaluation periods ' + s.evaluation_periods + ', lags ' + s.observation_lags.join(', ')));
+        planBox.appendChild(el('div', '', 'Demand: ' + (s.demand
+          ? 'generated (seed ' + s.demand.seed + ', day ' + s.demand.day.distribution + ', night ' +
+            s.demand.night.distribution + ')'
+          : 'file (marketData.xlsx)')));
         planBox.appendChild(el('div', '', 'Market: ' + s.strategy + ', bids ' + s.bid_bounds[0] + ' to ' +
           s.bid_bounds[1] + ' USD/MWh'));
         planBox.appendChild(el('div', '', 'Scenario agents: ' + (s.agents.length ? s.agents.join(', ') : 'none')));

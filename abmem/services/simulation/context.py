@@ -107,6 +107,39 @@ def policy_spec_for(
     )
 
 
+def demand_for(simulation: Simulation, periods: int) -> DemandSeries:
+    """Return the demand series of a simulation (PLAN 2.8).
+
+    Args:
+        simulation: Run or scenario.
+        periods: Number of periods to generate for a profile (the Excel
+            series is returned whole).
+
+    Returns:
+        ``DemandSeries.from_profile`` of ``simulation.demand_profile``, or the
+        ``DEMAND`` column of ``marketData.xlsx`` when the profile is NULL.
+
+    Raises:
+        DemandDataError: The demand file cannot be read or the stored
+            profile is invalid.
+    """
+    if simulation.demand_profile is not None:
+        from django.core.exceptions import ValidationError
+
+        from abmem.services.market.demand_generator import DemandProfile
+
+        try:
+            profile = DemandProfile.from_dict(simulation.demand_profile)
+        except ValidationError as error:
+            raise DemandDataError(
+                f"invalid demand profile: {'; '.join(error.messages)}"
+            ) from error
+        return DemandSeries.from_profile(profile, periods)
+    from abmem.constants.paths import DATA_DIR
+
+    return DemandSeries.from_excel(DATA_DIR / MARKET_DATA_FILE, column=DEMAND_COLUMN)
+
+
 class SimulationValidationError(ValueError):
     """Raised by :meth:`SimulationContext.build` when a run cannot start."""
 
@@ -244,8 +277,9 @@ class SimulationContext:
             forced_algorithm: Algorithm used for every agent instead of
                 ``Agent.algorithm_type`` (HPO, K7).
             export_json: Stored on the context for the run loop.
-            demand: Demand series to use. Read from ``marketData.xlsx`` when
-                None.
+            demand: Demand series to use. When None, generated from
+                ``simulation.demand_profile`` or read from ``marketData.xlsx``
+                when the profile is NULL (:func:`demand_for`).
 
         Returns:
             The context. No ``Period`` row has been created.
@@ -286,11 +320,7 @@ class SimulationContext:
 
         try:
             if demand is None:
-                from abmem.constants.paths import DATA_DIR
-
-                demand = DemandSeries.from_excel(
-                    DATA_DIR / MARKET_DATA_FILE, column=DEMAND_COLUMN
-                )
+                demand = demand_for(simulation, period_number)
             demand.validate_horizon(period_number)
         except DemandDataError as error:
             raise SimulationValidationError(str(error)) from error
