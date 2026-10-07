@@ -45,7 +45,7 @@ flowchart TB
     subgraph CORE["Pure domain core (no ORM)"]
         CTX["simulation/context.py<br/>SimulationContext, AgentRuntimeState"]
         SEED["simulation/seeding.py"]
-        CLR["market/clearing.py<br/>merit order, equal-share capped tie split"]
+        CLR["market/clearing.py + clearing_algorithms/<br/>Bid, ClearingResult, result contract,<br/>MERIT_ORDER (default) and discovered algorithms"]
         DEM["market/demand.py<br/>DemandSeries validation"]
         ACC["market/accounting.py<br/>offer_profit"]
         OBS["agent/observation.py<br/>build_observation, ObservationNormalizer"]
@@ -60,7 +60,7 @@ flowchart TB
         CFG["algorithm_config.py<br/>AlgorithmConfig + subclasses"]
         RB["replay_buffer.py<br/>ReplayBuffer, RolloutBuffer"]
         NET["networks.py, device.py"]
-        REG["registry.py<br/>AlgorithmType -> class, default config"]
+        REG["registry.py<br/>key -> discovered class, config class"]
         IMPL["DDPG.py, TD3.py, SAC.py (+sac_networks.py),<br/>ppo.py, RDPG.py, baselines.py"]
     end
 
@@ -93,9 +93,9 @@ abmem/
 ├── bootstrap.py                    # setup_django(), run_simulation_process, run_hpo_process, init_hpo_worker
 ├── models/
 │   ├── base.py                     # unchanged
-│   ├── enums.py                    # + AlgorithmType, SimulationState.FAILED, HPOStatus, HPOPhase, HPOTrialStatus
+│   ├── enums.py                    # SimulationState.FAILED, HPOStatus, HPOPhase, HPOTrialStatus (AlgorithmType kept only for old migrations)
 │   ├── simulation.py               # + seed, observation_lags, evaluation_periods, error
-│   ├── market.py                   # unchanged fields
+│   ├── market.py                   # + clearing_algorithm (key, default MERIT_ORDER, PLAN 2.10)
 │   ├── agent.py                    # + algorithm_type, algorithm_params, failstack_*, source, constraints, runtime_policy
 │   ├── models.py                   # Offer.acceptanceAmount / Period.metDemand -> DecimalField
 │   ├── diagnostics.py              # NEW AgentStepLog
@@ -112,7 +112,8 @@ abmem/
 │   │   └── offer_factory.py, agent_factory.py, portfolio_factory.py
 │   ├── market/
 │   │   ├── market_service.py       # run_period(ctx, t)
-│   │   ├── clearing.py             # NEW pure merit-order clearing
+│   │   ├── clearing.py             # Bid, ClearingResult, validate_clearing_result, acceptance_prices, clear_market wrapper
+│   │   ├── clearing_algorithms/    # NEW (2.10) base.py BaseClearingAlgorithm, registry.py, merit_order.py (MERIT_ORDER)
 │   │   ├── accounting.py           # NEW offer_profit (shared by budgets and reward)
 │   │   ├── demand.py               # NEW DemandSeries (A8)
 │   │   └── market_factory.py, period_factory.py
@@ -122,6 +123,7 @@ abmem/
 │   │   ├── seeding.py              # NEW seed_everything, spawn_agent_rngs
 │   │   └── simulation_factory.py
 │   ├── diagnostics/step_logger.py  # NEW
+│   ├── plugin_registry.py          # NEW (2.10) PluginRegistry: subclass registration and package discovery
 │   ├── algorithms/
 │   │   ├── base.py, algorithm_config.py, replay_buffer.py, networks.py, registry.py, device.py   # NEW
 │   │   ├── DDPG.py, TD3.py, SAC.py, sac_networks.py, ppo.py, RDPG.py                              # rewritten
@@ -175,7 +177,7 @@ erDiagram
     }
     AGENT {
         string name
-        int algorithm_type "NEW AlgorithmType, default DDPG"
+        string algorithm_type "key of a registered algorithm, default DDPG (2.10)"
         json algorithm_params "NEW nullable overrides"
         bool failstack_enabled "NEW default False"
         int failstack_limit "NEW L default 6"
@@ -253,6 +255,8 @@ erDiagram
 | `Simulation.error` | `TextField(blank=True, default='')` | OQ-8 | same |
 | `AgentStepLog` | new model | 1.2 | same |
 | `HPOStudy` (+ `heartbeat_at`), `HPOTrial`, `AlgorithmDefault` | new models, `HPOTrial.simulation` nullable OneToOne `SET_NULL` | 2.4, OQ-9, OQ-17 | `0011_hpo` |
+| `Agent`, `HPOStudy`, `AlgorithmDefault` (unique), `PolicyCheckpoint` `.algorithm_type` | enum integer -> `CharField(64)` holding the algorithm key (`Agent` default `DDPG`). RunPython maps 0..7 to DDPG, RDPG, TD3, SAC, PPO, RANDOM, MARGINAL_COST, FIXED_MARKUP and back | 2.10 | `0017_algorithm_keys_and_clearing_algorithm` |
+| `Market.clearing_algorithm` | `CharField(64, default='MERIT_ORDER')` | 2.10 | same |
 
 ### 4.2 Agent roles (K4 = A)
 
@@ -355,7 +359,9 @@ class UpdateStats:
     extra: Mapping[str, float]
 
 class BaseAgentAlgorithm(abc.ABC):
-    algorithm_type: ClassVar[AlgorithmType]
+    key: ClassVar[str]                # stored key, e.g. "DDPG" (PLAN 2.10)
+    label: ClassVar[str]
+    description: ClassVar[str]
     is_learning: ClassVar[bool]
     is_on_policy: ClassVar[bool]
     config_class: ClassVar[type[AlgorithmConfig]]
@@ -446,7 +452,7 @@ class SimulationContext:
 
     @classmethod
     def build(cls, simulation: Simulation, algorithm_overrides: Mapping[str, Any] | None = None,
-              *, forced_algorithm: AlgorithmType | None = None, export_json: bool = True) -> Self: ...
+              *, forced_algorithm: str | None = None, export_json: bool = True) -> Self: ...
     def phase_for(self, t: int) -> RunPhase: ...   # EVALUATE iff t >= evaluation_start
 ```
 
@@ -477,6 +483,23 @@ def apply_interventions(state, params, prices, ptf_prev, low, high, rng) -> tupl
 - The applied price is converted back with `action_space.from_price` and stored as the action. The flag goes to `AgentStepLog.intervened_plants`.
 - Applied identically for every learning algorithm by `agent_service`. Disabled by default. Never applied to baseline policies (2.1).
 - PPO masks intervened steps out of the clipped policy loss and keeps them in the value loss.
+
+### 5.6 Algorithm registries (`services/plugin_registry.py`, PLAN 2.10)
+
+Agent algorithms and market clearing algorithms are plain subclasses of a base class. One helper, `PluginRegistry`, serves both kinds:
+
+| Kind | Base class | Package scanned | Registry module | Stored in |
+|---|---|---|---|---|
+| Agent algorithm | `services/algorithms/base.py::BaseAgentAlgorithm` | `abmem.services.algorithms` (without `optimization/`) | `services/algorithms/registry.py` | `Agent`, `HPOStudy`, `AlgorithmDefault`, `PolicyCheckpoint` `.algorithm_type` |
+| Clearing algorithm | `services/market/clearing_algorithms/base.py::BaseClearingAlgorithm` | `abmem.services.market.clearing_algorithms` | `services/market/clearing_algorithms/registry.py` | `Market.clearing_algorithm` |
+
+- The base class calls `PluginRegistry.register` from `__init_subclass__`. A class is registered when it is concrete (`inspect.isabstract` is False) and declares its own non-empty `key` matching `^[A-Z][A-Z0-9_]{0,63}$`. A subclass that only inherits a key is not registered. A second class with the same key raises `ImproperlyConfigured` naming both classes. An agent algorithm must also declare `is_learning` and a `config_class`.
+- Discovery imports every public module of the package (names starting with `_` are skipped) on the first registry query and caches the result. Django start and importing a registry module import no algorithm module and no torch. A module that fails to import raises `PluginDiscoveryError` with its traceback.
+- Agent registry API: `available_algorithms()` (learning first, then baselines, each by label), `get_algorithm_class`, `get_config_class`, `default_config`, `build_policy`, `is_known`, `is_baseline` (not `is_learning`), `label_for`. The UI choices, the HPO algorithm list (algorithms with non-empty `default_search_bounds`), the YAML `algorithm` key and the run validation all read it. The keys of the eight existing algorithms are the former enum names.
+- Clearing registry API: `available_clearing_algorithms()` (MERIT_ORDER first), `get_clearing_algorithm(key)` (new instance), `is_known_clearing`, `clearing_label_for`.
+- A stored key whose class is gone stays in the database. Lists and forms show it as unavailable, saving it again is rejected, and `SimulationContext.build` raises `SimulationValidationError` naming the agent (or market) and the key.
+- Clearing result contract (`clearing.validate_clearing_result`, `ClearingContractError`): `accepted` has exactly the bid keys, every accepted quantity is a finite `Decimal` with `0 <= a <= q` and a multiple of the quantum, `met_demand == sum(accepted) <= min(demand, offered_volume)`, `offered_volume` equals the offered total, `ptf` is None exactly when `met_demand == 0` and otherwise lies in `[lowerBidBound, upperBidBound]`, and `marginal_group` is a tuple of bid keys without repeats.
+- How to add an algorithm: `docs/extending_algorithms.md`. A new algorithm used for reported results needs its own `FORMULATION.md` entry approved by the user.
 
 ---
 
@@ -539,7 +562,7 @@ sequenceDiagram
     participant S as simulation_service.run
     participant M as market_service.run_period
     participant A as agent_service.step
-    participant C as clearing.clear_market
+    participant C as ctx.clearing (Market.clearing_algorithm)
     participant DB as PostgreSQL
 
     S->>M: run_period(ctx, t)
@@ -548,8 +571,9 @@ sequenceDiagram
         M->>A: step(ctx, rt, t)
         A-->>M: unsaved Offer list
     end
-    M->>C: clear_market(bids, demand(t))
+    M->>C: clear(bids, demand(t), quantum)
     C-->>M: ClearingResult(accepted, ptf, met_demand, offered_volume)
+    M->>M: validate_clearing_result (contract, ClearingContractError)
     M->>M: acceptance_prices(strategy), offer_profit per offer, budgets in Decimal
     M->>DB: Offer.bulk_create, Period update, Agent.bulk_update(['budget','state'])
     M->>DB: AgentStepLog.bulk_create (StepLogger.flush)
@@ -557,7 +581,9 @@ sequenceDiagram
     M->>DB: Market.state = PERIODEND
 ```
 
-Clearing (1.7, B4, OQ-18): bids are grouped by equal price and processed in ascending order. A group that fits the remaining demand is fully accepted. The first group that exceeds the remaining demand `D` is split by equal shares capped at offer quantity (water-filling): `D` is divided equally among the tied offers, each offer is capped at its quantity, and the leftover is redistributed equally among the uncapped offers until `D` or the group capacity is exhausted. Example: A=100, B=10, D=60 gives B=10, A=50. Computation is in `Decimal`, quantised to 3 decimals with the largest-remainder method so allocations sum exactly to `D`. A supply shortfall accepts all bids and sets PTF to the highest accepted price. PAYASPTF sets every accepted `acceptancePrice` to PTF.
+The clearing algorithm is the class registered under `Market.clearing_algorithm` (section 5.6), resolved once in `SimulationContext.build`. Its result is checked against the contract of `clearing.validate_clearing_result` before anything is written. The settlement rule (`Market.strategy`, `acceptance_prices`) is applied afterwards and does not depend on the clearing algorithm.
+
+Default clearing `MERIT_ORDER` (1.7, B4, OQ-18): bids are grouped by equal price and processed in ascending order. A group that fits the remaining demand is fully accepted. The first group that exceeds the remaining demand `D` is split by equal shares capped at offer quantity (water-filling): `D` is divided equally among the tied offers, each offer is capped at its quantity, and the leftover is redistributed equally among the uncapped offers until `D` or the group capacity is exhausted. Example: A=100, B=10, D=60 gives B=10, A=50. Computation is in `Decimal`, quantised to 3 decimals with the largest-remainder method so allocations sum exactly to `D`. A supply shortfall accepts all bids and sets PTF to the highest accepted price. PAYASPTF sets every accepted `acceptancePrice` to PTF.
 
 ### 6.3 Simulation run
 
@@ -704,6 +730,11 @@ New POST endpoints use Django CSRF protection. The existing `@csrf_exempt` decor
 - `AgentStepLog.learning_active`, `evaluation_phase`, `exploration_scale` and `extra` hold the 1.2 diagnostics.
 - `HPOTrial.simulation` is a OneToOne link because each evaluation run belongs to exactly one trial.
 - `Simulation.observation_lags`, `evaluation_periods`, `error`, `SimulationState.FAILED`, `Agent.algorithm_params`, `AlgorithmDefault` and `HPOStudy.heartbeat_at` follow from the user's resolutions of OQ-1, OQ-5, OQ-8, OQ-9 and OQ-17.
+
+### ADR-010: Algorithms discovered from subclasses, stored as text keys (PLAN 2.10)
+- Context: adding an agent algorithm needed edits in the `AlgorithmType` enum, `registry.ALGORITHM_CLASS_PATHS`, `BASELINE_TYPES` and `CONFIG_CLASSES`, and the clearing was a single fixed function.
+- Decision: both kinds are subclasses of a base class registered by `__init_subclass__` and found by importing the modules of their package (section 5.6). The database stores the key as text. Migration 0017 maps the stored enum integers to the former enum names, so stored data and YAML files keep their meaning. The settlement rule stays in `Market.strategy`.
+- Consequences: no table edit is needed for a new algorithm, a removed class leaves its key in the database (shown as unavailable, rejected at run start), and the engine checks every clearing result against an explicit contract. `AlgorithmType` remains in `enums.py` only for the historical migrations.
 
 ---
 
