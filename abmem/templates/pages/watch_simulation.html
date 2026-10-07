@@ -106,6 +106,12 @@
                                                     <th
                                                         class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">
                                                         Budget</th>
+                                                    <th
+                                                        class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">
+                                                        Algorithm</th>
+                                                    <th
+                                                        class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">
+                                                        Fail-stack</th>
                                                 </tr>
                                             </thead>
                                             <tbody>
@@ -195,7 +201,11 @@
 
                 var agentRows = '';
                 data.agents.forEach(function (agent) {
-                    agentRows += '<tr><td>' + agent.name + '</td><td>' + agent.state + '</td><td>' + agent.budget + '</td></tr>';
+                    var failstackBadge = agent.failstack_enabled
+                        ? '<span class="badge bg-gradient-success">On</span>'
+                        : '<span class="badge bg-gradient-secondary">Off</span>';
+                    agentRows += '<tr><td>' + agent.name + '</td><td>' + agent.state + '</td><td>' + agent.budget
+                        + '</td><td>' + agent.algorithm + '</td><td>' + failstackBadge + '</td></tr>';
                 });
                 $('#agents-table tbody').html(agentRows);
                 //>>>>>>>

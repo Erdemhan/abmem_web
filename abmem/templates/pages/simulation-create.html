@@ -1,4 +1,4 @@
-{% load static %}
+{% load static abmem_choices %}
 <!DOCTYPE html>
 <html lang="en">
 
@@ -104,6 +104,7 @@
                         <tr>
                             <th>Name</th>
                             <th>Type</th>
+                            <th>Algorithm</th>
                             <th>Budget</th>
                             <th>Plants</th>
                         </tr>
@@ -138,6 +139,7 @@
     <!-- END MAIN -->
 
     {{ allowed_energy_types|json_script:"allowed-energy-types" }}
+    {% algorithm_fields_script %}
     <script>
         // Agent type -> allowed energy types, rendered from resource_rules.allowed_energy_types (PLAN 2.2).
         var ALLOWED_ENERGY_TYPES = JSON.parse(document.getElementById('allowed-energy-types').textContent);
@@ -235,6 +237,9 @@
                         </select>
                     </td>
                     <td>
+                        {% algorithm_fields %}
+                    </td>
+                    <td>
                         <input type="number" class="form-control agent-budget" placeholder="Budget" required>
                     </td>
                     <td>
@@ -257,6 +262,7 @@
                 </tr>
             `;
             $('#agents-tbody').append(agentHtml);
+            applyAlgorithmFields($('#agents-tbody tr.agent').last());
         }
 
         function addPlant(agentIndex) {
@@ -324,12 +330,12 @@
                     });
                 });
 
-                agentsData.push({
+                agentsData.push($.extend({
                     name: agentName,
                     type: agentType,
                     budget: agentBudget,
                     plants: plantsData
-                });
+                }, readAlgorithmFields($(this))));
             });
 
             var postData = {

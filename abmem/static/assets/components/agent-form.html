@@ -1,3 +1,4 @@
+{% load abmem_choices %}
 <agent-form>
     <div class="card-body">
         <form role="form text-left" id="agent-form" method="post" action="create">
@@ -19,6 +20,10 @@
                         <option value="2">Nuclear</option>
                         <option value="3">Hybrid</option>
                     </select>
+                </div>
+                <div class="form-group">
+                    <label for="algorithm_type">Algorithm</label>
+                    {% algorithm_fields form_names=True %}
                 </div>
                 <!-- Plant bilgileri için tablo -->
                 <div class="card-body px-0 pb-2 pt-0">
@@ -80,6 +85,7 @@
 </agent-form>
 
 {{ allowed_energy_types|json_script:"allowed-energy-types" }}
+{% algorithm_fields_script %}
 <script>
     // Agent type -> allowed energy types, rendered from resource_rules.allowed_energy_types (PLAN 2.2).
     var AGENT_FORM_ALLOWED_ENERGY_TYPES = JSON.parse(document.getElementById("allowed-energy-types").textContent);

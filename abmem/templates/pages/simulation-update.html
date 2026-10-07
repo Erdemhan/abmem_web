@@ -1,4 +1,4 @@
-{% load static %}
+{% load static abmem_choices %}
 <!DOCTYPE html>
 <html lang="en">
 
@@ -104,6 +104,7 @@
                         <tr>
                             <th>Name</th>
                             <th>Type</th>
+                            <th>Algorithm</th>
                             <th>Budget</th>
                             <th>Plants</th>
                         </tr>
@@ -121,6 +122,9 @@
                                     <option value="2" {% if agent.type == 2 %}selected{% endif %}>Nuclear</option>
                                     <option value="3" {% if agent.type == 3 %}selected{% endif %}>Hybrid</option>
                                 </select>
+                            </td>
+                            <td>
+                                {% algorithm_fields agent %}
                             </td>
                             <td>
                                 <input type="number" class="form-control agent-budget" id="agent-budget" placeholder="Budget" value="{{ agent.budget }}" required>
@@ -181,6 +185,7 @@
     <!-- END MAIN -->
 
     {{ allowed_energy_types|json_script:"allowed-energy-types" }}
+    {% algorithm_fields_script %}
     <script>
         // Agent type -> allowed energy types, rendered from resource_rules.allowed_energy_types (PLAN 2.2).
         var ALLOWED_ENERGY_TYPES = JSON.parse(document.getElementById('allowed-energy-types').textContent);
@@ -279,6 +284,9 @@
                         </select>
                     </td>
                     <td>
+                        {% algorithm_fields %}
+                    </td>
+                    <td>
                         <input type="number" class="form-control agent-budget" placeholder="Budget" required>
                     </td>
                     <td>
@@ -301,6 +309,7 @@
                 </tr>
             `;
             $('#agents-tbody').append(agentHtml);
+            applyAlgorithmFields($('#agents-tbody tr.agent').last());
         }
 
         function collectAgentsData() {
@@ -361,6 +370,9 @@
             filterResourceSelect($agentRow.find('.plant').last().find('.plant-resource'), $agentRow.find('.agent-type').val(), false);
         }
 
+        // Initial render: apply the baseline rule to the stored algorithm settings (PLAN 2.1).
+        applyAlgorithmFields($('#agents-tbody'));
+
         // Initial render: filter options of stored plants without removing them.
         $('#agents-tbody tr.agent').each(function () {
             var agentType = $(this).find('.agent-type').val();
@@ -407,12 +419,12 @@
                     });
                 });
 
-                agentsData.push({
+                agentsData.push($.extend({
                     name: agentName,
                     type: agentType,
                     budget: agentBudget,
                     plants: plantsData
-                });
+                }, readAlgorithmFields($(this))));
             });
 
             var postData = {

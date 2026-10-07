@@ -21,7 +21,9 @@ import json
 from django.shortcuts import render
 from django.http import JsonResponse
 from .models import Agent
+import math
 import re
+from collections.abc import Mapping
 from typing import Any
 
 from django.core.exceptions import ValidationError
@@ -31,10 +33,20 @@ from .services.agent.resource_rules import (
     allowed_energy_types_by_agent_type,
     validate_agent_resources,
 )
+from .services.algorithms.registry import BASELINE_TYPES
 
 
 # RESOURCE RULE HELPERS (PLAN 2.2)
-ParsedAgent = tuple[dict[str, Any], enums.AgentType, list[tuple[Resource, Any]]]
+ParsedAgent = tuple[
+    dict[str, Any], enums.AgentType, list[tuple[Resource, Any]], dict[str, Any]
+]
+
+# Payload key of the fail-stack object -> Agent model field (PLAN 2.1, K3).
+FAILSTACK_PAYLOAD_FIELDS: tuple[tuple[str, str], ...] = (
+    ("limit", "failstack_limit"),
+    ("delta", "failstack_delta"),
+    ("min_margin", "failstack_min_margin"),
+)
 
 
 def _add_errors(
@@ -97,6 +109,174 @@ def _coerce_agent_type(raw_type: Any) -> enums.AgentType:
         raise ValidationError({"type": [f"Unknown agent type: {raw_type}."]})
 
 
+def _coerce_algorithm_type(raw_type: Any) -> enums.AlgorithmType:
+    """Convert a JSON algorithm type (int, digit string or name) to ``AlgorithmType``.
+
+    Args:
+        raw_type: Value of the ``algorithm_type`` key. None or "" selects the
+            model default (DDPG).
+
+    Returns:
+        The matching ``AlgorithmType`` member.
+
+    Raises:
+        ValidationError: ``{'algorithm_type': [...]}`` for a value outside the enum.
+    """
+    if raw_type is None or raw_type == "":
+        default = Agent._meta.get_field("algorithm_type").get_default()
+        return enums.AlgorithmType.get(getattr(default, "value", default))
+    member = None
+    if isinstance(raw_type, int) and not isinstance(raw_type, bool):
+        member = enums.AlgorithmType.get(raw_type)
+    elif isinstance(raw_type, str):
+        text = raw_type.strip()
+        if text.isdigit():
+            member = enums.AlgorithmType.get(int(text))
+        elif text in enums.AlgorithmType.__members__:
+            member = enums.AlgorithmType[text]
+    if member is None:
+        known = ", ".join(f"{t.value} ({t.name})" for t in enums.AlgorithmType)
+        raise ValidationError(
+            {
+                "algorithm_type": [
+                    f"Unknown algorithm type: {raw_type!r}. Known types: {known}."
+                ]
+            }
+        )
+    return member
+
+
+def _coerce_failstack_value(field_name: str, raw_value: Any) -> Any:
+    """Validate one fail-stack value with the ``Agent`` model field rules.
+
+    Args:
+        field_name: ``failstack_limit``, ``failstack_delta`` or
+            ``failstack_min_margin``.
+        raw_value: Payload value (number or numeric string).
+
+    Returns:
+        The cleaned value (``int`` for the limit, ``Decimal`` otherwise).
+
+    Raises:
+        ValidationError: With a plain message when the value is not a finite
+            number, does not fit the field, ``limit < 1`` or ``delta < 0``.
+    """
+    if isinstance(raw_value, bool) or raw_value is None or raw_value == "":
+        raise ValidationError("a number is required.")
+    if isinstance(raw_value, float) and not math.isfinite(raw_value):
+        raise ValidationError(f"{raw_value} is not a finite number.")
+    if isinstance(raw_value, float):
+        raw_value = repr(raw_value)
+    if field_name == "failstack_limit":
+        text = str(raw_value).strip()
+        if not text.lstrip("-").isdigit():
+            raise ValidationError(f"{raw_value!r} is not an integer.")
+        limit = int(text)
+        if limit < 1:
+            raise ValidationError(f"must be an integer >= 1, got {limit}.")
+        return limit
+    value = Agent._meta.get_field(field_name).clean(raw_value, None)
+    if field_name == "failstack_delta" and value < 0:
+        raise ValidationError(f"must be >= 0 TL/MWh, got {value}.")
+    return value
+
+
+def _coerce_switch(raw_value: Any) -> bool:
+    """Convert a JSON switch value to bool.
+
+    Args:
+        raw_value: bool, or one of the strings "true", "false", "on", "off",
+            "1", "0", "" (case-insensitive). None means False.
+
+    Returns:
+        The switch state.
+
+    Raises:
+        ValidationError: For any other value.
+    """
+    if raw_value is None:
+        return False
+    if isinstance(raw_value, bool):
+        return raw_value
+    if isinstance(raw_value, str):
+        text = raw_value.strip().lower()
+        if text in ("true", "on", "1"):
+            return True
+        if text in ("false", "off", "0", ""):
+            return False
+    raise ValidationError(f"Fail-stack switch must be true or false, got {raw_value!r}.")
+
+
+def _parse_agent_algorithm(agent_data: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate the algorithm and fail-stack settings of one agent payload.
+
+    Expected keys: ``algorithm_type`` (int, digit string or enum name) and
+    ``failstack`` (``{"enabled": bool, "limit": int, "delta": number,
+    "min_margin": number}``). Values sent with ``enabled`` False are stored
+    so the settings are kept for later, the rule stays inactive.
+
+    Args:
+        agent_data: One entry of the ``agents`` list.
+
+    Returns:
+        ``{algorithm_type, failstack_enabled, failstack_limit,
+        failstack_delta, failstack_min_margin}``. Missing values take the
+        model defaults.
+
+    Raises:
+        ValidationError: Mapping from field name to messages for an unknown
+            algorithm, malformed or out-of-range fail-stack values, or an
+            enabled fail-stack rule on a baseline algorithm.
+    """
+    errors: dict[str, list[str]] = {}
+    result: dict[str, Any] = {
+        model_field: Agent._meta.get_field(model_field).get_default()
+        for _, model_field in FAILSTACK_PAYLOAD_FIELDS
+    }
+    try:
+        result["algorithm_type"] = _coerce_algorithm_type(
+            agent_data.get("algorithm_type")
+        )
+    except ValidationError as exc:
+        _add_errors(errors, exc, "algorithm_type", "")
+        result["algorithm_type"] = None
+
+    raw_failstack = agent_data.get("failstack")
+    if raw_failstack is not None and not isinstance(raw_failstack, Mapping):
+        errors.setdefault("failstack", []).append(
+            "Fail-stack settings must be an object."
+        )
+        raw_failstack = None
+    raw_failstack = raw_failstack or {}
+
+    try:
+        result["failstack_enabled"] = _coerce_switch(raw_failstack.get("enabled"))
+    except ValidationError as exc:
+        errors.setdefault("failstack_enabled", []).extend(exc.messages)
+        result["failstack_enabled"] = False
+
+    for payload_key, model_field in FAILSTACK_PAYLOAD_FIELDS:
+        if raw_failstack.get(payload_key) in (None, ""):
+            continue
+        try:
+            result[model_field] = _coerce_failstack_value(
+                model_field, raw_failstack[payload_key]
+            )
+        except ValidationError as exc:
+            errors.setdefault(model_field, []).extend(
+                f"Fail-stack {payload_key}: {message}" for message in exc.messages
+            )
+
+    if result["failstack_enabled"] and result["algorithm_type"] in BASELINE_TYPES:
+        errors.setdefault("failstack_enabled", []).append(
+            "The fail-stack rule cannot be enabled for the baseline algorithm "
+            f"{result['algorithm_type'].name}."
+        )
+    if errors:
+        raise ValidationError(errors)
+    return result
+
+
 def _parse_plants(raw_plants: Any) -> list[tuple[Resource, Any]]:
     """Resolve the plant rows of one agent payload.
 
@@ -144,8 +324,9 @@ def _parse_agents(agents_data: Any) -> list[ParsedAgent]:
         agents_data: Value of the ``agents`` key of the JSON payload.
 
     Returns:
-        One ``(agent_data, agent_type, [(resource, capacity), ...])`` tuple
-        per agent.
+        One ``(agent_data, agent_type, [(resource, capacity), ...],
+        algorithm)`` tuple per agent, ``algorithm`` from
+        ``_parse_agent_algorithm``.
 
     Raises:
         ValidationError: Mapping from field name to messages, each message
@@ -163,10 +344,15 @@ def _parse_agents(agents_data: Any) -> list[ParsedAgent]:
         agent_errors: dict[str, list[str]] = {}
         agent_type = None
         plants: list[tuple[Resource, Any]] = []
+        algorithm: dict[str, Any] = {}
         try:
             agent_type = _coerce_agent_type(agent_data.get("type"))
         except ValidationError as exc:
             _add_errors(agent_errors, exc, "type", prefix)
+        try:
+            algorithm = _parse_agent_algorithm(agent_data)
+        except ValidationError as exc:
+            _add_errors(agent_errors, exc, "algorithm_type", prefix)
         try:
             plants = _parse_plants(agent_data.get("plants"))
         except ValidationError as exc:
@@ -182,7 +368,7 @@ def _parse_agents(agents_data: Any) -> list[ParsedAgent]:
             for key, messages in agent_errors.items():
                 errors.setdefault(key, []).extend(messages)
         else:
-            parsed.append((agent_data, agent_type, plants))
+            parsed.append((agent_data, agent_type, plants, algorithm))
     if errors:
         raise ValidationError(errors)
     return parsed
@@ -198,13 +384,15 @@ def _create_agents(
         parsed_agents: Output of ``_parse_agents``.
         proxy: Proxy flag for every created row.
     """
-    for agent_data, agent_type, plants in parsed_agents:
-        agent = AgentFactory.create(
+    for agent_data, agent_type, plants, algorithm in parsed_agents:
+        agent = Agent.objects.create(
             name=agent_data["name"],
+            state=enums.AgentState.CREATED,
             type=agent_type,
             budget=agent_data["budget"],
             market=market,
             proxy=proxy,
+            **algorithm,
         )
         portfolio = Portfolio.objects.create(agent=agent, proxy=proxy)
         for resource, capacity in plants:
@@ -336,8 +524,18 @@ def get_simulation_status(request):
     agents = list(market.agent_set.all().order_by("-budget"))
     agent_list = []
     for agent in agents:
+        algorithm_type = enums.AlgorithmType.get(
+            getattr(agent.algorithm_type, "value", agent.algorithm_type)
+        )
         agent_list.append(
-            {"name": agent.name, "state": agent.state.name, "budget": agent.budget}
+            {
+                "name": agent.name,
+                "state": agent.state.name,
+                "budget": agent.budget,
+                "algorithm": algorithm_type.name if algorithm_type is not None else "",
+                "failstack_enabled": bool(agent.failstack_enabled)
+                and algorithm_type not in BASELINE_TYPES,
+            }
         )
 
     periods_list = []
@@ -372,6 +570,7 @@ def get_simulation_status(request):
             "marketStatus": marketStatus,
             "agents": agent_list,
             "periods": periods_list,
+            "error": simulation.error,
         }
     )
 

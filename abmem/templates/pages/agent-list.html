@@ -1,4 +1,4 @@
-{% load static %}
+{% load static abmem_choices %}
 <!DOCTYPE html>
 <html lang="en">
 
@@ -88,6 +88,12 @@
                                                 <th
                                                     class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">
                                                     Energy Type</th>
+                                                <th
+                                                    class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">
+                                                    Algorithm</th>
+                                                <th
+                                                    class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">
+                                                    Fail-stack</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -115,6 +121,20 @@
                                                             class="text-center d-flex flex-column justify-content-center">
                                                             <h6 class="mb-0 text-sm">{{ agent.type }}</h6>
                                                         </div>
+                                                    </div>
+                                                </td>
+                                                <td>
+                                                    <div class="d-flex px-2 py-1">
+                                                        <h6 class="mb-0 text-sm agent-algorithm-label">{{ agent.algorithm_type.name }}</h6>
+                                                    </div>
+                                                </td>
+                                                <td>
+                                                    <div class="d-flex px-2 py-1">
+                                                        {% if agent|failstack_active %}
+                                                        <span class="badge bg-gradient-success">On (L={{ agent.failstack_limit }}, &delta;={{ agent.failstack_delta }}, m_min={{ agent.failstack_min_margin }})</span>
+                                                        {% else %}
+                                                        <span class="badge bg-gradient-secondary">Off</span>
+                                                        {% endif %}
                                                     </div>
                                                 </td>
                                                 <td>
@@ -178,6 +198,7 @@
             $("#budget").val('');
             $("#type").val('').change();
             $("#plant_table tbody").find("tr:not(#row_template)").remove();
+            resetAlgorithmFields($("#agent-form"));
         }
 
 
@@ -196,6 +217,13 @@
             $("#agent-form").attr('action', '{{ agent.id }}/');
             $("#budget").val('{{ agent.budget }}');
             $("#type").val('{{ agent.type.value }}').change();
+            setAlgorithmFields($("#agent-form"), {
+                algorithm_type: '{{ agent.algorithm_type.value }}',
+                failstack_enabled: {% if agent.failstack_enabled %}true{% else %}false{% endif %},
+                failstack_limit: '{{ agent.failstack_limit }}',
+                failstack_delta: '{{ agent.failstack_delta }}',
+                failstack_min_margin: '{{ agent.failstack_min_margin }}'
+            });
             $("#submit-button").text("Save");
 
             // Load plants for this agent
