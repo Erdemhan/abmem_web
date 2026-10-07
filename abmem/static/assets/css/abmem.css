@@ -1,6 +1,68 @@
-.zoom4-1{
-    transition: transform .4s; /* Animation */
-  }
-  .zoom4-1:hover {
-    transform: scale(1.1); /* (150% zoom - Note: if the zoom is too large, it will go outside of the viewport) */
-  }
+.zoom4-1 {
+  transition: transform .4s; /* Animation */
+}
+.zoom4-1:hover {
+  transform: scale(1.1); /* (150% zoom - Note: if the zoom is too large, it will go outside of the viewport) */
+}
+
+/* ------------------------------------------------------------------------
+   Contrast of fields and nested cards.
+   Pages put inputs, option cards and agent cards on a white card, so white
+   controls had no visible edge. Fields and inner cards get a light grey
+   fill and a visible border; the focused or selected state stays magenta.
+   The body prefix raises specificity above page-level <style> rules.
+   ------------------------------------------------------------------------ */
+body .form-control,
+body .form-select,
+body .input-group-text {
+  background-color: #f6f7fb;
+  border: 1px solid #b9c0cb;
+  color: #344767;
+}
+body .form-control:focus,
+body .form-select:focus {
+  background-color: #fff;
+  border-color: #cb0c9f;
+  box-shadow: 0 0 0 .15rem rgba(203, 12, 159, .2);
+}
+body .form-control:disabled,
+body .form-select:disabled,
+body .form-control[readonly] {
+  background-color: #e9ecef;
+  color: #67748e;
+}
+body .form-control.is-invalid,
+body .form-select.is-invalid {
+  border-color: #ea0606;
+}
+body .form-check-input {
+  border: 1px solid #8392ab;
+}
+
+/* Cards placed inside a card, option tiles and library agent cards. */
+body .card .card,
+body .wizard-option,
+body .library-card {
+  background-color: #f6f7fb;
+  border: 1px solid #c3c9d4;
+  box-shadow: none;
+}
+body .wizard-option:hover,
+body .library-card:hover {
+  border-color: #cb0c9f;
+  background-color: #fff;
+}
+body .btn-check:checked + .wizard-option {
+  background-color: #fff;
+  border-color: #cb0c9f;
+  box-shadow: 0 0 0 .15rem rgba(203, 12, 159, .25);
+}
+body .library-card.is-added {
+  background-color: #f1fbe6;
+  border-color: #82d616;
+}
+
+/* Table rows and list items on cards. */
+body .card .table > :not(caption) > * > * {
+  border-bottom-color: #dfe3ea;
+}
