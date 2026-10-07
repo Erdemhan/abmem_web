@@ -15,8 +15,8 @@
 body .form-control,
 body .form-select,
 body .input-group-text {
-  background-color: #f6f7fb;
-  border: 1px solid #b9c0cb;
+  background-color: #eef1f6;
+  border: 1px solid #a9b2c1;
   color: #344767;
 }
 body .form-control:focus,
@@ -43,8 +43,8 @@ body .form-check-input {
 body .card .card,
 body .wizard-option,
 body .library-card {
-  background-color: #f6f7fb;
-  border: 1px solid #c3c9d4;
+  background-color: #eef1f6;
+  border: 1px solid #b4bccb;
   box-shadow: none;
 }
 body .wizard-option:hover,
