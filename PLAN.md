@@ -246,11 +246,12 @@ Her maddede: **ne yapılacak**, **nasıl doğrulanacak**. Type B/C maddeleri ayr
 - [ ] **Önizleme:** Özet adımında talep grafiği (dosya ya da üretilmiş), gece saatleri gölgeli, min/ortalama/maks. Talep ayarları YAML dışa/içe aktarmaya eklenir.
 
 ### 2.9 Talep profili kütüphanesi ve talep üretici sayfası (İstek 9, onay 2026-10-07)
-- [ ] **Tek kod:** üretim, doğrulama ve önizleme 2.8'deki ortak modül ve bileşenle yapılır (`demand_generator.py`, ortak form/önizleme bileşeni, tek önizleme uç noktası). Kod tekrarı yok.
-- [ ] **Kütüphane:** `DemandProfileTemplate` tablosu (ad, büyük/küçük harf duyarsız benzersiz; açıklama; profil JSON). Kenar çubuğunda "Demand Profiles", ana sayfada kart ve "Yeni profil" düğmesi. Liste, oluştur, düzenle, sil, kopyala. Oluşturma ekranında aynı editör ve canlı önizleme (süre seçilebilir).
-- [ ] **YAML:** profil başına dışa aktarma (`format_version: 1`, `kind: demand_profile`, `demand: {...}`, sadece ayarlar). İçe aktarma kütüphaneye ekler (önizleme + onay). Aynı ad farklı ayar → hata, aynı ad aynı ayar → mevcut kullanılır (ajan kuralıyla aynı).
-- [ ] **Sihirbaz:** talep kaynağı Dosya / Üret / Kütüphaneden. "Kütüphaneden" seçilen profilin kopyasını senaryoya yazar (senaryo kendi kopyasını tutar, `Simulation.demand_profile_source` bağlantısı). Sihirbazda talep YAML'ı içe aktarılabilir ve üretilen profil "Kütüphaneye kaydet" ile kütüphaneye eklenebilir.
-- [ ] **Silme kuralı:** bir senaryoda kaynak olarak kullanılan profil silinemez (ajan kuralıyla aynı). Çalıştırmalar engellemez.
+- [x] **Tek kod:** üretim, doğrulama ve önizleme 2.8'deki ortak modül ve bileşenle yapılır (`demand_generator.py`, ortak form/önizleme bileşeni, tek önizleme uç noktası). Kod tekrarı yok.
+- [x] **Kütüphane:** `DemandProfileTemplate` tablosu (ad, büyük/küçük harf duyarsız benzersiz; açıklama; profil JSON). Kenar çubuğunda "Demand Profiles", ana sayfada kart ve "Yeni profil" düğmesi. Liste, oluştur, düzenle, sil, kopyala. Oluşturma ekranında aynı editör ve canlı önizleme (süre seçilebilir).
+- [x] **YAML:** profil başına dışa aktarma (`format_version: 1`, `kind: demand_profile`, `demand: {...}`, sadece ayarlar). İçe aktarma kütüphaneye ekler (önizleme + onay). Aynı ad farklı ayar → hata, aynı ad aynı ayar → mevcut kullanılır (ajan kuralıyla aynı).
+- [x] **Sihirbaz:** talep kaynağı Dosya / Üret / Kütüphaneden. "Kütüphaneden" seçilen profilin kopyasını senaryoya yazar (senaryo kendi kopyasını tutar, `Simulation.demand_profile_source` bağlantısı). Sihirbazda talep YAML'ı içe aktarılabilir ve üretilen profil "Kütüphaneye kaydet" ile kütüphaneye eklenebilir.
+- [x] **Silme kuralı:** bir senaryoda kaynak olarak kullanılan profil silinemez (ajan kuralıyla aynı). Çalıştırmalar engellemez.
+- [x] **Ek (2026-10-07):** gece-gündüz geçiş rampaları ve isteğe bağlı yaz/kış ayrımı (generator, ölçekleme, ortak editör, önizleme). FORMULATION EQ-02b/EQ-02c güncellendi.
 
 ### 2.10 Pluggable agent and market clearing algorithms (request 10, approved 2026-10-07)
 Spec: `specs/pluggable_algorithms.json`. Starts after 2.9 is merged (migration 0017 follows 0016).
