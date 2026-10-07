@@ -107,11 +107,18 @@ def test_create_accepts_seed_zero_and_comma_string_lags(
     assert simulation.observation_lags == [1, 24, 168]
 
 
+def test_create_accepts_largest_storable_seed(client: Client, fossil: Resource) -> None:
+    simulation = _created(client, _payload(fossil, seed=2**31 - 1))
+
+    assert simulation.seed == 2**31 - 1
+
+
 @pytest.mark.parametrize(
     ("settings", "field"),
     [
         ({"seed": "-1"}, "seed"),
         ({"seed": 2**32}, "seed"),
+        ({"seed": 2**31}, "seed"),  # Simulation.seed is a signed 32-bit column
         ({"seed": "abc"}, "seed"),
         ({"seed": True}, "seed"),
         ({"seed": 1.5}, "seed"),

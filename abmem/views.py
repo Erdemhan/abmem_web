@@ -62,8 +62,10 @@ MODE_LIBRARY: Final[str] = "library"
 MODE_SCENARIO: Final[str] = "scenario"
 SCENARIO_AGENT_MODES: Final[tuple[str, ...]] = (MODE_NEW, MODE_LIBRARY, MODE_SCENARIO)
 
-# Exclusive upper bound of Simulation.seed (check constraint simulation_seed_range).
-SEED_UPPER_BOUND: Final[int] = 2**32
+# Exclusive upper bound of Simulation.seed. The column is a signed 32-bit
+# IntegerField, so values >= 2**31 raise "integer out of range" before the
+# check constraint simulation_seed_range (< 2**32) can apply.
+SEED_UPPER_BOUND: Final[int] = 2**31
 
 
 def _add_errors(
