@@ -759,3 +759,5 @@ Deviations from the specs, made during implementation:
 - Tests run with `web_project.settings_test`: DEBUG on, no `.env` needed, one test database per checkout, created as UTF8 from `template0` (the server's template databases are WIN1252).
 
 Open items: the multi-seed comparative experiment (protocol details pending, `FORMULATION.md` section 9), the remaining `FORMULATION.md` sections, persistence of trained policies (A9), and equalising the learning start across algorithms for fair comparison.
+
+- Run-time seed selection and the per-run analysis tab (PLAN 2.5, `aa0de9e`): `run_simulation` accepts a POST seed; routes `simulation/<id>/analysis/`, `simulation/<id>/analysis/data/`, `simulation/<id>/export/<periods|offers|steps>.csv`. The initial budget of a run is reconstructed from the stored final budget and the per-period offer profits (no stored initial budget). Verified in a real browser on run 33643 and with a seeded run (33651, seed 12345).
