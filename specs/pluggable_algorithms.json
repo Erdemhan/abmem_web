@@ -1,0 +1,64 @@
+{
+  "spec_id": "pluggable_algorithms",
+  "title": "Pluggable agent algorithms and market clearing algorithms discovered from subclasses",
+  "status": "approved",
+  "approval_note": "Requested and approved by the user on 2026-10-07 (PLAN.md 2.10): agent algorithms and market clearing algorithms are both defined as subclasses of a base class, discovered from the code and selectable in the simulation. The settlement rule (pay-as-bid / PTF) stays a separate choice.",
+  "plan_items": ["2.10"],
+  "depends_on": "PLAN 2.9 merged (migration 0016_demand_profile_template). The migration of this item is 0017.",
+  "invariants": [
+    "Existing results are unchanged: tests/runtime/test_result_fingerprint.py and the full suite stay green without changing expected values.",
+    "Keys of the existing agent algorithms are exactly the current AlgorithmType names: DDPG, RDPG, TD3, SAC, PPO, RANDOM, MARGINAL_COST, FIXED_MARKUP. Existing scenario YAML files (algorithm: DDPG) import unchanged.",
+    "Discovery imports modules lazily on first registry access (cached), not at Django start, to keep startup free of torch imports."
+  ],
+  "agent_algorithms": {
+    "base_class": "abmem/services/algorithms/base.py::BaseAgentAlgorithm gains ClassVars key: str, label: str, description: str, config_class: type[AlgorithmConfig] (is_learning and is_on_policy stay). The ClassVar algorithm_type is replaced by key.",
+    "registration": "BaseAgentAlgorithm.__init_subclass__ registers every concrete subclass (not inspect.isabstract and a non-empty key) in a module-level registry. Duplicate key -> ImproperlyConfigured naming both classes. Key format ^[A-Z][A-Z0-9_]{0,63}$.",
+    "discovery": "registry.discover() imports every module of the package abmem.services.algorithms (pkgutil.iter_modules, skipping private modules starting with '_' and the subpackage optimization if it has no algorithms) once and caches the result. A module that fails to import is reported with its traceback in the error, not skipped silently.",
+    "registry_api": [
+      "available_algorithms() -> tuple[AlgorithmInfo, ...]  (key, label, description, is_learning, is_on_policy, ordered: learning first then baselines, each by label)",
+      "get_algorithm_class(key: str) -> type[BaseAgentAlgorithm]  (KeyError listing known keys)",
+      "get_config_class(key: str) -> type[AlgorithmConfig]",
+      "is_baseline(key: str) -> bool  (not is_learning)",
+      "is_known(key: str) -> bool"
+    ],
+    "remove_static_tables": "ALGORITHM_CLASS_PATHS, BASELINE_TYPES and algorithm_config.CONFIG_CLASSES are removed (or derived from the registry if a stable import is needed). Each existing algorithm class declares its own key, label, description, config_class.",
+    "models": "Agent.algorithm_type, HPOStudy.algorithm_type, AlgorithmDefault.algorithm_type (unique) and PolicyCheckpoint's algorithm field become CharField(max_length=64) holding the key, default 'DDPG' where a default exists. Data migration maps the stored int through the old enum to its name and back in reverse. Keep the field names unless a rename is clearly simpler, and update every DB constraint that references them.",
+    "legacy_enum": "abmem.models.enums.AlgorithmType stays only because historical migrations import it. Add a comment that live code must not use it. No live code path imports it after this change (grep check in a test).",
+    "consumers": "Update every live use: library_service, scenario_yaml (validates the key with registry.is_known), forms_hpo, views, views_hpo, hpo_service (param_space_payload from the config class of the key), simulation context and service, checkpoints and persistence (stored key, warm start compares keys), run_analysis (labels from the registry), templatetags/abmem_choices (algorithm_choices from available_algorithms), templates and JS that send int values (they send keys now).",
+    "unknown_key": "An agent whose key is no longer registered: list/forms show the key with an 'unavailable' badge, saving it again is rejected with a field error, a run start fails in SimulationContext.build with SimulationValidationError naming the agent and the key."
+  },
+  "market_clearing": {
+    "base_class": "New module abmem/services/market/clearing_algorithms/base.py: abstract BaseClearingAlgorithm with ClassVars key, label, description and abstract method clear(self, bids: Sequence[Bid], demand: Decimal, quantum: Decimal) -> ClearingResult. Registration and discovery identical to the agent side (same helper, written once and used by both registries, e.g. abmem/services/plugin_registry.py).",
+    "merit_order": "The current clear_market logic moves into clearing_algorithms/merit_order.py as MeritOrderClearing (key MERIT_ORDER, label 'Uniform-price merit order'). clearing.py keeps Bid, ClearingResult, acceptance_prices and a thin clear_market wrapper delegating to MERIT_ORDER so the existing tests keep passing.",
+    "registry_api": "available_clearing_algorithms(), get_clearing_algorithm(key) -> instance, is_known_clearing(key).",
+    "model": "Market.clearing_algorithm = CharField(max_length=64, default='MERIT_ORDER'). Copied by duplicate_scenario and clone_scenario_for_run.",
+    "engine": "market_service.run_period calls the algorithm of ctx.market.clearing_algorithm (resolved once in SimulationContext.build) and then validate_clearing_result(result, bids, demand, quantum, low, high) before writing anything.",
+    "result_contract": [
+      "accepted has exactly the bid keys",
+      "every accepted quantity is a Decimal, 0 <= accepted <= bid quantity and a multiple of quantum",
+      "met_demand == sum(accepted) <= min(demand, offered_volume)",
+      "offered_volume == sum of bid quantities",
+      "ptf is None iff met_demand == 0, otherwise finite and lowerBidBound <= ptf <= upperBidBound",
+      "marginal_group is a subset of the accepted bid keys",
+      "A violation raises ClearingContractError (ValueError subclass) naming the algorithm key and the broken rule, and the run fails with that message."
+    ],
+    "settlement": "MarketStrategy (PAYASBID / PAYASPTF) and acceptance_prices stay unchanged and separate from the clearing algorithm.",
+    "ui": "Scenario wizard market step: a select 'Clearing algorithm' filled from available_clearing_algorithms() with the description as help text, next to the existing settlement rule. Scenario and run detail/list pages show the label. Editing a scenario with an unknown key shows it as unavailable and requires a valid choice.",
+    "yaml": "scenario YAML market section gains optional key clearing_algorithm (default MERIT_ORDER when missing, validated with is_known_clearing). Export always writes it."
+  },
+  "docs": "docs/extending_algorithms.md (English): how to add an agent algorithm (subclass, key, config_class with default_search_bounds for HPO, file location) and a clearing algorithm (subclass, contract, file location), with a minimal example of each, and the FORMULATION.md approval rule for research use. Update ARCHITECTURE.md where it describes the registry and the clearing.",
+  "tests": [
+    "Registry: all eight existing keys discovered with correct classes and config classes, ordering, duplicate key error, abstract subclass skipped, a test-only plugin module (created in a tmp package and imported) is discovered for both agents and clearing.",
+    "Migration 0017 data mapping int -> key and reverse (MigrationExecutor test or equivalent).",
+    "Clearing contract: each rule violated by a fake algorithm raises ClearingContractError, MERIT_ORDER passes on the existing clearing tests.",
+    "A run with a test-only clearing algorithm uses it (e.g. a fake that reverses order) and settles with the chosen settlement rule.",
+    "Unknown keys: agent and clearing produce SimulationValidationError at build, forms reject them.",
+    "Views/YAML: wizard saves clearing_algorithm, YAML round trip with and without the key, algorithm selects show discovered classes, HPO create works with the key.",
+    "Grep test: no live module under abmem/ (excluding migrations and enums.py) references AlgorithmType.",
+    "Full suite green including the result fingerprint."
+  ],
+  "out_of_scope": [
+    "No new clearing or agent algorithm is implemented here besides moving the existing ones.",
+    "No change to FORMULATION.md."
+  ]
+}
