@@ -154,22 +154,22 @@ Her maddede: **ne yapılacak**, **nasıl doğrulanacak**. Type B/C maddeleri ayr
 - **Doğrulama:** aynı seed ile iki çalıştırma aynı sonucu verir. Karşılaştırma ajanlarıyla senaryo uçtan uca çalışır.
 
 ### 1.11 ABC ve değerlendirme metriği (C8, B9)
-- [ ] Standart ABC (Karaboga, 2005): gözcü arılar uygunlukla orantılı olasılıkla kaynak seçer. Kaşif fazı `limit` ile çalışır.
-- [ ] Amaç: ya iki amaç üzerinden gerçek Pareto baskınlığı (Deb, 2001) ya da açıkça tek amaç (ağırlıklı skor). Seçim `FORMULATION.md`'ye yazılır.
-- [ ] Değerlendirme JSON dosyası yerine veritabanından yapılır. Başlangıç bütçesi gerçek başlangıç değeri, kapasite ajanın toplam kapasitesi olur (B9).
-- [ ] Her aday birden fazla seed'de değerlendirilir. Raporlanan sonuç, aramada kullanılmamış seed'lerde tekrar ölçülür.
+- [x] Standart ABC (Karaboga, 2005): gözcü arılar uygunlukla orantılı olasılıkla kaynak seçer. Kaşif fazı `limit` ile çalışır.
+- [x] Amaç: ya iki amaç üzerinden gerçek Pareto baskınlığı (Deb, 2001) ya da açıkça tek amaç (ağırlıklı skor). Seçim `FORMULATION.md`'ye yazılır.
+- [x] Değerlendirme JSON dosyası yerine veritabanından yapılır. Başlangıç bütçesi gerçek başlangıç değeri, kapasite ajanın toplam kapasitesi olur (B9).
+- [x] Her aday birden fazla seed'de değerlendirilir. Raporlanan sonuç, aramada kullanılmamış seed'lerde tekrar ölçülür.
 - **Doğrulama:** sentetik bir amaç fonksiyonuyla (örn. bilinen optimumlu bir test fonksiyonu) ABC'nin optimuma yaklaştığını gösteren unit test.
 
 ### 1.12 Performans (A10)
 - [ ] Teklifler `bulk_create`/`bulk_update` ile yazılır. Her durum değişikliğinde `agent.save()` çağrılmaz (sadece gerekli alanlar, `update_fields` ile).
-- [ ] Ölü kod temizliği: `estimatePTF`, `MPIP` (kullanılacaksa ayrı tutulur), `parallel_service`, `multi_objective_abc.py`, boş `visualization_service`, tekrarlanan `ReplayBuffer`'lar.
+- [x] Ölü kod temizliği: `estimatePTF`, `MPIP` (kullanılacaksa ayrı tutulur), `parallel_service`, `multi_objective_abc.py`, boş `visualization_service`, tekrarlanan `ReplayBuffer`'lar.
 - **Doğrulama:** 8 ajan × 336 periyot çalıştırmasının süresi önce/sonra ölçülür.
 
 ### 1.13 WebSocket (A7)
 - [x] K10 kararına göre kaldır ya da bağla.
 
 ### 1.14 Duman testleri
-- [ ] Her algoritma ve karşılaştırma ajanı için 30 periyotluk, 2 ajanlı test senaryosu. NaN/Inf, boş teklif ve sınır değer kontrolleri.
+- [x] Her algoritma ve karşılaştırma ajanı için 30 periyotluk, 2 ajanlı test senaryosu. NaN/Inf, boş teklif ve sınır değer kontrolleri.
 
 ---
 
