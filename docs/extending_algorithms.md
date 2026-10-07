@@ -169,14 +169,84 @@ Add a unit test that clears a few bid sets and passes every result through
 `validate_clearing_result`, and a run test like
 `tests/runtime/test_clearing_algorithm_run.py`.
 
+### Parameters of a clearing algorithm
+
+A clearing algorithm without parameters needs nothing else. To declare
+parameters (PLAN 2.12), define a frozen subclass of `ClearingConfig` and set
+it as `config_class`. The engine builds one config per run and passes it to
+the constructor, the algorithm reads it from `self.config`:
+
+```python
+from dataclasses import dataclass
+
+from .config import ClearingConfig
+from .merit_order import MeritOrderClearing
+
+
+@dataclass(frozen=True)
+class CappedConfig(ClearingConfig):
+    """Parameters of the capped merit order.
+
+    Attributes:
+        price_cap: Highest accepted price in USD/MWh, > 0.
+        strict: Reject bids exactly at the cap.
+    """
+
+    price_cap: float = 150.0
+    strict: bool = False
+
+    def _validate(self) -> None:
+        """Validate the cap."""
+        super()._validate()
+        if self.price_cap <= 0:
+            raise ValueError(f"price_cap must be > 0, got {self.price_cap}")
+
+
+class CappedMeritOrder(MeritOrderClearing):
+    """Merit order that ignores bids above a price cap."""
+
+    key = "CAPPED_MERIT_ORDER"
+    label = "Merit order with a price cap"
+    description = "Merit order that does not accept bids above the price cap."
+    config_class = CappedConfig
+
+    def clear(self, bids, demand, quantum):
+        """Clear with the merit order and zero quantity above the cap."""
+        ...  # uses self.config.price_cap
+```
+
+Rules:
+
+- Supported field types are `int`, `float`, `float | None`, `bool` and
+  `tuple[int, ...]`. Every field needs a default, and the defaults must
+  validate.
+- `_validate` raises `ValueError` with a message that starts with the field
+  name. The Algorithms page and the wizard show the message under that field.
+- The text of each field in the `Attributes:` section of the docstring is
+  shown as help text next to the field.
+- Effective parameters of a run: the class defaults, overridden by the
+  global default edited on the Algorithms page (`ClearingDefault`),
+  overridden by the scenario's own values (`Market.clearing_params`, wizard
+  market step, YAML `market.clearing_params`).
+- The run stores the parameters it used in `Market.effective_clearing_params`
+  (analysis page, "Parameters used").
+
+Agent algorithms get the same generated form from their `config_class`. The
+Algorithms page edits `AlgorithmDefault`, and the run stores the parameters
+of every agent in `Agent.effective_params`.
+
 ## Where the key appears
 
 - Scenario wizard: the agent algorithm selects and, in the market step, the
   "Clearing algorithm" select next to the pricing strategy.
-- Scenario YAML: `agents[].algorithm` and the optional
+- Scenario YAML: `agents[].algorithm`, the optional
   `market.clearing_algorithm` (`MERIT_ORDER` when missing, always written on
-  export).
+  export) and the optional `market.clearing_params` (written when the
+  scenario has overrides).
+- Algorithms page (sidebar "Algorithms"): one card per algorithm with its
+  parameter form. A module that fails to import is shown there with its
+  traceback.
 - HPO: the algorithm select (algorithms with search bounds only).
 - Database: `Agent.algorithm_type`, `HPOStudy.algorithm_type`,
-  `AlgorithmDefault.algorithm_type`, `PolicyCheckpoint.algorithm_type` and
-  `Market.clearing_algorithm`.
+  `AlgorithmDefault.algorithm_type`, `PolicyCheckpoint.algorithm_type`,
+  `Market.clearing_algorithm` and `ClearingDefault.algorithm_key`.

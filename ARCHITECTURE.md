@@ -95,7 +95,8 @@ abmem/
 │   ├── base.py                     # unchanged
 │   ├── enums.py                    # SimulationState.FAILED, HPOStatus, HPOPhase, HPOTrialStatus (AlgorithmType kept only for old migrations)
 │   ├── simulation.py               # + seed, observation_lags, evaluation_periods, error
-│   ├── market.py                   # + clearing_algorithm (key, default MERIT_ORDER, PLAN 2.10)
+│   ├── market.py                   # + clearing_algorithm (key, default MERIT_ORDER, PLAN 2.10), clearing_params, effective_clearing_params (2.12)
+│   ├── clearing.py                 # NEW (2.12) ClearingDefault
 │   ├── agent.py                    # + algorithm_type, algorithm_params, failstack_*, source, constraints, runtime_policy
 │   ├── models.py                   # Offer.acceptanceAmount / Period.metDemand -> DecimalField
 │   ├── diagnostics.py              # NEW AgentStepLog
@@ -113,7 +114,7 @@ abmem/
 │   ├── market/
 │   │   ├── market_service.py       # run_period(ctx, t)
 │   │   ├── clearing.py             # Bid, ClearingResult, validate_clearing_result, acceptance_prices, clear_market wrapper
-│   │   ├── clearing_algorithms/    # NEW (2.10) base.py BaseClearingAlgorithm, registry.py, merit_order.py (MERIT_ORDER)
+│   │   ├── clearing_algorithms/    # NEW (2.10) base.py BaseClearingAlgorithm, config.py ClearingConfig (2.12), registry.py, merit_order.py (MERIT_ORDER)
 │   │   ├── accounting.py           # NEW offer_profit (shared by budgets and reward)
 │   │   ├── demand.py               # NEW DemandSeries (A8)
 │   │   └── market_factory.py, period_factory.py
@@ -257,6 +258,9 @@ erDiagram
 | `HPOStudy` (+ `heartbeat_at`), `HPOTrial`, `AlgorithmDefault` | new models, `HPOTrial.simulation` nullable OneToOne `SET_NULL` | 2.4, OQ-9, OQ-17 | `0011_hpo` |
 | `Agent`, `HPOStudy`, `AlgorithmDefault` (unique), `PolicyCheckpoint` `.algorithm_type` | enum integer -> `CharField(64)` holding the algorithm key (`Agent` default `DDPG`). RunPython maps 0..7 to DDPG, RDPG, TD3, SAC, PPO, RANDOM, MARGINAL_COST, FIXED_MARKUP and back | 2.10 | `0017_algorithm_keys_and_clearing_algorithm` |
 | `Market.clearing_algorithm` | `CharField(64, default='MERIT_ORDER')` | 2.10 | same |
+| `ClearingDefault` | new model (`algorithm_key` unique, `params` JSON), global default parameters of a clearing algorithm | 2.12 | `0018_clearing_params_and_parameter_snapshots` |
+| `Market.clearing_params` | `JSONField(default=dict)`, per-scenario overrides of the clearing parameters | 2.12 | same |
+| `Agent.effective_params`, `Market.effective_clearing_params` | `JSONField(null=True)`, parameter snapshot written once when a run starts, NULL on library and scenario rows and on older runs | 2.12 | same |
 
 ### 4.2 Agent roles (K4 = A)
 
@@ -318,7 +322,7 @@ class FixedMarkupConfig(AlgorithmConfig):
     markup: float = 0.10                                   # OQ-6: price = (fuelCost + staticCost) * (1 + markup)
 ```
 
-Parameter resolution per agent (OQ-9), implemented in `SimulationContext.build`: HPO overrides (evaluation runs only), else `Agent.algorithm_params`, else `AlgorithmDefault.params` of the agent's algorithm, else the dataclass defaults.
+Parameter resolution per agent (OQ-9), implemented in `SimulationContext.build`: HPO overrides (evaluation runs only), else `Agent.algorithm_params`, else `AlgorithmDefault.params` of the agent's algorithm, else the dataclass defaults. Parameters of the clearing algorithm (PLAN 2.12): `Market.clearing_params`, else `ClearingDefault.params`, else the defaults of its `ClearingConfig` class. `build` writes the resolved configs (`to_dict()`) to `Agent.effective_params` and `Market.effective_clearing_params` of the run (two UPDATE statements). A run never reads the defaults again, so a later default edit only affects runs started afterwards. Warm start loads weights into the policies built this way, so the snapshot is also correct for warm-started runs.
 
 ### 5.2 `BaseAgentAlgorithm` (`services/algorithms/base.py`)
 
@@ -496,7 +500,9 @@ Agent algorithms and market clearing algorithms are plain subclasses of a base c
 - The base class calls `PluginRegistry.register` from `__init_subclass__`. A class is registered when it is concrete (`inspect.isabstract` is False) and declares its own non-empty `key` matching `^[A-Z][A-Z0-9_]{0,63}$`. A subclass that only inherits a key is not registered. A second class with the same key raises `ImproperlyConfigured` naming both classes. An agent algorithm must also declare `is_learning` and a `config_class`.
 - Discovery imports every public module of the package (names starting with `_` are skipped) on the first registry query and caches the result. Django start and importing a registry module import no algorithm module and no torch. A module that fails to import raises `PluginDiscoveryError` with its traceback.
 - Agent registry API: `available_algorithms()` (learning first, then baselines, each by label), `get_algorithm_class`, `get_config_class`, `default_config`, `build_policy`, `is_known`, `is_baseline` (not `is_learning`), `label_for`. The UI choices, the HPO algorithm list (algorithms with non-empty `default_search_bounds`), the YAML `algorithm` key and the run validation all read it. The keys of the eight existing algorithms are the former enum names.
-- Clearing registry API: `available_clearing_algorithms()` (MERIT_ORDER first), `get_clearing_algorithm(key)` (new instance), `is_known_clearing`, `clearing_label_for`.
+- Clearing registry API: `available_clearing_algorithms()` (MERIT_ORDER first), `get_clearing_algorithm(key, params=None)` (new instance with `config_class.from_dict(params)`), `get_clearing_config_class`, `is_known_clearing`, `clearing_label_for`.
+- Parameters (PLAN 2.12): an agent algorithm declares `config_class` (an `AlgorithmConfig` subclass), a clearing algorithm may declare `config_class` (a frozen `ClearingConfig` subclass, default without fields, MERIT_ORDER has none). `services/param_schema.py` describes such a class as form fields (type from the hint, class default, the docstring `Attributes:` text, `default_search_bounds` as hint) and validates submitted values with per-field errors. Supported field types: `int`, `float`, `float | None`, `bool`, `tuple[int, ...]`.
+- `PluginRegistry.scan()` imports every module and returns the classes plus the import errors per module instead of raising. The Algorithms page uses it to list the working algorithms next to the modules that failed.
 - A stored key whose class is gone stays in the database. Lists and forms show it as unavailable, saving it again is rejected, and `SimulationContext.build` raises `SimulationValidationError` naming the agent (or market) and the key.
 - Clearing result contract (`clearing.validate_clearing_result`, `ClearingContractError`): `accepted` has exactly the bid keys, every accepted quantity is a finite `Decimal` with `0 <= a <= q` and a multiple of the quantum, `met_demand == sum(accepted) <= min(demand, offered_volume)`, `offered_volume` equals the offered total, `ptf` is None exactly when `met_demand == 0` and otherwise lies in `[lowerBidBound, upperBidBound]`, and `marginal_group` is a tuple of bid keys without repeats.
 - How to add an algorithm: `docs/extending_algorithms.md`. A new algorithm used for reported results needs its own `FORMULATION.md` entry approved by the user.
@@ -682,6 +688,10 @@ Prefix `/dev/` (from `web_project/urls.py`). Routes not listed stay unchanged. `
 | GET | `hpo/<id>/status/` | `views_hpo.study_status` | JSON progress, per-iteration best, trial table, scatter data, Pareto front | hpo |
 | POST | `hpo/<id>/cancel/` | `views_hpo.study_cancel` | sets `cancel_requested` | hpo |
 | POST | `hpo/<id>/apply/` | `views_hpo.study_apply` | apply best parameters to scenario agents or as algorithm default | hpo |
+| GET | `algorithms/` | `views_algorithms.algorithm_list` | Algorithms page: agent algorithms and clearing algorithms in two columns, usage counts, modules that failed to import | algorithms_tab |
+| GET/POST | `algorithms/<agent\|clearing>/<key>/` | `views_algorithms.algorithm_params` | GET: parameter form JSON (fields, class defaults, current defaults, descriptions, search bounds). POST `{"params": {...}}`: validate and store the changed fields in `AlgorithmDefault` or `ClearingDefault` | algorithms_tab |
+| POST | `algorithms/<agent\|clearing>/<key>/reset/` | `views_algorithms.algorithm_params_reset` | delete the stored default (published defaults apply) | algorithms_tab |
+| GET | `simulation/<id>/export/parameters.json` | `views_analysis.simulation_export_parameters` | parameter snapshot of a run as a JSON attachment | algorithms_tab |
 
 New POST endpoints use Django CSRF protection. The existing `@csrf_exempt` decorators are not extended to new views. Validation errors return HTTP 400 with JSON `{"errors": {field: [messages]}}`.
 
@@ -735,6 +745,7 @@ New POST endpoints use Django CSRF protection. The existing `@csrf_exempt` decor
 - Context: adding an agent algorithm needed edits in the `AlgorithmType` enum, `registry.ALGORITHM_CLASS_PATHS`, `BASELINE_TYPES` and `CONFIG_CLASSES`, and the clearing was a single fixed function.
 - Decision: both kinds are subclasses of a base class registered by `__init_subclass__` and found by importing the modules of their package (section 5.6). The database stores the key as text. Migration 0017 maps the stored enum integers to the former enum names, so stored data and YAML files keep their meaning. The settlement rule stays in `Market.strategy`.
 - Consequences: no table edit is needed for a new algorithm, a removed class leaves its key in the database (shown as unavailable, rejected at run start), and the engine checks every clearing result against an explicit contract. `AlgorithmType` remains in `enums.py` only for the historical migrations.
+- Extension (PLAN 2.12): parameter forms are generated from the config classes, so a new parameter needs no template change. Global defaults (`AlgorithmDefault`, `ClearingDefault`) are edited on the Algorithms page and every run stores the parameters it used (`Agent.effective_params`, `Market.effective_clearing_params`).
 
 ---
 
@@ -803,3 +814,5 @@ Open items: the multi-seed comparative experiment (protocol details pending, `FO
 - Agent library entry points and scenario wizard (PLAN 2.6): sidebar "Agents" link, dashboard "Library Agents" counter (library agents only) and "New Agent" shortcut (`agent/list?new=1`). One wizard template serves scenario create and update (Basics, Market, Agents, Review). It sends the unchanged scenario payload; the server additionally validates the name (at most 20 characters), mode, period type, strategy and bid bounds (`upper > lower`) with field-keyed HTTP 400 errors. The wizard's agent dialog is the library page's agent form component in local mode. Helpers: capacity versus demand warning (`simulation/demand-stats/`), draft autosave in `localStorage`, "Duplicate" on the templates list, help tooltips. "Save and run" saves, then posts to `run_simulation` without options (scenario seed, fresh policies) and opens the watch page.
 
 - Scenario YAML import/export (PLAN 2.7): `abmem/scenario_yaml.py` writes and reads `format_version: 1` files. Import reuses a resource or library agent only when name (database `LOWER`) and all values match, otherwise it fails without writing; the scenario is a new proxy whose agents are copies of the library agents. Header, run settings and agent fields are checked with the wizard validators of `abmem.views`; `algorithm_params` are additionally checked with `AlgorithmConfig.from_dict`. The wizard shows one row of library cards until a filter is set or "Show all (N)" is pressed.
+
+- Algorithms page and parameter snapshots (PLAN 2.12, spec `algorithms_tab`): sidebar entry "Algorithms" (`algorithms/`) lists the agent and clearing algorithms in two columns. A card opens a modal with the form generated from the config class. Saving stores only the fields that differ from the class defaults, "Reset to published defaults" deletes the row after an in-page confirmation. Clearing algorithms have optional parameters (`ClearingConfig`, `ClearingDefault`, per-scenario `Market.clearing_params` in the wizard market step and in the scenario YAML as optional `market.clearing_params`). Runs store the parameters they used, shown in the collapsible "Parameters used" card of the analysis page and downloadable as `simulation/<id>/export/parameters.json`. Migration `0018_clearing_params_and_parameter_snapshots`.
