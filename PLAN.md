@@ -255,10 +255,10 @@ Her maddede: **ne yapılacak**, **nasıl doğrulanacak**. Type B/C maddeleri ayr
 
 ### 2.10 Pluggable agent and market clearing algorithms (request 10, approved 2026-10-07)
 Spec: `specs/pluggable_algorithms.json`. Starts after 2.9 is merged (migration 0017 follows 0016).
-- [ ] **Agent algorithms:** every concrete subclass of `BaseAgentAlgorithm` with a `key` is discovered from the modules of `abmem/services/algorithms/` and becomes selectable in the UI, HPO and YAML. No enum or registry table edit is needed. Keys are the current names (DDPG, TD3, ...), so YAML files and stored data keep working. `Agent`, `HPOStudy`, `AlgorithmDefault` and `PolicyCheckpoint` store the key as text (data migration).
-- [ ] **Market clearing algorithms:** new base class `BaseClearingAlgorithm`. The current merit order becomes `MERIT_ORDER` (default, results unchanged). Subclasses in `abmem/services/market/clearing_algorithms/` are discovered and selectable per scenario (`Market.clearing_algorithm`). The settlement rule (pay-as-bid / PTF) stays a separate choice.
-- [ ] **Safety:** the engine checks every clearing result against the contract (quantities, demand, PTF within the bid bounds). An unknown or removed key stops the run at validation with a clear message.
-- [ ] **Research rule:** every new clearing or agent algorithm used in results needs its own FORMULATION.md entry approved by the user.
+- [x] **Agent algorithms:** every concrete subclass of `BaseAgentAlgorithm` with a `key` is discovered from the modules of `abmem/services/algorithms/` and becomes selectable in the UI, HPO and YAML. No enum or registry table edit is needed. Keys are the current names (DDPG, TD3, ...), so YAML files and stored data keep working. `Agent`, `HPOStudy`, `AlgorithmDefault` and `PolicyCheckpoint` store the key as text (data migration).
+- [x] **Market clearing algorithms:** new base class `BaseClearingAlgorithm`. The current merit order becomes `MERIT_ORDER` (default, results unchanged). Subclasses in `abmem/services/market/clearing_algorithms/` are discovered and selectable per scenario (`Market.clearing_algorithm`). The settlement rule (pay-as-bid / PTF) stays a separate choice.
+- [x] **Safety:** the engine checks every clearing result against the contract (quantities, demand, PTF within the bid bounds). An unknown or removed key stops the run at validation with a clear message.
+- [x] **Research rule:** every new clearing or agent algorithm used in results needs its own FORMULATION.md entry approved by the user.
 
 ### 2.11 Watch progress, offers table and chart zoom in analysis (request 11, approved 2026-10-07)
 Spec: `specs/watch_analysis_ui.json`. Independent of 2.10.
