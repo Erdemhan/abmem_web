@@ -1,0 +1,55 @@
+{% comment %}
+One day/night shape of components/demand_profile_form.html: day hours, the morning and evening
+transitions and the day and night segments. Included once for the whole run (or summer) with the form
+prefix and once for winter with the prefix "<prefix>-winter".
+Parameters: prefix (id prefix of the shape), segment_title ("" or "Winter " before "day"/"night").
+{% endcomment %}
+<div class="row">
+    <div class="col-6 col-md-3 col-lg-2 mb-3">
+        <label for="{{ prefix }}-day_start_hour" class="form-label">Day start hour
+            <button type="button" class="btn btn-link p-0 ms-1 mb-0 info-tip" data-bs-toggle="tooltip"
+                title="Day hours are [start, end) on the 24-hour clock, for example 8 to 20 is 08:00-20:00. The other hours are night."
+                aria-label="Help: day hours"><i class="fas fa-circle-info" aria-hidden="true"></i></button>
+        </label>
+        <input type="number" id="{{ prefix }}-day_start_hour" class="form-control" min="0" max="23" step="1"
+            aria-describedby="{{ prefix }}-day_start_hour-feedback {{ prefix }}-night-text">
+        <div class="invalid-feedback" id="{{ prefix }}-day_start_hour-feedback"></div>
+    </div>
+    <div class="col-6 col-md-3 col-lg-2 mb-3">
+        <label for="{{ prefix }}-day_end_hour" class="form-label">Day end hour</label>
+        <input type="number" id="{{ prefix }}-day_end_hour" class="form-control" min="1" max="24" step="1"
+            aria-describedby="{{ prefix }}-day_end_hour-feedback {{ prefix }}-night-text">
+        <div class="invalid-feedback" id="{{ prefix }}-day_end_hour-feedback"></div>
+    </div>
+    <div class="col-6 col-md-3 col-lg-2 mb-3">
+        <label for="{{ prefix }}-morning_ramp_hours" class="form-label">Morning transition (h)
+            <button type="button" class="btn btn-link p-0 ms-1 mb-0 info-tip" data-bs-toggle="tooltip"
+                title="Width in whole hours (0 to 12) of a smooth night-to-day transition centred on the day start hour. 0 = abrupt switch."
+                aria-label="Help: morning transition"><i class="fas fa-circle-info" aria-hidden="true"></i></button>
+        </label>
+        <input type="number" id="{{ prefix }}-morning_ramp_hours" class="form-control" min="0" max="12" step="1"
+            aria-describedby="{{ prefix }}-morning_ramp_hours-feedback {{ prefix }}-morning_ramp_hours-help">
+        <small class="form-text text-muted" id="{{ prefix }}-morning_ramp_hours-help">0 = abrupt switch</small>
+        <div class="invalid-feedback" id="{{ prefix }}-morning_ramp_hours-feedback"></div>
+    </div>
+    <div class="col-6 col-md-3 col-lg-2 mb-3">
+        <label for="{{ prefix }}-evening_ramp_hours" class="form-label">Evening transition (h)
+            <button type="button" class="btn btn-link p-0 ms-1 mb-0 info-tip" data-bs-toggle="tooltip"
+                title="Width in whole hours (0 to 12) of a smooth day-to-night transition centred on the day end hour. 0 = abrupt switch. Morning plus evening transition must be at most twice the shorter of day and night."
+                aria-label="Help: evening transition"><i class="fas fa-circle-info" aria-hidden="true"></i></button>
+        </label>
+        <input type="number" id="{{ prefix }}-evening_ramp_hours" class="form-control" min="0" max="12" step="1"
+            aria-describedby="{{ prefix }}-evening_ramp_hours-feedback {{ prefix }}-evening_ramp_hours-help">
+        <small class="form-text text-muted" id="{{ prefix }}-evening_ramp_hours-help">0 = abrupt switch</small>
+        <div class="invalid-feedback" id="{{ prefix }}-evening_ramp_hours-feedback"></div>
+    </div>
+    <div class="col-12 col-md-6 col-lg-4 mb-3 d-flex align-items-end">
+        <p class="text-sm text-secondary mb-2" id="{{ prefix }}-night-text" aria-live="polite">Night: -</p>
+    </div>
+</div>
+<div class="row">
+    {% with day_title=segment_title|add:"day" night_title=segment_title|add:"night" %}
+    {% include 'components/demand_segment_fields.html' with prefix=prefix segment="day" title=day_title|capfirst %}
+    {% include 'components/demand_segment_fields.html' with prefix=prefix segment="night" title=night_title|capfirst %}
+    {% endwith %}
+</div>

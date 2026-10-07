@@ -98,7 +98,8 @@
                                         {% for row in rows %}
                                         <tr data-profile-id="{{ row.template.id }}">
                                             <td class="ps-4">
-                                                <h6 class="mb-0 text-sm">{{ row.template.name }}</h6>
+                                                <h6 class="mb-0 text-sm">{{ row.template.name }}{% if row.seasonal %}
+                                                    <span class="badge badge-sm bg-gradient-info ms-1 demand-seasonal-badge" title="Summer/winter split: summer until period {{ row.summer_end_period }}, then winter. The other columns describe summer.">Seasonal</span>{% endif %}</h6>
                                                 {% if row.template.description %}<p class="text-xs text-secondary mb-0 text-wrap">{{ row.template.description }}</p>{% endif %}
                                             </td>
                                             <td class="text-sm">{{ row.day_hours }}</td>

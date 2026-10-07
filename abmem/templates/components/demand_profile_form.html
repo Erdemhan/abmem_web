@@ -10,6 +10,8 @@ Optional flags (PLAN 2.9):
                          <prefix>-library-edit, <prefix>-library-feedback)
     generated_only=True  hides the source choice, the editor always edits a generated profile
                          (the library editor page)
+The day/night shape (components/demand_shape_fields.html) is included twice: with the prefix for the whole
+run or summer, and with "<prefix>-winter" for winter (shown when the switch <prefix>-seasons_enabled is on).
 {% endcomment %}
 {% with json_id=prefix|add:"-initial" %}{{ initial_profile|json_script:json_id }}{% endwith %}
 <div class="demand-profile" id="{{ prefix }}-component" data-prefix="{{ prefix }}"{% if generated_only %} data-generated-only="true"{% endif %}>
@@ -55,7 +57,7 @@ Optional flags (PLAN 2.9):
             <div class="col-12 col-md-6 col-lg-3 mb-3">
                 <label for="{{ prefix }}-seed" class="form-label">Demand seed
                     <button type="button" class="btn btn-link p-0 ms-1 mb-0 info-tip" data-bs-toggle="tooltip"
-                        title="Seed of the demand generator only. The same profile, seed and number of periods always give the same demand; the run seed does not change it."
+                        title="Seed of the demand generator only. The same profile, seed and number of periods always give the same demand. The run seed does not change it."
                         aria-label="Help: demand seed"><i class="fas fa-circle-info" aria-hidden="true"></i></button>
                 </label>
                 <div class="input-group">
@@ -65,39 +67,66 @@ Optional flags (PLAN 2.9):
                 </div>
                 <div class="invalid-feedback" id="{{ prefix }}-seed-feedback"></div>
             </div>
-            <div class="col-6 col-md-3 col-lg-2 mb-3">
-                <label for="{{ prefix }}-day_start_hour" class="form-label">Day start hour
-                    <button type="button" class="btn btn-link p-0 ms-1 mb-0 info-tip" data-bs-toggle="tooltip"
-                        title="Day hours are [start, end) on the 24-hour clock, for example 8 to 20 is 08:00-20:00. The other hours are night."
-                        aria-label="Help: day hours"><i class="fas fa-circle-info" aria-hidden="true"></i></button>
-                </label>
-                <input type="number" id="{{ prefix }}-day_start_hour" class="form-control" min="0" max="23" step="1"
-                    aria-describedby="{{ prefix }}-day_start_hour-feedback {{ prefix }}-night-text">
-                <div class="invalid-feedback" id="{{ prefix }}-day_start_hour-feedback"></div>
-            </div>
-            <div class="col-6 col-md-3 col-lg-2 mb-3">
-                <label for="{{ prefix }}-day_end_hour" class="form-label">Day end hour</label>
-                <input type="number" id="{{ prefix }}-day_end_hour" class="form-control" min="1" max="24" step="1"
-                    aria-describedby="{{ prefix }}-day_end_hour-feedback {{ prefix }}-night-text">
-                <div class="invalid-feedback" id="{{ prefix }}-day_end_hour-feedback"></div>
-            </div>
-            <div class="col-12 col-md-6 col-lg-2 mb-3 d-flex align-items-end">
-                <p class="text-sm text-secondary mb-2" id="{{ prefix }}-night-text" aria-live="polite">Night: -</p>
-            </div>
             <div class="col-12 col-md-6 col-lg-3 mb-3">
                 <label for="{{ prefix }}-autocorrelation" class="form-label">Autocorrelation (phi)
                     <button type="button" class="btn btn-link p-0 ms-1 mb-0 info-tip" data-bs-toggle="tooltip"
-                        title="How strongly an hour follows the previous hour (AR(1) coefficient, 0 to 0.99). 0: independent hours; 0.9: smooth, persistent demand."
+                        title="How strongly an hour follows the previous hour (AR(1) coefficient, 0 to 0.99). 0: independent hours. 0.9: smooth, persistent demand."
                         aria-label="Help: autocorrelation"><i class="fas fa-circle-info" aria-hidden="true"></i></button>
                 </label>
                 <input type="number" id="{{ prefix }}-autocorrelation" class="form-control" min="0" max="0.99" step="0.01"
                     aria-describedby="{{ prefix }}-autocorrelation-feedback">
                 <div class="invalid-feedback" id="{{ prefix }}-autocorrelation-feedback"></div>
             </div>
+            <div class="col-12 col-lg-6 mb-3 d-flex flex-column justify-content-end">
+                <div class="form-check form-switch mb-2">
+                    <input class="form-check-input" type="checkbox" role="switch" id="{{ prefix }}-seasons_enabled"
+                        aria-describedby="{{ prefix }}-seasons-feedback">
+                    <label class="form-check-label" for="{{ prefix }}-seasons_enabled">Summer/winter split
+                        <button type="button" class="btn btn-link p-0 ms-1 mb-0 info-tip" data-bs-toggle="tooltip"
+                            title="Off: one day/night shape for the whole run. On: periods 1 to the last summer period use the summer settings and later periods the winter settings, each with its own day hours, transitions and day and night distributions."
+                            aria-label="Help: summer/winter split"><i class="fas fa-circle-info" aria-hidden="true"></i></button>
+                    </label>
+                </div>
+                <div class="invalid-feedback" id="{{ prefix }}-seasons-feedback"></div>
+            </div>
         </div>
-        <div class="row">
-            {% include 'components/demand_segment_fields.html' with prefix=prefix segment="day" title="Day" %}
-            {% include 'components/demand_segment_fields.html' with prefix=prefix segment="night" title="Night" %}
+        <div class="row" id="{{ prefix }}-season-fields" hidden>
+            <div class="col-6 col-md-3 mb-3">
+                <label for="{{ prefix }}-summer_end_period" class="form-label">Last summer period
+                    <button type="button" class="btn btn-link p-0 ms-1 mb-0 info-tip" data-bs-toggle="tooltip"
+                        title="Periods 1 to this period are summer, later periods are winter."
+                        aria-label="Help: last summer period"><i class="fas fa-circle-info" aria-hidden="true"></i></button>
+                </label>
+                <input type="number" id="{{ prefix }}-summer_end_period" class="form-control" min="1" step="1"
+                    aria-describedby="{{ prefix }}-summer_end_period-feedback {{ prefix }}-season-text">
+                <div class="invalid-feedback" id="{{ prefix }}-summer_end_period-feedback"></div>
+            </div>
+            <div class="col-6 col-md-3 mb-3">
+                <label for="{{ prefix }}-transition_days" class="form-label">Season transition (days)
+                    <button type="button" class="btn btn-link p-0 ms-1 mb-0 info-tip" data-bs-toggle="tooltip"
+                        title="Width in whole days (0 to 90) of a smooth summer-to-winter transition centred on the end of the last summer period. 0 = abrupt switch. Half of the transition (in hours) must not exceed the last summer period."
+                        aria-label="Help: season transition"><i class="fas fa-circle-info" aria-hidden="true"></i></button>
+                </label>
+                <input type="number" id="{{ prefix }}-transition_days" class="form-control" min="0" max="90" step="1"
+                    aria-describedby="{{ prefix }}-transition_days-feedback {{ prefix }}-transition_days-help">
+                <small class="form-text text-muted" id="{{ prefix }}-transition_days-help">0 = abrupt switch</small>
+                <div class="invalid-feedback" id="{{ prefix }}-transition_days-feedback"></div>
+            </div>
+            <div class="col-12 col-md-6 mb-3 d-flex flex-column justify-content-end">
+                <p class="text-sm text-secondary mb-1" id="{{ prefix }}-season-text" aria-live="polite">Summer: -</p>
+                <p class="text-sm text-warning mb-2" id="{{ prefix }}-season-warning" role="status" hidden></p>
+            </div>
         </div>
+        <fieldset class="mb-2" id="{{ prefix }}-shape">
+            <legend class="text-sm font-weight-bold mb-2" id="{{ prefix }}-shape-title">Day/Night</legend>
+            {% include 'components/demand_shape_fields.html' with prefix=prefix segment_title="" %}
+        </fieldset>
+        <fieldset class="mb-2" id="{{ prefix }}-winter" hidden>
+            <legend class="text-sm font-weight-bold mb-2">Winter</legend>
+            {% with winter_prefix=prefix|add:"-winter" %}
+            {% include 'components/demand_shape_fields.html' with prefix=winter_prefix segment_title="Winter " %}
+            {% endwith %}
+            <div class="invalid-feedback" id="{{ prefix }}-winter-feedback"></div>
+        </fieldset>
     </div>
 </div>

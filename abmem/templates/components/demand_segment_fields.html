@@ -1,6 +1,7 @@
 {% comment %}
 One segment panel (day or night) of components/demand_profile_form.html.
-Parameters: prefix, segment ("day" or "night"), title.
+Parameters: prefix (the form prefix, or "<prefix>-winter" for the winter shape), segment ("day" or "night"),
+title ("Day", "Night", "Winter day", "Winter night").
 {% endcomment %}
 <div class="col-12 col-lg-6 mb-3">
     <fieldset class="border border-radius-lg p-3 h-100" id="{{ prefix }}-{{ segment }}">

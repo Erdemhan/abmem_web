@@ -557,3 +557,127 @@ def test_inline_page_scripts_pass_node_check(
             [NODE, "--check", str(path)], capture_output=True, text=True, check=False
         )
         assert result.returncode == 0, result.stderr
+
+
+# ramps and summer/winter split ------------------------------------------------------
+
+SEASONAL: dict[str, Any] = {
+    **copy.deepcopy(PROFILE),
+    "morning_ramp_hours": 1,
+    "evening_ramp_hours": 2,
+    "seasons": {
+        "summer_end_period": 4380,
+        "transition_days": 14,
+        "winter": {
+            "day_start_hour": 7,
+            "day_end_hour": 17,
+            "morning_ramp_hours": 2,
+            "evening_ramp_hours": 2,
+            "day": {"distribution": "UNIFORM", "min": 700.0, "max": 1400.0},
+            "night": {
+                "distribution": "NORMAL",
+                "mean": 800.0,
+                "std": 60.0,
+                "min": 600.0,
+                "max": 1000.0,
+            },
+        },
+    },
+}
+
+
+def test_list_marks_seasonal_profiles(
+    client: Client, template: DemandProfileTemplate
+) -> None:
+    seasonal = demand_library.create_profile("Year", SEASONAL, "")
+    response = client.get(reverse("demand_profile_list"))
+    rows = {row["template"].id: row for row in response.context["rows"]}
+    assert rows[seasonal.id]["seasonal"] is True
+    assert rows[seasonal.id]["summer_end_period"] == 4380
+    assert rows[template.id]["seasonal"] is False
+    html = response.content.decode()
+    assert html.count("demand-seasonal-badge") == 1
+    assert "summer until period 4380" in html
+
+
+def test_library_round_trip_of_a_seasonal_profile(client: Client) -> None:
+    response = _json_post(
+        client,
+        reverse("demand_profile_create"),
+        {"name": "Year", "description": "", "profile": SEASONAL},
+    )
+    assert response.status_code == 201, response.content
+    profile_id = response.json()["id"]
+    assert response.json()["profile"] == SEASONAL
+
+    edit_url = reverse("demand_profile_edit", args=[profile_id])
+    html = client.get(edit_url).content.decode()
+    assert 'id="editor-seasons_enabled"' in html
+    assert 'id="editor-winter-night-std"' in html
+    assert '<option value="8760">' in html
+    edited = copy.deepcopy(SEASONAL)
+    edited["seasons"]["transition_days"] = 0
+    edited["seasons"]["winter"]["evening_ramp_hours"] = 0
+    response = _json_post(
+        client, edit_url, {"name": "Year", "description": "", "profile": edited}
+    )
+    assert response.status_code == 200, response.content
+    assert DemandProfileTemplate.objects.get(id=profile_id).profile == edited
+
+    text = client.get(
+        reverse("demand_profile_export", args=[profile_id])
+    ).content.decode()
+    assert yaml.safe_load(text)["demand"] == edited
+    DemandProfileTemplate.objects.all().delete()
+    preview = client.post(
+        reverse("demand_profile_import_preview"), {"file": _upload(text)}
+    )
+    assert preview.status_code == 200, preview.content
+    assert preview.json()["status"] == "new" and preview.json()["demand"] == edited
+    confirm = client.post(
+        reverse("demand_profile_import_confirm"), {"file": _upload(text)}
+    )
+    assert confirm.status_code == 200, confirm.content
+    assert DemandProfileTemplate.objects.get().profile == edited
+
+
+def test_library_rejects_bad_winter_settings(client: Client) -> None:
+    bad = copy.deepcopy(SEASONAL)
+    bad["seasons"]["winter"]["day_end_hour"] = 7
+    bad["seasons"]["winter"]["night"]["std"] = 0
+    bad["seasons"]["summer_end_period"] = 100
+    response = _json_post(
+        client,
+        reverse("demand_profile_create"),
+        {"name": "Bad", "description": "", "profile": bad},
+    )
+    assert response.status_code == 400
+    errors = response.json()["errors"]
+    assert "profile.seasons.winter.day_end_hour" in errors
+    assert "profile.seasons.winter.night.std" in errors
+    assert errors["profile.seasons.transition_days"] == [
+        "The season transition starts before period 1. Half of the transition "
+        "(in hours) must not exceed the summer end period."
+    ]
+    assert DemandProfileTemplate.objects.count() == 0
+
+    document = _document(name="Bad", demand=bad)
+    response = client.post(
+        reverse("demand_profile_import_preview"), {"file": _upload(_yaml(document))}
+    )
+    assert response.status_code == 400
+    assert any(".seasons.winter." in key for key in response.json()["errors"])
+
+
+def test_wizard_library_profile_with_seasons_is_copied(
+    client: Client, fossil: Resource
+) -> None:
+    seasonal = demand_library.create_profile("Year", SEASONAL, "")
+    simulation = _create(
+        client,
+        _payload([_new_agent(fossil)], demand_profile_source=seasonal.id),
+    )
+    assert simulation.demand_profile == SEASONAL
+    assert simulation.demand_profile_source_id == seasonal.id
+    body = client.get(reverse("demand_profile_detail_json", args=[seasonal.id])).json()
+    assert body["profile"] == SEASONAL

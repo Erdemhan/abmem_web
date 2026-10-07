@@ -1235,6 +1235,19 @@
                     hint = 'Hourly periods, ' + (Number.isInteger(days) ? days : days.toFixed(1)) + (days === 1 ? ' day.' : ' days.');
                 }
                 byId('periodNumber-hint').textContent = hint;
+                syncDemandHorizon();
+            }
+
+            // The season text of the demand editor counts the winter periods up to the run length.
+            function syncDemandHorizon() {
+                var periods = byId('periodNumber').value.trim();
+                demandForm.setHorizon(/^\d+$/.test(periods) && Number(periods) > 0 ? Number(periods) : null, 'run');
+            }
+
+            // Last summer period when the generated profile splits summer and winter, else null.
+            function demandSummerEnd(profile) {
+                return profile && profile.seasons && typeof profile.seasons.summer_end_period === 'number'
+                    ? profile.seasons.summer_end_period : null;
             }
 
             // ---------------------------------------------------------------- review
@@ -1249,6 +1262,11 @@
                 if (values.simulationMode === '0' && Number(values.periodNumber) > 48) {
                     warnings.push('Period by period mode pauses after each of the ' + values.periodNumber
                         + ' periods until you press Next on the watch page.');
+                }
+                var summerEnd = demandSummerEnd(values.demand_profile);
+                if (summerEnd !== null && /^\d+$/.test(values.periodNumber) && summerEnd >= Number(values.periodNumber)) {
+                    warnings.push('The whole run is summer: the last summer period (' + summerEnd
+                        + ') is not before the end of the run (' + values.periodNumber + ' periods), so the winter settings are not used.');
                 }
                 state.agents.forEach(function (row) {
                     if (row.plants.length === 0) {
@@ -1305,9 +1323,18 @@
                     var item = demandLibrary.filter(function (entry) { return entry.id === libraryId; })[0];
                     origin = 'From library "' + (item ? item.name : '#' + libraryId) + '"';
                 }
-                return origin + ' (demand seed ' + profile.seed + ', day ' + profile.day_start_hour + '-' + profile.day_end_hour
-                    + ' h ' + (labels[profile.day.distribution] || profile.day.distribution) + ', night '
-                    + (labels[profile.night.distribution] || profile.night.distribution) + ', phi ' + profile.autocorrelation + ')';
+                function shapeText(shape) {
+                    var ramps = (shape.morning_ramp_hours || shape.evening_ramp_hours)
+                        ? ', transitions ' + (shape.morning_ramp_hours || 0) + '/' + (shape.evening_ramp_hours || 0) + ' h' : '';
+                    return 'day ' + shape.day_start_hour + '-' + shape.day_end_hour + ' h '
+                        + (labels[shape.day.distribution] || shape.day.distribution) + ', night '
+                        + (labels[shape.night.distribution] || shape.night.distribution) + ramps;
+                }
+                var summerEnd = demandSummerEnd(profile);
+                var shapes = summerEnd === null ? shapeText(profile)
+                    : 'summer periods 1-' + summerEnd + ': ' + shapeText(profile) + ' / winter: ' + shapeText(profile.seasons.winter)
+                        + ', season transition ' + (profile.seasons.transition_days || 0) + ' days';
+                return origin + ' (demand seed ' + profile.seed + ', ' + shapes + ', phi ' + profile.autocorrelation + ')';
             }
 
             // ---------------------------------------------------------------- server errors
@@ -1780,6 +1807,7 @@
             demandForm.onChange(scheduleDemand);
 
             renderAgents();
+            syncDemandHorizon();
             goTo(0);
             fetchDemand(true);
             offerDraft();

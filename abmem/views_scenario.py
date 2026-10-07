@@ -270,7 +270,10 @@ def demand_preview(request: HttpRequest) -> JsonResponse:
         ``{"source", "periods", "values", "night_mask", "day_start_hour",
         "day_end_hour", "stats": {"count", "min", "mean", "max", "std",
         "day": {...} | None, "night": {...} | None}}`` in MWh; a file
-        preview also has ``available_periods``. HTTP 400 ``{"errors":
+        preview also has ``available_periods``. A profile with a
+        summer/winter split also has ``season_boundary`` (the last summer
+        period) and ``stats.summer`` / ``stats.winter`` over the periods
+        whose winter weight is below / at least 0.5. HTTP 400 ``{"errors":
         {...}}`` with keys ``periods``, ``source``, ``body`` or
         ``demand_profile[.<field>]``; HTTP 503 when the demand file cannot be
         read.
@@ -323,6 +326,11 @@ def demand_preview(request: HttpRequest) -> JsonResponse:
     stats: dict[str, Any] = dict(_series_stats(values) or {})
     stats["day"] = _series_stats(values[~mask])
     stats["night"] = _series_stats(values[mask])
+    if profile is not None and profile.seasons is not None:
+        winter = profile.seasons.winter_weight(periods) >= 0.5
+        stats["summer"] = _series_stats(values[~winter])
+        stats["winter"] = _series_stats(values[winter])
+        body["season_boundary"] = profile.seasons.summer_end_period
     body.update(
         values=[float(value) for value in values],
         night_mask=[bool(flag) for flag in mask],

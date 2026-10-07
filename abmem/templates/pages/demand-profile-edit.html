@@ -128,6 +128,8 @@
 
             function refreshPreview() {
                 var periods = Number(byId('preview-periods').value);
+                // The season text of the editor counts the winter periods up to the preview length.
+                form.setHorizon(periods);
                 var clientErrors = form.validate();
                 if (Object.keys(clientErrors).length > 0) {
                     loader.cancel();

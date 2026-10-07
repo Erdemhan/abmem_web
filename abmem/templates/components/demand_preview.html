@@ -2,6 +2,7 @@
 Demand preview (PLAN 2.8): chart canvas, status line and statistics table. Reusable: include with
     {% include 'components/demand_preview.html' with prefix="demand-preview" %}
 and fill it with DemandProfileForm.renderPreview(canvas, json) and DemandProfileForm.renderStats(tbody, json).
+A seasonal profile adds a dashed line at the end of summer and Summer / Winter statistics rows.
 Ids: <prefix>-chart, <prefix>-status, <prefix>-stats.
 {% endcomment %}
 <div class="demand-preview" id="{{ prefix }}">
@@ -9,7 +10,7 @@ Ids: <prefix>-chart, <prefix>-status, <prefix>-stats.
     <div class="position-relative" style="height: 260px;">
         <canvas id="{{ prefix }}-chart" role="img" aria-label="Demand preview chart"></canvas>
     </div>
-    <p class="text-xs text-secondary mt-1 mb-2">Shaded: night hours. Values in MWh.</p>
+    <p class="text-xs text-secondary mt-1 mb-2">Shaded: night hours. With a summer/winter split, the night hours of the dominant season are shaded and a dashed line marks the end of summer. Values in MWh.</p>
     <div class="table-responsive">
         <table class="table table-sm align-items-center mb-0 text-sm" aria-describedby="{{ prefix }}-status">
             <caption class="visually-hidden">Demand statistics of the chosen horizon</caption>

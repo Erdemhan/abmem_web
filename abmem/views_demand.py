@@ -40,7 +40,8 @@ from .views_scenario import _uploaded_document
 
 logger = logging.getLogger(__name__)
 
-PREVIEW_PERIOD_CHOICES: tuple[int, ...] = (24, 168, 336, 720)
+# 2160 and 8760 hours (a quarter and a year) show the summer/winter switch.
+PREVIEW_PERIOD_CHOICES: tuple[int, ...] = (24, 168, 336, 720, 2160, 8760)
 DEFAULT_PREVIEW_PERIODS: int = 168
 _DISTRIBUTION_LABELS: dict[str, str] = {
     "NORMAL": "Normal",
@@ -107,7 +108,10 @@ def profile_row(template: DemandProfileTemplate) -> dict[str, Any]:
             ``scenario_count``.
 
     Returns:
-        ``{"template", "day_hours", "day", "night", "scenario_count"}``.
+        ``{"template", "day_hours", "day", "night", "scenario_count",
+        "seasonal", "summer_end_period"}``. ``seasonal`` is True for a
+        profile with a summer/winter split, whose ``day_hours``, ``day``
+        and ``night`` describe the summer shape.
     """
     profile = template.profile if isinstance(template.profile, dict) else {}
     start = profile.get("day_start_hour")
@@ -118,12 +122,16 @@ def profile_row(template: DemandProfileTemplate) -> dict[str, Any]:
     count = getattr(template, "scenario_count", None)
     if count is None:
         count = len(demand_library.scenarios_using(template))
+    seasons = profile.get("seasons")
+    seasonal = isinstance(seasons, dict)
     return {
         "template": template,
         "day_hours": day_hours,
         "day": segment_summary(profile.get("day")),
         "night": segment_summary(profile.get("night")),
         "scenario_count": count,
+        "seasonal": seasonal,
+        "summer_end_period": seasons.get("summer_end_period") if seasonal else None,
     }
 
 
