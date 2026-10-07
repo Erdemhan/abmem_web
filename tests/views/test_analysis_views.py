@@ -268,4 +268,9 @@ def test_analysis_config_is_json(
     assert config == {
         "data_url": reverse("simulation_analysis_data", args=[hand_run.pk]),
         "simulation_id": hand_run.pk,
+        "offers_url": reverse("simulation_analysis_offers", args=[hand_run.pk]),
+        "offer_agents": [
+            {"id": agent.pk, "name": agent.name}
+            for agent in hand_run.market.agent_set.order_by("id")
+        ],
     }

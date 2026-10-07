@@ -22,6 +22,8 @@
     .an-expand { cursor: pointer; }
     .an-resource-row td { background: #f8f9fa; }
     .an-num { text-align: right; font-variant-numeric: tabular-nums; }
+    .an-chart-full { position: relative; height: calc(100vh - 140px); }
+    .an-muted td { color: #a0aec0 !important; }
   </style>
 </head>
 
@@ -126,7 +128,7 @@
                 <h6 class="mb-0">Market clearing price and demand</h6>
                 <p class="text-xs text-secondary mb-0">PTF (left axis), demand and met demand (right axis) per period.</p>
               </div>
-              <button class="btn btn-sm btn-outline-secondary mb-0 ms-auto js-png" data-chart="market" type="button">PNG</button>
+              <div class="ms-auto d-flex align-items-center flex-shrink-0"><button class="btn btn-sm btn-outline-secondary mb-0 ms-1" data-zoom-reset="market" type="button" title="Reset zoom">Reset zoom</button><button class="btn btn-sm btn-outline-secondary mb-0 ms-1 js-png" data-chart="market" type="button">PNG</button><button class="btn btn-sm btn-outline-secondary mb-0 ms-1" data-expand="market" type="button" title="Full screen" aria-label="Full screen"><i class="fas fa-expand"></i></button></div>
             </div>
             <div class="card-body p-3"><div class="an-chart"><canvas id="chart-market"></canvas></div></div>
           </div>
@@ -139,7 +141,7 @@
                 <p class="text-xs text-secondary mb-0">Budget after each period, period 0 = initial budget (reconstructed
                   from the offer profits, ends at the stored final budget).</p>
               </div>
-              <button class="btn btn-sm btn-outline-secondary mb-0 ms-auto js-png" data-chart="budgets" type="button">PNG</button>
+              <div class="ms-auto d-flex align-items-center flex-shrink-0"><button class="btn btn-sm btn-outline-secondary mb-0 ms-1" data-zoom-reset="budgets" type="button" title="Reset zoom">Reset zoom</button><button class="btn btn-sm btn-outline-secondary mb-0 ms-1 js-png" data-chart="budgets" type="button">PNG</button><button class="btn btn-sm btn-outline-secondary mb-0 ms-1" data-expand="budgets" type="button" title="Full screen" aria-label="Full screen"><i class="fas fa-expand"></i></button></div>
             </div>
             <div class="card-body p-3"><div class="an-chart"><canvas id="chart-budgets"></canvas></div></div>
           </div>
@@ -155,7 +157,7 @@
                 <p class="text-xs text-secondary mb-0">Offer prices per period. Circles: accepted, crosses: rejected,
                   dashed line: PTF. Click a legend entry to hide or show a series.</p>
               </div>
-              <button class="btn btn-sm btn-outline-secondary mb-0 ms-auto js-png" data-chart="offers" type="button">PNG</button>
+              <div class="ms-auto d-flex align-items-center flex-shrink-0"><button class="btn btn-sm btn-outline-secondary mb-0 ms-1" data-zoom-reset="offers" type="button" title="Reset zoom">Reset zoom</button><button class="btn btn-sm btn-outline-secondary mb-0 ms-1 js-png" data-chart="offers" type="button">PNG</button><button class="btn btn-sm btn-outline-secondary mb-0 ms-1" data-expand="offers" type="button" title="Full screen" aria-label="Full screen"><i class="fas fa-expand"></i></button></div>
             </div>
             <div class="card-body p-3"><div class="an-chart-tall"><canvas id="chart-offers"></canvas></div></div>
           </div>
@@ -172,7 +174,7 @@
               </div>
               <div class="ms-auto d-flex align-items-center">
                 <select class="form-select form-select-sm me-2" id="an-panel-agent" aria-label="Agent"></select>
-                <button class="btn btn-sm btn-outline-secondary mb-0 js-png" data-chart="panel" type="button">PNG</button>
+                <button class="btn btn-sm btn-outline-secondary mb-0 ms-1" data-zoom-reset="panel" type="button" title="Reset zoom">Reset zoom</button><button class="btn btn-sm btn-outline-secondary mb-0 ms-1 js-png" data-chart="panel" type="button">PNG</button><button class="btn btn-sm btn-outline-secondary mb-0 ms-1" data-expand="panel" type="button" title="Full screen" aria-label="Full screen"><i class="fas fa-expand"></i></button>
               </div>
             </div>
             <div class="card-body p-3">
@@ -191,7 +193,7 @@
               </div>
               <div class="ms-auto d-flex align-items-center">
                 <select class="form-select form-select-sm me-2" id="an-learning-agent" aria-label="Agent"></select>
-                <button class="btn btn-sm btn-outline-secondary mb-0 js-png" data-chart="learning" type="button">PNG</button>
+                <button class="btn btn-sm btn-outline-secondary mb-0 ms-1" data-zoom-reset="learning" type="button" title="Reset zoom">Reset zoom</button><button class="btn btn-sm btn-outline-secondary mb-0 ms-1 js-png" data-chart="learning" type="button">PNG</button><button class="btn btn-sm btn-outline-secondary mb-0 ms-1" data-expand="learning" type="button" title="Full screen" aria-label="Full screen"><i class="fas fa-expand"></i></button>
               </div>
             </div>
             <div class="card-body p-3">
@@ -211,7 +213,7 @@
                 <p class="text-xs text-secondary mb-0">Mean agent score and market score. Legacy agent score = mean of the
                   legacy composite scores.</p>
               </div>
-              <button class="btn btn-sm btn-outline-secondary mb-0 ms-auto js-png" data-chart="scores" type="button">PNG</button>
+              <div class="ms-auto d-flex align-items-center flex-shrink-0"><button class="btn btn-sm btn-outline-secondary mb-0 ms-1" data-zoom-reset="scores" type="button" title="Reset zoom">Reset zoom</button><button class="btn btn-sm btn-outline-secondary mb-0 ms-1 js-png" data-chart="scores" type="button">PNG</button><button class="btn btn-sm btn-outline-secondary mb-0 ms-1" data-expand="scores" type="button" title="Full screen" aria-label="Full screen"><i class="fas fa-expand"></i></button></div>
             </div>
             <div class="card-body p-3"><div class="an-chart"><canvas id="chart-scores"></canvas></div></div>
           </div>
@@ -223,7 +225,7 @@
                 <h6 class="mb-0">Legacy composite agent scores</h6>
                 <p class="text-xs text-secondary mb-0">Archived pre-B9 definition, kept for comparison with earlier results.</p>
               </div>
-              <button class="btn btn-sm btn-outline-secondary mb-0 ms-auto js-png" data-chart="legacy" type="button">PNG</button>
+              <div class="ms-auto d-flex align-items-center flex-shrink-0"><button class="btn btn-sm btn-outline-secondary mb-0 ms-1" data-zoom-reset="legacy" type="button" title="Reset zoom">Reset zoom</button><button class="btn btn-sm btn-outline-secondary mb-0 ms-1 js-png" data-chart="legacy" type="button">PNG</button><button class="btn btn-sm btn-outline-secondary mb-0 ms-1" data-expand="legacy" type="button" title="Full screen" aria-label="Full screen"><i class="fas fa-expand"></i></button></div>
             </div>
             <div class="card-body p-3"><div class="an-chart"><canvas id="chart-legacy"></canvas></div></div>
           </div>
@@ -279,25 +281,83 @@
             <div class="card-header pb-0">
               <div class="d-flex flex-wrap align-items-center">
                 <h6 class="mb-0 me-3">Offers</h6>
-                <select class="form-select form-select-sm me-2" id="an-offer-agent" style="max-width: 200px;" aria-label="Agent filter"></select>
-                <input class="form-control form-control-sm me-2" id="an-offer-period" type="number" min="1" placeholder="Period"
-                  style="max-width: 120px;" aria-label="Period filter">
-                <div class="ms-auto d-flex align-items-center">
-                  <button class="btn btn-sm btn-outline-secondary mb-0 me-1" id="an-offer-prev" type="button">Previous</button>
-                  <span class="text-xs mx-2" id="an-offer-range"></span>
-                  <button class="btn btn-sm btn-outline-secondary mb-0" id="an-offer-next" type="button">Next</button>
+                <span class="text-xs text-secondary me-auto">Rejected offers are greyed out.</span>
+                <a class="btn btn-sm btn-outline-secondary mb-0" href="{{ csv_urls.offers }}">Offers CSV</a>
+              </div>
+              <form class="d-flex flex-wrap align-items-end mt-2" id="an-offer-filters" novalidate>
+                <div class="me-2 mb-1">
+                  <label class="form-label text-xs mb-0" for="an-offer-agent">Agent</label>
+                  <select class="form-select form-select-sm" id="an-offer-agent" style="min-width: 160px;"></select>
                 </div>
+                <div class="me-2 mb-1">
+                  <label class="form-label text-xs mb-0" for="an-offer-from">Period from</label>
+                  <input class="form-control form-control-sm" id="an-offer-from" type="number" min="1" step="1"
+                    max="{{ simulation.periodNumber }}" style="max-width: 110px;">
+                </div>
+                <div class="me-2 mb-1">
+                  <label class="form-label text-xs mb-0" for="an-offer-to">Period to</label>
+                  <input class="form-control form-control-sm" id="an-offer-to" type="number" min="1" step="1"
+                    max="{{ simulation.periodNumber }}" style="max-width: 110px;">
+                </div>
+                <div class="me-2 mb-1">
+                  <label class="form-label text-xs mb-0" for="an-offer-accepted">Accepted</label>
+                  <select class="form-select form-select-sm" id="an-offer-accepted">
+                    <option value="all" selected>All</option>
+                    <option value="yes">Accepted</option>
+                    <option value="no">Rejected</option>
+                  </select>
+                </div>
+                <div class="me-2 mb-1">
+                  <label class="form-label text-xs mb-0" for="an-offer-size">Rows per page</label>
+                  <select class="form-select form-select-sm" id="an-offer-size">
+                    <option value="10" selected>10</option>
+                    <option value="25">25</option>
+                    <option value="50">50</option>
+                    <option value="100">100</option>
+                  </select>
+                </div>
+              </form>
+              <div class="text-xs text-danger" id="an-offer-error"></div>
+            </div>
+            <div class="card-body px-0 pt-2 pb-2">
+              <div class="table-responsive">
+                <table class="table table-sm an-table mb-0">
+                  <thead>
+                    <tr><th class="ps-3">Period</th><th>Agent</th><th>Resource</th><th class="an-num">Quantity</th>
+                      <th class="an-num">Offer price</th><th>Accepted</th><th class="an-num">Accepted quantity</th>
+                      <th class="an-num">Acceptance price</th><th class="an-num">Profit</th></tr>
+                  </thead>
+                  <tbody id="an-offers"></tbody>
+                </table>
+              </div>
+              <div class="d-flex flex-wrap align-items-center px-3 pt-2">
+                <span class="text-xs text-secondary me-auto" id="an-offer-range"></span>
+                <button class="btn btn-sm btn-outline-secondary mb-0 me-1" id="an-offer-first" type="button" title="First page">&laquo;</button>
+                <button class="btn btn-sm btn-outline-secondary mb-0 me-1" id="an-offer-prev" type="button" title="Previous page">&lsaquo;</button>
+                <span class="text-xs mx-2" id="an-offer-page">Page 1 of 1</span>
+                <button class="btn btn-sm btn-outline-secondary mb-0 ms-1" id="an-offer-next" type="button" title="Next page">&rsaquo;</button>
+                <button class="btn btn-sm btn-outline-secondary mb-0 ms-1" id="an-offer-last" type="button" title="Last page">&raquo;</button>
               </div>
             </div>
-            <div class="card-body px-0 pt-2 pb-2 an-scroll">
-              <table class="table table-sm an-table mb-0">
-                <thead>
-                  <tr><th class="ps-3">Period</th><th>Agent</th><th>Resource</th><th class="an-num">Amount</th>
-                    <th class="an-num">Offer price</th><th>Accepted</th><th class="an-num">Accepted amount</th>
-                    <th class="an-num">Acceptance price</th><th class="an-num">Profit</th></tr>
-                </thead>
-                <tbody id="an-offers"></tbody>
-              </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- FULL-SCREEN CHART -->
+      <div class="modal fade" id="an-chart-modal" tabindex="-1" aria-labelledby="an-chart-modal-title" aria-hidden="true">
+        <div class="modal-dialog modal-fullscreen">
+          <div class="modal-content">
+            <div class="modal-header">
+              <h5 class="modal-title" id="an-chart-modal-title"></h5>
+              <div class="ms-auto d-flex align-items-center">
+                <span class="text-xs text-secondary me-3">Wheel or pinch to zoom, drag to pan.</span>
+                <button class="btn btn-sm btn-outline-secondary mb-0 me-1" id="an-chart-modal-reset" type="button">Reset zoom</button>
+                <button class="btn btn-sm btn-outline-secondary mb-0 me-3" id="an-chart-modal-png" type="button">PNG</button>
+                <button class="btn-close" type="button" data-bs-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+              </div>
+            </div>
+            <div class="modal-body">
+              <div class="an-chart-full"><canvas id="an-chart-modal-canvas"></canvas></div>
             </div>
           </div>
         </div>
@@ -312,6 +372,9 @@
   <script src="{% static 'assets/js/plugins/perfect-scrollbar.min.js' %}"></script>
   <script src="{% static 'assets/js/plugins/smooth-scrollbar.min.js' %}"></script>
   <script src="{% static 'assets/js/plugins/chartjs.min.js' %}"></script>
+  <script src="{% static 'assets/js/plugins/hammer.min.js' %}"></script>
+  <script src="{% static 'assets/js/plugins/chartjs-plugin-zoom.min.js' %}"></script>
+  <script src="{% static 'assets/js/chart-tools.js' %}"></script>
   <script src="{% static 'assets/js/zip-store.js' %}"></script>
   <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/7.2.0/mdb.umd.min.js"></script>
 
@@ -322,7 +385,6 @@
       'use strict';
       // Chart.js 3.7.1 API (bundled plugins/chartjs.min.js).
       var CONFIG = JSON.parse(document.getElementById('analysis-config').textContent);
-      var OFFERS_PER_PAGE = 50;
       // Agent colours of the legacy analysis script, by agent name.
       var LEGACY_COLORS = { 'SOLAR': '#edf066', 'GEOTHERMAL': '#e26363', 'BİOFUEL': '#bad34d', 'BIOFUEL': '#bad34d',
         'COAL': '#96633A', 'CCGT': '#53a553', 'WİND': '#888888', 'WIND': '#888888', 'NUCLEAR': '#976ebd', 'HYDRO': '#3f97d6' };
@@ -330,8 +392,13 @@
         '#8392ab', '#fb6340', '#5e72e4', '#11cdef'];
       var data = null;
       var charts = {};
+      // Pristine copy of each chart config, used for the full-screen view.
+      var configs = {};
       var agentColor = {};
-      var offerPage = 0;
+      var offerState = { page: 1, numPages: 1, request: 0 };
+      var CHART_TITLES = { market: 'Market clearing price and demand', budgets: 'Agent budgets',
+        offers: 'All offers and PTF', panel: 'Agent panel', learning: 'Learning diagnostics',
+        scores: 'Corrected and legacy scores', legacy: 'Legacy composite agent scores' };
 
       function $(id) { return document.getElementById(id); }
 
@@ -410,10 +477,12 @@
         };
       }
 
+      // Zoom, reset and full-screen view come from the shared ChartTools helper.
       function makeChart(key, config) {
         if (charts[key]) { charts[key].destroy(); }
         config.plugins = (config.plugins || []).concat([whiteBackground]);
-        charts[key] = new Chart($('chart-' + key).getContext('2d'), config);
+        configs[key] = ChartTools.copyConfig(config);
+        charts[key] = ChartTools.create($('chart-' + key), config);
         return charts[key];
       }
 
@@ -688,36 +757,85 @@
         body.appendChild(fragment);
       }
 
-      function filteredOffers() {
+      function offerParams() {
+        var params = new URLSearchParams();
         var agent = $('an-offer-agent').value;
-        var raw = $('an-offer-period').value.trim();
-        var period = raw === '' ? null : Number(raw);
-        return data.offers.filter(function (o) {
-          return (agent === '' || o.agent === agent) && (period === null || o.period === period);
-        });
+        var from = $('an-offer-from').value.trim();
+        var to = $('an-offer-to').value.trim();
+        if (agent !== '') { params.set('agent', agent); }
+        if (from !== '') { params.set('period_from', from); }
+        if (to !== '') { params.set('period_to', to); }
+        params.set('accepted', $('an-offer-accepted').value);
+        params.set('page', String(offerState.page));
+        params.set('page_size', $('an-offer-size').value);
+        return params;
       }
 
-      function offersTable() {
-        var rows = filteredOffers();
-        var pages = Math.max(1, Math.ceil(rows.length / OFFERS_PER_PAGE));
-        offerPage = Math.min(Math.max(0, offerPage), pages - 1);
-        var start = offerPage * OFFERS_PER_PAGE;
-        var slice = rows.slice(start, start + OFFERS_PER_PAGE);
-        var body = $('an-offers');
-        body.innerHTML = '';
+      function renderOffers(body) {
+        var tbody = $('an-offers');
+        tbody.innerHTML = '';
         var fragment = document.createDocumentFragment();
-        slice.forEach(function (o) {
-          var tr = row([cell(String(o.period), 'ps-3'), cell(o.agent), cell(o.resource), cell(String(o.amount), 'an-num'),
-            cell(fmt(o.offer_price), 'an-num'), cell(o.accepted ? 'yes' : 'no', o.accepted ? 'text-success' : 'text-danger'),
-            cell(fmt(o.acceptance_amount, 3), 'an-num'), cell(fmt(o.acceptance_price), 'an-num'), cell(fmt(o.profit), 'an-num')]);
+        body.rows.forEach(function (o) {
+          var tr = row([cell(String(o.period), 'ps-3'), cell(o.agent), cell(o.resource), cell(String(o.quantity), 'an-num'),
+            cell(fmt(o.offer_price), 'an-num'), cell(o.accepted ? 'yes' : 'no', o.accepted ? 'text-success' : ''),
+            cell(fmt(o.accepted_quantity, 3), 'an-num'), cell(fmt(o.acceptance_price), 'an-num'), cell(fmt(o.profit), 'an-num')]);
+          if (!o.accepted) { tr.className = 'an-muted'; }
           fragment.appendChild(tr);
         });
-        body.appendChild(fragment);
-        $('an-offer-range').textContent = rows.length
-          ? (start + 1) + '-' + (start + slice.length) + ' of ' + rows.length
+        tbody.appendChild(fragment);
+        offerState.page = body.page;
+        offerState.numPages = body.num_pages;
+        var start = (body.page - 1) * body.page_size;
+        $('an-offer-range').textContent = body.count
+          ? (start + 1) + '-' + (start + body.rows.length) + ' of ' + body.count + ' offers'
           : '0 offers';
-        $('an-offer-prev').disabled = offerPage === 0;
-        $('an-offer-next').disabled = offerPage >= pages - 1;
+        $('an-offer-page').textContent = 'Page ' + body.page + ' of ' + body.num_pages;
+        $('an-offer-first').disabled = body.page <= 1;
+        $('an-offer-prev').disabled = body.page <= 1;
+        $('an-offer-next').disabled = body.page >= body.num_pages;
+        $('an-offer-last').disabled = body.page >= body.num_pages;
+      }
+
+      function offerErrors(errors) {
+        return Object.keys(errors).map(function (field) { return field + ': ' + errors[field].join(' '); }).join('  ');
+      }
+
+      // Loads one page from the server. Only the answer to the latest request is shown.
+      function loadOffers(page) {
+        offerState.page = Math.max(1, page);
+        var request = ++offerState.request;
+        $('an-offer-error').textContent = '';
+        fetch(CONFIG.offers_url + '?' + offerParams().toString(), { headers: { 'Accept': 'application/json' }, cache: 'no-store' })
+          .then(function (response) {
+            return response.json().then(function (body) { return { ok: response.ok, status: response.status, body: body }; });
+          })
+          .then(function (result) {
+            if (request !== offerState.request) { return; }
+            if (!result.ok) {
+              $('an-offer-error').textContent = result.body.errors ? offerErrors(result.body.errors)
+                : (result.body.error || ('HTTP ' + result.status));
+              return;
+            }
+            renderOffers(result.body);
+          })
+          .catch(function (error) {
+            if (request === offerState.request) { $('an-offer-error').textContent = 'Loading the offers failed: ' + error.message; }
+          });
+      }
+
+      function fillOfferAgents() {
+        var select = $('an-offer-agent');
+        select.innerHTML = '';
+        var all = document.createElement('option');
+        all.value = '';
+        all.textContent = 'All agents';
+        select.appendChild(all);
+        CONFIG.offer_agents.forEach(function (a) {
+          var option = document.createElement('option');
+          option.value = String(a.id);
+          option.textContent = a.name;
+          select.appendChild(option);
+        });
       }
 
       function fillSelect(select, values, allLabel) {
@@ -787,13 +905,12 @@
         var learners = names.filter(function (n) { return (data.step_logs[n] || []).length > 0; });
         fillSelect($('an-panel-agent'), names, null);
         fillSelect($('an-learning-agent'), learners.length ? learners : names, null);
-        fillSelect($('an-offer-agent'), names, 'All agents');
-        $('an-offer-period').max = String(data.settings.period_number);
+        fillOfferAgents();
         settingsTable();
         scoreTables();
         summaryTable();
         periodsTable();
-        offersTable();
+        loadOffers(1);
         if (typeof Chart === 'undefined') {
           showMessage('Chart.js could not be loaded, charts are not shown.', true);
           return;
@@ -811,10 +928,23 @@
 
       $('an-panel-agent').addEventListener('change', function (e) { panelChart(e.target.value); });
       $('an-learning-agent').addEventListener('change', function (e) { learningChart(e.target.value); });
-      $('an-offer-agent').addEventListener('change', function () { offerPage = 0; offersTable(); });
-      $('an-offer-period').addEventListener('input', function () { offerPage = 0; offersTable(); });
-      $('an-offer-prev').addEventListener('click', function () { offerPage -= 1; offersTable(); });
-      $('an-offer-next').addEventListener('click', function () { offerPage += 1; offersTable(); });
+      ['an-offer-agent', 'an-offer-from', 'an-offer-to', 'an-offer-accepted', 'an-offer-size'].forEach(function (id) {
+        $(id).addEventListener('change', function () { loadOffers(1); });
+      });
+      $('an-offer-filters').addEventListener('submit', function (e) { e.preventDefault(); loadOffers(1); });
+      $('an-offer-first').addEventListener('click', function () { loadOffers(1); });
+      $('an-offer-prev').addEventListener('click', function () { loadOffers(offerState.page - 1); });
+      $('an-offer-next').addEventListener('click', function () { loadOffers(offerState.page + 1); });
+      $('an-offer-last').addEventListener('click', function () { loadOffers(offerState.numPages); });
+      function chartSuffix(key) {
+        return key === 'panel' ? $('an-panel-agent').value : (key === 'learning' ? $('an-learning-agent').value : '');
+      }
+      ChartTools.bindButtons(document, {
+        chart: function (key) { return charts[key]; },
+        config: function (key) { return configs[key]; },
+        title: function (key) { return CHART_TITLES[key] + (chartSuffix(key) ? ': ' + chartSuffix(key) : ''); },
+        fileName: function (key) { return fileName(key, chartSuffix(key)); }
+      });
       Array.prototype.forEach.call(document.querySelectorAll('.js-png'), function (button) {
         button.addEventListener('click', function () { downloadPng(button.getAttribute('data-chart')); });
       });

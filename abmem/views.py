@@ -20,6 +20,7 @@ from django.http import (
 )
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
+from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 
 from .forms import AgentForm, PlantForm, ResourceForm
@@ -51,6 +52,7 @@ from .services.market.clearing_algorithms.registry import (
 from .services.market import market_factory as MarketFactory
 from .services.market.demand_generator import PAYLOAD_KEY, normalize_profile
 from .services.simulation import checkpoints
+from .services.simulation.progress import simulation_progress
 from .services.simulation import simulation_factory as SimulationFactory
 from .services.starter import starter_service as StarterService
 
@@ -1704,8 +1706,20 @@ def watch_simulation(request: HttpRequest, simulation_id: str) -> HttpResponse:
     return render(request, "pages/watch_simulation.html", context)
 
 
-# Simülasyon durumu kontrol view fonksiyonu
-def get_simulation_status(request):
+def get_simulation_status(request: HttpRequest) -> JsonResponse:
+    """Return the state and progress of a simulation for the watch page.
+
+    The offers of the periods are not part of the response (PLAN 2.11). They
+    are shown in the offers table of the analysis tab.
+
+    Args:
+        request: GET request with ``simulation_id``.
+
+    Returns:
+        ``status``, ``mode``, ``total`` (periodNumber), ``period``
+        (currentPeriod), ``marketStatus``, ``agents``, ``error`` and
+        ``progress`` (:class:`RunProgress` as a dict).
+    """
     simulation_id = request.GET.get("simulation_id")
     simulation = get_object_or_404(Simulation, id=simulation_id)
     status = simulation.state.name
@@ -1728,29 +1742,6 @@ def get_simulation_status(request):
             }
         )
 
-    periods_list = []
-    if simulation.state == enums.SimulationState.FINISHED:
-        periods = list(market.period_set.all())
-        for period in periods:
-            offersList = []
-            if period != None:
-                offers = list(period.offer_set.all().order_by("-agent_id"))
-                for offer in offers:
-                    offersList.append(offer.to_dict())
-                if period.ptf != -1:
-                    offersList.append(create_mcp(period.ptf))
-                periods_list.append({"id": period.periodNumber, "offers": offersList})
-    else:
-        period = market.period_set.filter(periodNumber=currentPeriod).first()
-        offersList = []
-        if period != None:
-            offers = list(period.offer_set.all().order_by("-agent_id"))
-            for offer in offers:
-                offersList.append(offer.to_dict())
-            if period.ptf != -1:
-                offersList.append(create_mcp(period.ptf))
-            periods_list.append({"id": period.periodNumber, "offers": offersList})
-
     return JsonResponse(
         {
             "status": status,
@@ -1759,8 +1750,8 @@ def get_simulation_status(request):
             "period": currentPeriod,
             "marketStatus": marketStatus,
             "agents": agent_list,
-            "periods": periods_list,
             "error": simulation.error,
+            "progress": simulation_progress(simulation, timezone.now()).to_dict(),
         }
     )
 
@@ -1771,19 +1762,6 @@ def nextPeriod(request):
     simulation.market.state = enums.MarketState.INITIALIZED
     fb = simulation.market.save()
     return JsonResponse({"status": "OK"})
-
-
-def create_mcp(mcp):
-    return {
-        "id": -1,
-        "agent": "MCP",
-        "resource": mcp,
-        "amount": mcp,
-        "offerPrice": mcp,
-        "acceptance": mcp,
-        "acceptancePrice": mcp,
-        "acceptanceAmount": mcp,
-    }
 
 
 # RESOURCE

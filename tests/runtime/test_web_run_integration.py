@@ -112,4 +112,8 @@ def test_web_run_reaches_finished(monkeypatch, settings, tmp_path) -> None:
     assert status.status_code == 200
     body = status.json()
     assert body["status"] == "FINISHED"
-    assert len(body["periods"]) == 5
+    assert "periods" not in body
+    assert body["period"] == 5 and body["total"] == 5
+    assert body["progress"]["completed"] == 5
+    assert body["progress"]["percent"] == 100.0
+    assert body["progress"]["finished"] is True

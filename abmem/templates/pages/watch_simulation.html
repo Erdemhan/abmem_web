@@ -16,35 +16,25 @@
     <link href="{% static 'assets/css/nucleo-svg.css' %}" rel="stylesheet" />
     <!-- Font Awesome Icons -->
     <script src="https://kit.fontawesome.com/42d5adcbca.js" crossorigin="anonymous"></script>
-    <link href="{% static 'assets/css/nucleo-svg.css' %}" rel="stylesheet" />
     <!-- CSS Files -->
     <link id="pagestyle" href="{% static 'assets/css/soft-ui-dashboard.css' %}" rel="stylesheet" />
-    <link id="pagestyle" href="{% static 'assets/css/abmem.css' %}?v=3" rel="stylesheet" />
+    <link href="{% static 'assets/css/abmem.css' %}?v=3" rel="stylesheet" />
     <script src="https://code.jquery.com/jquery-3.7.1.min.js"
         integrity="sha256-/JqT3SQfawRcv/BIHPThkBvs0OEvtFFmqPF/lYI/Cxo=" crossorigin="anonymous"></script>
-
-
-    <script>
-        function nextPeriod() {
-            $.ajax({
-                url: "{% url 'nextPeriod' %}",  // Adjust the URL pattern name
-                data: {
-                    'simulation_id': {{ simulation_id }}
-            },
-        dataType: 'json',
-            success: function (data) {
-            },
-        error: function (xhr, status, error) {
-            console.error('Error fetching simulation status:', error);
+    <style>
+        .wp-gauge { position: relative; width: 180px; height: 180px; }
+        .wp-gauge-label {
+            position: absolute; inset: 0; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; pointer-events: none;
         }
-    })
-    };
-
-    </script>
+        .wp-gauge-label strong { font-size: 2rem; line-height: 1; font-variant-numeric: tabular-nums; }
+        .wp-progress { height: 10px; }
+        .wp-facts dt { font-weight: 600; font-size: 0.75rem; text-transform: uppercase; color: #8392ab; }
+        .wp-facts dd { font-size: 0.95rem; margin-bottom: 0.6rem; font-variant-numeric: tabular-nums; }
+    </style>
 </head>
 
 <body class="g-sidenav-show bg-gray-100">
-
 
     <!-- SIDEBAR -->
     <aside class="sidenav navbar navbar-vertical navbar-expand-xs border-0 border-radius-xl my-3 fixed-start ms-3"
@@ -62,244 +52,91 @@
 
         <!-- CONTAINER -->
         <div class="container-fluid py-4">
-            <row>
-                <div class="row ">
-                    <h4 class="modal-title pb-3" id="resource-modal-label">Simulation Status</h4>
-                    <div class="card pt-3">
-                        <div class="row " id="simulation-status">
-                            <div class="col mb-3">
-                                <p>Status: <span span id="status"
-                                        class="badge badge-sm bg-gradient-primary">CREATED</span></p>
-                            </div>
-                            <div class="col mb-3">
-                                <p>Market Status: <span span id="marketStatus"
-                                        class="badge badge-sm bg-gradient-primary">CREATED</span></p>
-                            </div>
-                            <div class="col mb-3">
-                                <p>Current Period: <span id="period"></span></p>
-                            </div>
-                            <div class="col mb-3">
-                                <p>Seed: <span id="seed">{{ seed }}</span></p>
-                            </div>
-                            {% if analysis_url %}
-                            <div class="col mb-3">
-                                <a class="btn btn-sm bg-gradient-success mb-0 d-none" id="analysis-button"
-                                    href="{{ analysis_url }}">Analysis</a>
-                            </div>
-                            {% endif %}
-                        </div>
-                        <div class="row " id="nextRow">
-                            <div class="form-group col">
-                                <button type="button" class="btn btn-info" onclick="nextPeriod()">Continue</button>
-                            </div>
-                        </div>
-                    </div>
-                    <!-- AGENTS TABLE -->
-                    <div class="row px-0 pt-3">
-                        <div class="col-12 px-0">
-                            <div class="card mb-2">
-                                <div class="card-header pb-0">
-                                    <h4>Agents</h4>
-                                </div>
-                                <div class="card-body px-0 pb-2 pt-0">
-                                    <div class="table-responsive">
-                                        <table class="table align-items-center mb-0" id="agents-table">
-                                            <thead>
-                                                <tr>
-                                                    <th
-                                                        class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">
-                                                        Name</th>
-                                                    <th
-                                                        class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">
-                                                        State</th>
-                                                    <th
-                                                        class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">
-                                                        Budget</th>
-                                                    <th
-                                                        class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">
-                                                        Algorithm</th>
-                                                    <th
-                                                        class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">
-                                                        Fail-stack</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
+            <h4 class="pb-3">Simulation Status</h4>
 
-                                            </tbody>
-                                        </table>
-                                    </div>
+            <!-- PROGRESS -->
+            <div class="card mb-4">
+                <div class="card-body">
+                    <div class="row align-items-center">
+                        <div class="col-md-auto d-flex justify-content-center mb-3 mb-md-0">
+                            <div class="wp-gauge">
+                                <canvas id="progress-chart" aria-label="Run progress" role="img"></canvas>
+                                <div class="wp-gauge-label">
+                                    <strong id="progress-percent">0 %</strong>
+                                    <span class="text-xs text-secondary">completed</span>
                                 </div>
                             </div>
                         </div>
-
-                        <!--PERIOD TABLE CONTAINER-->
-                        <div class="row px-0 pt-1" id="period-table-container">
-                            <!-- Period tabloları buraya eklenecek -->
+                        <div class="col">
+                            <div class="d-flex flex-wrap align-items-center mb-2">
+                                <span class="me-2">Status:</span>
+                                <span id="status" class="badge badge-sm bg-gradient-primary me-3">CREATED</span>
+                                <span class="me-2">Market:</span>
+                                <span id="marketStatus" class="badge badge-sm bg-gradient-secondary me-3">CREATED</span>
+                                <span class="badge badge-sm bg-gradient-secondary d-none" id="progress-phase"></span>
+                                {% if analysis_url %}
+                                <a class="btn btn-sm bg-gradient-success mb-0 ms-auto d-none" id="analysis-button"
+                                    href="{{ analysis_url }}">Open analysis</a>
+                                {% endif %}
+                            </div>
+                            <div class="progress wp-progress mb-3">
+                                <div class="progress-bar bg-gradient-info" id="progress-bar" role="progressbar"
+                                    style="width: 0%;" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
+                            </div>
+                            <dl class="row wp-facts mb-0">
+                                <div class="col-sm-6 col-lg-3">
+                                    <dt>Period</dt>
+                                    <dd id="progress-period">-</dd>
+                                </div>
+                                <div class="col-sm-6 col-lg-3">
+                                    <dt>Elapsed</dt>
+                                    <dd id="progress-elapsed">-</dd>
+                                </div>
+                                <div class="col-sm-6 col-lg-3">
+                                    <dt>Remaining (estimate)</dt>
+                                    <dd id="progress-remaining">-</dd>
+                                </div>
+                                <div class="col-sm-6 col-lg-3">
+                                    <dt>Seed</dt>
+                                    <dd><span id="seed">{{ seed }}</span></dd>
+                                </div>
+                            </dl>
+                            <div class="alert alert-danger text-white text-sm mb-0 d-none" id="run-error"></div>
+                            <div class="mt-2 d-none" id="nextRow">
+                                <button type="button" class="btn btn-info mb-0" id="next-period-button">Continue with the next period</button>
+                            </div>
                         </div>
-                        <!--PERIOD TABLE CONTAINER-->
-
                     </div>
                 </div>
-            </row>
+            </div>
 
-
-
-            </row>
+            <!-- AGENTS TABLE -->
+            <div class="card mb-2">
+                <div class="card-header pb-0">
+                    <h4>Agents</h4>
+                </div>
+                <div class="card-body px-0 pb-2 pt-0">
+                    <div class="table-responsive">
+                        <table class="table align-items-center mb-0" id="agents-table">
+                            <thead>
+                                <tr>
+                                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Name</th>
+                                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">State</th>
+                                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Budget</th>
+                                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Algorithm</th>
+                                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Fail-stack</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
         </div>
         <!-- END CONTAINER -->
 
     </main>
     <!-- END MAIN -->
-
-
-    <script>
-
-        $(document).ready(function () {
-            $('#nextRow').hide();
-            var flag = false
-            function getSimulationStatus() {
-                $.ajax({
-                    url: "{% url 'get_simulation_status' %}",  // Adjust the URL pattern name
-                    data: {
-                        'simulation_id': {{ simulation_id }}
-        },
-            dataType: 'json',
-            success: function (data) {
-                // Check if status is FINISHED
-                /*
-                if (flag) {
-                    setTimeout(function () {
-                        window.history.back();
-                    }, 3000); // Wait for 3 seconds before redirecting
-                    return;
-                }*/
-                if (data.status === 'STARTED') {
-                    $('#status').removeClass('bg-gradient-primary');
-                    $('#status').addClass('bg-gradient-info');
-                }
-                if (data.status === 'FINISHED') {
-                    flag = true
-                    $('#analysis-button').removeClass('d-none');
-                    $('#status').removeClass('bg-gradient-info');
-                    $('#status').addClass('bg-gradient-success');
-                }
-                if (data.status === 'CANCELED') {
-                    flag = true
-                    $('#status').removeClass('bg-gradient-info');
-                    $('#status').removeClass('bg-gradient-primary');
-                    $('#status').addClass('bg-gradient-danger');
-                }
-                if (data.marketStatus === 'WAITINGAGENTS') {
-                    $('#marketStatus').removeClass('bg-gradient-primary');
-                    $('#marketStatus').addClass('bg-gradient-info');
-                }
-                if (data.marketStatus === 'PERIODEND') {
-                    $('#marketStatus').removeClass('bg-gradient-info');
-                    $('#marketStatus').addClass('bg-gradient-success');
-                    if (data.mode === 'PERIODBYPERIOD' && data.status != 'FINISHED') {
-                        $('#nextRow').show();
-                    } else {
-                        $('#nextRow').hide();
-                    }
-                } else {
-                    $('#nextRow').hide();
-                }
-                $('#status').text(data.status);
-                $('#marketStatus').text(data.marketStatus);
-                $('#period').text(data.period + ' / ' + data.total);
-                $('#offers-period').text('Period: ' + data.period + '   Offers');
-
-                var agentRows = '';
-                data.agents.forEach(function (agent) {
-                    var failstackBadge = agent.failstack_enabled
-                        ? '<span class="badge bg-gradient-success">On</span>'
-                        : '<span class="badge bg-gradient-secondary">Off</span>';
-                    agentRows += '<tr><td>' + agent.name + '</td><td>' + agent.state + '</td><td>' + agent.budget
-                        + '</td><td>' + agent.algorithm + '</td><td>' + failstackBadge + '</td></tr>';
-                });
-                $('#agents-table tbody').html(agentRows);
-                //>>>>>>>
-
-                $('#period-table-container').empty();
-                data.periods.forEach(function (period, index) {
-                    
-                    var periodHeader = '<div class="col-12 px-0">' +
-                        '<div class="card mb-4">' +
-                        '<div class="card-header pb-0">' +
-                        '<h4 id="offers-period">Period ' + period.id + ' Offers</h4>' +
-                        '</div>' +
-                        '<div class="card-body px-0 pb-2 pt-0">' +
-                        '<div class="table-responsive">' +
-                        '<table class="table align-items-center mb-0" id="period-table-' + period.id + '">' +
-                        '<thead>' +
-                        '<tr>' +
-                        '<th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Agent</th>' +
-                        '<th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Resource</th>' +
-                        '<th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Amount</th>' +
-                        '<th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Accepted Amount</th>' +
-                        '<th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Offer Price</th>' +
-                        '<th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Acceptance Price</th>' +
-                        '<th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Acceptance</th>' +
-                        '</tr>' +
-                        '</thead>' +
-                        '<tbody>' +
-                        '</tbody>' +
-                        '</table>' +
-                        '</div>' +
-                        '</div>' +
-                        '</div>' +
-                        '</div>';
-
-                    $('#period-table-container').append(periodHeader);
-
-                    period.offers.sort(function (a, b) {
-                        return a.offerPrice - b.offerPrice;
-                    });
-
-                    var hasIdMinusOne = period.offers.some(function (offer) {
-                        return offer.id === -1;
-                    });
-
-                    var offerRows = '';
-                    period.offers.forEach(function (offer) {
-                        var rowColor = '';
-                        if (hasIdMinusOne) {
-                            if (offer.id === -1) {
-                                rowColor = 'background-color: #ADD8E6;';
-                            } else if (!offer.acceptance) {
-                                rowColor = 'background-color: #FC6868;';
-                            } else {
-                                rowColor = 'background-color: #7AFC68;';
-                            }
-                        }
-                        offerRows += '<tr style="' + rowColor + '"><td>' + offer.agent + '</td><td>' + offer.resource + '</td><td>' + offer.amount + '</td><td>' + offer.acceptanceAmount + '</td><td>' + offer.offerPrice + '</td><td>' + offer.acceptancePrice + '</td><td>' + offer.acceptance + '</td></tr>';
-                    });
-                    $('#period-table-' + period.id + ' tbody').html(offerRows);
-                });
-
-
-
-
-                // ZZZZZZ
-            },
-            error: function (xhr, status, error) {
-                console.error('Error fetching simulation status:', error);
-            }
-                });
-        if (flag) {
-            clearInterval(intervalId)
-        }
-            }
-        // Initial fetch
-        getSimulationStatus();
-        var intervalId = setInterval(getSimulationStatus, 1000);
-
-
-        });
-
-    </script>
-
-
 
     <!-- Core JS Files -->
     <script src="{% static 'assets/js/core/popper.min.js' %}"></script>
@@ -307,11 +144,162 @@
     <script src="{% static 'assets/js/plugins/perfect-scrollbar.min.js' %}"></script>
     <script src="{% static 'assets/js/plugins/smooth-scrollbar.min.js' %}"></script>
     <script src="{% static 'assets/js/plugins/chartjs.min.js' %}"></script>
-    <!-- Github buttons -->
-    <script async defer src="https://buttons.github.io/buttons.js"></script>
     <!-- MDB -->
     <script type="text/javascript"
         src="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/7.2.0/mdb.umd.min.js"></script>
+
+    <script>
+        (function () {
+            'use strict';
+            // Chart.js 3.7.1 API (bundled plugins/chartjs.min.js).
+            var STATUS_URL = "{% url 'get_simulation_status' %}";
+            var NEXT_URL = "{% url 'nextPeriod' %}";
+            var SIMULATION_ID = {{ simulation_id }};
+            var POLL_MS = 1000;
+            var TERMINAL = { FINISHED: true, FAILED: true, CANCELED: true, STOPPED: true };
+            var STATUS_CLASS = { FINISHED: 'bg-gradient-success', FAILED: 'bg-gradient-danger',
+                CANCELED: 'bg-gradient-danger', STOPPED: 'bg-gradient-warning', CREATED: 'bg-gradient-primary' };
+            var BAR_CLASS = { FINISHED: 'bg-gradient-success', FAILED: 'bg-gradient-danger',
+                CANCELED: 'bg-gradient-danger', STOPPED: 'bg-gradient-warning' };
+            var gauge = null;
+
+            function duration(seconds) {
+                if (seconds === null || seconds === undefined || !isFinite(seconds)) { return '-'; }
+                var total = Math.max(0, Math.round(seconds));
+                var h = Math.floor(total / 3600);
+                var m = Math.floor((total % 3600) / 60);
+                var s = total % 60;
+                if (h > 0) { return h + ' h ' + m + ' min'; }
+                if (m > 0) { return m + ' min ' + s + ' s'; }
+                return s + ' s';
+            }
+
+            function gaugeColor(state) {
+                if (state === 'FAILED' || state === 'CANCELED') { return '#ea0606'; }
+                if (state === 'FINISHED') { return '#82d616'; }
+                return '#17c1e8';
+            }
+
+            function drawGauge(percent, state) {
+                if (typeof Chart === 'undefined') { return; }
+                var values = [percent, Math.max(0, 100 - percent)];
+                var colors = [gaugeColor(state), '#e9ecef'];
+                if (!gauge) {
+                    gauge = new Chart(document.getElementById('progress-chart').getContext('2d'), {
+                        type: 'doughnut',
+                        data: { labels: ['Completed', 'Remaining'],
+                            datasets: [{ data: values, backgroundColor: colors, borderWidth: 0 }] },
+                        options: { cutout: '78%', maintainAspectRatio: false, animation: { duration: 300 },
+                            plugins: { legend: { display: false }, tooltip: { enabled: false } } }
+                    });
+                    return;
+                }
+                gauge.data.datasets[0].data = values;
+                gauge.data.datasets[0].backgroundColor = colors;
+                gauge.update();
+            }
+
+            function setBadge(id, text, className) {
+                var badge = $('#' + id);
+                badge.removeClass(function (index, current) {
+                    return (current.match(/bg-gradient-\S+/g) || []).join(' ');
+                });
+                badge.addClass(className).text(text);
+            }
+
+            function renderAgents(agents) {
+                var body = $('#agents-table tbody').empty();
+                agents.forEach(function (agent) {
+                    var badge = $('<span class="badge"></span>')
+                        .addClass(agent.failstack_enabled ? 'bg-gradient-success' : 'bg-gradient-secondary')
+                        .text(agent.failstack_enabled ? 'On' : 'Off');
+                    $('<tr></tr>')
+                        .append($('<td></td>').text(agent.name))
+                        .append($('<td></td>').text(agent.state))
+                        .append($('<td></td>').text(agent.budget))
+                        .append($('<td></td>').text(agent.algorithm))
+                        .append($('<td></td>').append(badge))
+                        .appendTo(body);
+                });
+            }
+
+            function render(data) {
+                var p = data.progress;
+                var finished = !!TERMINAL[data.status];
+                var percent = p.percent;
+                drawGauge(percent, data.status);
+                $('#progress-percent').text((percent % 1 === 0 ? percent.toFixed(0) : percent.toFixed(1)) + ' %');
+                $('#progress-bar').css('width', percent + '%').attr('aria-valuenow', percent)
+                    .removeClass('bg-gradient-info bg-gradient-success bg-gradient-danger bg-gradient-warning')
+                    .addClass(BAR_CLASS[data.status] || 'bg-gradient-info')
+                    .toggleClass('progress-bar-striped progress-bar-animated', !finished);
+
+                var current = finished ? p.completed : Math.max(0, data.period);
+                $('#progress-period').text('Period ' + current + ' of ' + p.total
+                    + ' (' + p.completed + ' completed)');
+                $('#progress-elapsed').text(duration(p.elapsed_seconds));
+                var remaining = '-';
+                if (data.status === 'FINISHED') { remaining = 'done'; }
+                else if (finished) { remaining = '-'; }
+                else if (data.mode === 'PERIODBYPERIOD') { remaining = 'waits for "Continue"'; }
+                else if (p.remaining_seconds !== null) { remaining = 'about ' + duration(p.remaining_seconds); }
+                else { remaining = 'after the first period'; }
+                $('#progress-remaining').text(remaining);
+
+                if (p.phase) {
+                    var evaluation = p.phase === 'evaluation';
+                    setBadge('progress-phase', evaluation
+                        ? 'Evaluation (last ' + p.evaluation_periods + ' periods)'
+                        : 'Training', evaluation ? 'bg-gradient-warning' : 'bg-gradient-info');
+                    $('#progress-phase').removeClass('d-none');
+                } else {
+                    $('#progress-phase').addClass('d-none');
+                }
+
+                setBadge('status', data.status, STATUS_CLASS[data.status] || 'bg-gradient-info');
+                setBadge('marketStatus', data.marketStatus,
+                    data.marketStatus === 'PERIODEND' ? 'bg-gradient-success' : 'bg-gradient-info');
+                $('#analysis-button').toggleClass('d-none', data.status !== 'FINISHED');
+                var failed = data.status === 'FAILED' || data.status === 'CANCELED';
+                $('#run-error').toggleClass('d-none', !failed)
+                    .text(failed ? 'The run ' + data.status.toLowerCase() + '. ' + (data.error || '') : '');
+                var waiting = data.mode === 'PERIODBYPERIOD' && data.marketStatus === 'PERIODEND' && !finished;
+                $('#nextRow').toggleClass('d-none', !waiting);
+                renderAgents(data.agents);
+                return finished;
+            }
+
+            function poll() {
+                $.ajax({
+                    url: STATUS_URL,
+                    data: { simulation_id: SIMULATION_ID },
+                    dataType: 'json',
+                    cache: false,
+                    success: function (data) {
+                        if (!render(data)) { window.setTimeout(poll, POLL_MS); }
+                    },
+                    error: function (xhr, status, error) {
+                        console.error('Error fetching simulation status:', error);
+                        window.setTimeout(poll, POLL_MS * 3);
+                    }
+                });
+            }
+
+            $('#next-period-button').on('click', function () {
+                $('#nextRow').addClass('d-none');
+                $.ajax({
+                    url: NEXT_URL,
+                    data: { simulation_id: SIMULATION_ID },
+                    dataType: 'json',
+                    error: function (xhr, status, error) {
+                        console.error('Error requesting the next period:', error);
+                    }
+                });
+            });
+
+            $(poll);
+        })();
+    </script>
 
 </body>
 

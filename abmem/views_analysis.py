@@ -4,6 +4,8 @@ Routes (prefix ``/dev/``):
 
 * ``simulation/<id>/analysis/`` analysis page,
 * ``simulation/<id>/analysis/data/`` JSON for the charts and tables,
+* ``simulation/<id>/analysis/offers/`` JSON page of the filtered offers
+  (PLAN 2.11),
 * ``simulation/<id>/export/<kind>.csv`` CSV export, ``kind`` in
   ``{periods, offers, steps}``.
 
@@ -22,8 +24,13 @@ from django.shortcuts import get_object_or_404, render
 from django.urls import reverse
 from django.views.decorators.http import require_GET
 
-from .models import Simulation
+from .models import Agent, Simulation
 from .services.analysis import exports
+from .services.analysis.offer_table import (
+    OfferFilterError,
+    offer_page,
+    parse_offer_filter,
+)
 from .services.analysis.run_analysis import (
     RunAnalysisUnavailable,
     build_run_analysis,
@@ -55,6 +62,23 @@ def _get_run(sim_id: int) -> Simulation:
     )
 
 
+def _offer_agents(simulation: Simulation) -> list[dict[str, object]]:
+    """Return the agents of a run for the agent filter of the offers table.
+
+    Args:
+        simulation: The run.
+
+    Returns:
+        ``[{"id", "name"}]`` ordered by id (one query).
+    """
+    return [
+        {"id": agent_id, "name": name}
+        for agent_id, name in Agent.objects.filter(market__simulation=simulation)
+        .order_by("id")
+        .values_list("id", "name")
+    ]
+
+
 @require_GET
 def simulation_analysis(request: HttpRequest, sim_id: int) -> HttpResponse:
     """Render the analysis page of a run.
@@ -73,7 +97,12 @@ def simulation_analysis(request: HttpRequest, sim_id: int) -> HttpResponse:
     context = {
         "simulation": simulation,
         "unavailable": reason,
-        "page_config": {"data_url": data_url, "simulation_id": simulation.pk},
+        "page_config": {
+            "data_url": data_url,
+            "simulation_id": simulation.pk,
+            "offers_url": reverse("simulation_analysis_offers", args=[simulation.pk]),
+            "offer_agents": [] if reason else _offer_agents(simulation),
+        },
         "watch_url": reverse(
             "watch_simulation", kwargs={"simulation_id": simulation.pk}
         ),
@@ -139,3 +168,31 @@ def simulation_export_csv(request: HttpRequest, sim_id: int, kind: str) -> HttpR
         f'attachment; filename="simulation_{simulation.pk}_{kind}.csv"'
     )
     return response
+
+
+@require_GET
+def simulation_analysis_offers(request: HttpRequest, sim_id: int) -> JsonResponse:
+    """Return one page of the filtered offers of a run as JSON.
+
+    Query parameters (all optional): ``agent`` (agent id), ``period_from``,
+    ``period_to``, ``accepted`` (``all``, ``yes`` or ``no``), ``page`` and
+    ``page_size`` (10, 25, 50 or 100, default 10).
+
+    Args:
+        request: GET request.
+        sim_id: Primary key of the run.
+
+    Returns:
+        ``{count, page, page_size, num_pages, rows}`` (200),
+        ``{"errors": {field: [message, ...]}}`` with 400 for invalid
+        parameters, or ``{"error": message}`` with 409 when the run has no
+        analysis.
+    """
+    simulation = _get_run(sim_id)
+    reason = unavailable_reason(simulation)
+    if reason:
+        return JsonResponse({"error": reason}, status=409)
+    try:
+        return JsonResponse(offer_page(simulation, parse_offer_filter(request.GET)))
+    except OfferFilterError as exc:
+        return JsonResponse({"errors": exc.errors}, status=400)
