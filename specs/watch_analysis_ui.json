@@ -1,0 +1,33 @@
+{
+  "spec_id": "watch_analysis_ui",
+  "title": "Watch page progress chart, offers table and chart zoom/full screen in the analysis tab",
+  "status": "approved",
+  "approval_note": "Requested by the user on 2026-10-07 (PLAN.md 2.11): remove the offer listing from the watch page and show progress as a percent chart, offers only in the analysis tab as a filtered paginated table with 10 rows per page by default and a selectable page size, zoom in/out on analysis charts and a button to open each chart full screen.",
+  "plan_items": ["2.11"],
+  "watch_page": {
+    "files": "abmem/templates/pages/watch_simulation.html and the view/JSON endpoint it polls (grep views.py for the watch and status endpoints).",
+    "remove": "The per-period offer tables (period-table-*, offers-period) and the offer payload in the polling response if nothing else uses it (keep the endpoint backward compatible for tests that need it, or update those tests).",
+    "add": [
+      "A progress chart in percent: completed periods / periodNumber. Use a doughnut or radial gauge with the percent in the centre plus a linear progress bar (Chart.js already bundled as static/assets/js/plugins/chartjs.min.js, version 3.7.1).",
+      "Text: 'Period t of N', run state, elapsed time since the run started (Simulation.created_at or the first period timestamp) and a remaining-time estimate from the average time per completed period. Show the training/evaluation phase when evaluation_periods > 0.",
+      "When the run finishes or fails: 100 % (or the failed state with Simulation.error) and a button to the analysis tab.",
+      "PERIODBYPERIOD mode keeps its 'next period' control."
+    ]
+  },
+  "analysis_offers_table": {
+    "endpoint": "A JSON endpoint under the analysis URLs, e.g. simulation/<id>/analysis/offers/?agent=<id>&period_from=&period_to=&accepted=all|yes|no&page=1&page_size=10. page_size in {10, 25, 50, 100}, default 10. Server-side filtering and pagination with Django Paginator, ordered by period then agent then plant. Returns {count, page, page_size, num_pages, rows:[{period, agent, resource, quantity, accepted_quantity, offer_price, acceptance_price, accepted}]}. Invalid parameters give 400 with field errors.",
+    "ui": "A card 'Offers' in simulation-analysis.html with the filters (agent select, period from/to, accepted select), the table, pagination controls (first, previous, page x of y, next, last) and a rows-per-page select (10 default). Rejected rows visually muted, accepted rows normal. The existing Offers CSV download stays.",
+    "performance": "Use select_related and only() so one page costs a constant number of queries (add a query-count test)."
+  },
+  "analysis_charts": {
+    "zoom": "Vendor chartjs-plugin-zoom 1.2.1 and hammerjs 2.0.8 (both compatible with Chart.js 3.7.1) into abmem/static/assets/js/plugins/ (download the minified UMD builds from cdnjs and commit them with their license headers). Enable wheel zoom, pinch zoom and drag-pan on the x axis for every analysis chart, plus a 'Reset zoom' button per chart. PNG and ZIP export keep working (export the current view).",
+    "full_screen": "An expand button on every chart card opens a Bootstrap modal (modal-fullscreen) with a larger copy of the same chart (same data and options, zoom enabled, its own reset button and PNG download). Closing the modal destroys the copy.",
+    "reuse": "One shared helper for zoom options, the reset button and the full-screen modal, used by all charts, no per-chart copies."
+  },
+  "tests": [
+    "Watch page renders without offer tables and contains the progress chart elements, the polling endpoint returns the fields the progress chart uses (current period, period number, state, timestamps).",
+    "Offers endpoint: filters, pagination, default page size 10, allowed page sizes, invalid parameters 400, constant query count per page.",
+    "Analysis page includes the vendored plugin scripts and the shared helper, inline scripts pass node --check.",
+    "Full suite green."
+  ]
+}

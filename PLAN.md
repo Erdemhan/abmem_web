@@ -260,6 +260,19 @@ Spec: `specs/pluggable_algorithms.json`. Starts after 2.9 is merged (migration 0
 - [ ] **Safety:** the engine checks every clearing result against the contract (quantities, demand, PTF within the bid bounds). An unknown or removed key stops the run at validation with a clear message.
 - [ ] **Research rule:** every new clearing or agent algorithm used in results needs its own FORMULATION.md entry approved by the user.
 
+### 2.11 Watch progress, offers table and chart zoom in analysis (request 11, approved 2026-10-07)
+Spec: `specs/watch_analysis_ui.json`. Independent of 2.10.
+- [ ] **Watch:** the per-period offer tables are removed. The page shows the run progress as a chart in percent (completed periods / periodNumber), with period counter, elapsed time and an estimate of the remaining time.
+- [ ] **Analysis offers table:** filter by agent, period range and acceptance, server-side pagination, 10 rows per page by default, page size selectable. The Offers CSV stays.
+- [ ] **Analysis charts:** zoom in/out (wheel, pinch, drag) with a reset button, and a full-screen pop-up button on every chart.
+
+### 2.12 Algorithms tab (request 12, approved 2026-10-07, after 2.10)
+Spec: `specs/algorithms_tab.json`.
+- [ ] **Page:** sidebar entry "Algorithms". Two columns: agent algorithms and market clearing algorithms, discovered from the registries of 2.10. Clicking an algorithm opens its parameters for editing.
+- [ ] **Agent parameters:** editing changes the global default (`AlgorithmDefault`). Agents without their own value use it. Fields, types and bounds come from the algorithm's config class. "Reset to published defaults" restores the class defaults.
+- [ ] **Market parameters:** clearing algorithms get an optional config class like agent algorithms, a `ClearingDefault` table edited on this page and per-scenario overrides in the wizard (`Market.clearing_params`). MERIT_ORDER has no parameters.
+- [ ] **Reproducibility:** every run stores a snapshot of the parameters it actually used (agents and clearing). The analysis tab shows the snapshot. Changing a default affects only runs started afterwards.
+
 ## 4b. Uygulama sırasında çıkan takip işleri
 
 - [x] **B13 (sonradan bulundu, `3b653d9` ile düzeltildi): `Agent.budget` taşabilir.** `max_digits=12` (en fazla ~9.99e9). Büyük kapasiteli uzun çalıştırmalarda periyot yazımı hata verir ve çalıştırma FAILED olarak biter. Alan genişletilmeli (migration). runtime_core worker'ı bildirdi.

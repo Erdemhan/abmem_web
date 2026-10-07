@@ -1,0 +1,35 @@
+{
+  "spec_id": "algorithms_tab",
+  "title": "Algorithms tab: list agent and market clearing algorithms and edit their default parameters",
+  "status": "approved",
+  "approval_note": "Requested by the user on 2026-10-07 (PLAN.md 2.12): a sidebar tab listing agent and market algorithms in two columns, click to edit parameters. Decisions: editing changes the global default and every run stores a snapshot of the parameters it used. Clearing algorithms get editable parameters like agent algorithms.",
+  "plan_items": ["2.12"],
+  "depends_on": "PLAN 2.10 merged (registries of agent and clearing algorithms, Market.clearing_algorithm).",
+  "agent_algorithms": {
+    "defaults": "AlgorithmDefault (one row per algorithm key, params JSON) is the global default edited on the page. Effective parameters of an agent = config class defaults, overridden by AlgorithmDefault.params, overridden by Agent.algorithm_params (existing order OQ-9, unchanged).",
+    "form": "Generated from the algorithm's config class (dataclass fields, type hints, docstring attribute descriptions, default_search_bounds as hints). Validation through config_class.from_dict, errors per field. Shows the class default next to each field and marks fields whose value differs from it. 'Reset to published defaults' deletes the AlgorithmDefault row (with an in-page confirmation, no confirm()).",
+    "info": "Each card shows key, label, description, learning or baseline, on/off-policy, and how many library agents and scenarios use the algorithm."
+  },
+  "clearing_algorithms": {
+    "config": "BaseClearingAlgorithm gains an optional ClassVar config_class (a frozen dataclass with from_dict/to_dict like AlgorithmConfig, default an empty config). The clearing algorithm receives its validated config on construction. MERIT_ORDER has an empty config.",
+    "defaults": "New model ClearingDefault(algorithm_key unique, params JSON) edited on the page, same form generator and reset as agents.",
+    "per_scenario": "Market.clearing_params JSON (default {}) holds per-scenario overrides, edited in the wizard market step under the clearing algorithm select (form generated from the config class, hidden when the class has no fields). Effective = class defaults < ClearingDefault < Market.clearing_params. Scenario YAML gets optional market.clearing_params.",
+    "migration": "One migration after 0017 for ClearingDefault, Market.clearing_params and the snapshot fields."
+  },
+  "snapshot": {
+    "fields": "Agent.effective_params JSON null (filled only on run agents) and Market.effective_clearing_params JSON null (filled only on run markets), written once in SimulationContext.build from the resolved configs (to_dict).",
+    "rule": "A run never reads defaults again after build. Changing a default affects only runs started afterwards. Warm start and HPO keep their current override behaviour, and the snapshot records what was actually used.",
+    "display": "The analysis tab shows the snapshot per agent and for the clearing algorithm (collapsible), and the analysis CSV/ZIP export includes it as a JSON file."
+  },
+  "page": {
+    "url": "algorithms/ (name algorithm_list), algorithms/agent/<key>/ and algorithms/clearing/<key>/ for GET/POST of the parameter form (JSON errors), reset endpoints. Sidebar entry 'Algorithms' after the library entries.",
+    "layout": "Two columns on desktop (Agent algorithms | Market clearing algorithms), stacked on phones. Cards in the existing style (abmem.css contrast rules). Clicking a card opens the parameter editor (modal or detail page). An algorithm whose module failed to import is shown with its error."
+  },
+  "tests": [
+    "Form generation from config classes (types, defaults, descriptions), validation errors per field, save and reset for agent and clearing defaults.",
+    "Effective parameter resolution order for agents and clearing, wizard clearing_params save and YAML round trip.",
+    "Snapshot written at build, unchanged after a later default edit, shown in analysis and included in the export.",
+    "A test-only clearing algorithm with parameters is listed, editable and receives its config in a run.",
+    "Full suite green including the result fingerprint."
+  ]
+}
