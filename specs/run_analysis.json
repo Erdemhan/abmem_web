@@ -1,0 +1,80 @@
+{
+  "spec_id": "run_analysis",
+  "title": "Run-time seed selection and per-run analysis tab",
+  "status": "approved",
+  "approval_note": "Approved by the user on 2026-10-07 (PLAN.md 2.5): interactive Chart.js charts with per-chart PNG download and a bulk download of all charts, both the corrected scores and the legacy composite score, CSV export.",
+  "plan_items": ["2.5"],
+  "purpose": "Let the user choose the seed when starting a run, and give every finished run an analysis page with the charts of the legacy analysis script plus learning diagnostics, score tables and CSV export, all computed from the database.",
+  "files": {
+    "create": [
+      "abmem/services/analysis/__init__.py",
+      "abmem/services/analysis/run_analysis.py",
+      "abmem/services/analysis/legacy_scores.py",
+      "abmem/services/analysis/exports.py",
+      "abmem/views_analysis.py",
+      "abmem/templates/pages/simulation-analysis.html",
+      "abmem/static/assets/js/zip-store.js",
+      "tests/analysis/__init__.py",
+      "tests/analysis/test_run_analysis.py",
+      "tests/analysis/test_legacy_scores.py",
+      "tests/analysis/test_exports.py",
+      "tests/views/test_analysis_views.py",
+      "tests/views/test_run_seed.py"
+    ],
+    "modify": [
+      "abmem/views.py (run_simulation: accept a seed; simulation_list context)",
+      "abmem/urls.py (analysis routes)",
+      "abmem/templates/pages/simulation-list-proxy.html (run dialog with seed)",
+      "abmem/templates/pages/simulation-list.html (seed column, Analysis button)",
+      "abmem/templates/pages/watch_simulation.html (seed display, Analysis button when FINISHED)"
+    ]
+  },
+  "public_interfaces": [
+    {
+      "module": "abmem/views.py",
+      "signature": "run_simulation(request, simulation_id): POST with optional 'seed' (form field or JSON)",
+      "description": "Validates seed in [0, 2**31) (views.SEED_UPPER_BOUND), passes it to library_service.clone_scenario_for_run(seed=...). Missing seed keeps the scenario seed. Invalid seed -> HTTP 400 JSON error, no run created. GET keeps working for existing links (scenario seed)."
+    },
+    {
+      "module": "abmem/services/analysis/run_analysis.py",
+      "signature": "def build_run_analysis(simulation: Simulation) -> RunAnalysis",
+      "description": "Pure read-only aggregation from the DB with a bounded number of queries (select_related/prefetch_related). Returns dataclasses: run settings (seed, lags, evaluation_periods, strategy, bounds, periodNumber, agent algorithm/fail-stack), period series (periodNumber, demand, metDemand, ptf, marketVolume), per-offer rows (period, agent, plant/resource, amount, offerPrice, accepted, acceptanceAmount, acceptancePrice), budget series per agent reconstructed from offer profits (accounting.offer_profit) starting at the true initial budget, step-log series per agent (reward, critic_loss, actor_loss, mean_q, exploration scale, intervened, learning_active), agent summary (initial/final budget, budget change, mean budget change per period, acceptance rate, mean offer price, mean accepted offer price, accepted energy, revenue, profit, per-resource breakdown with the same columns), corrected scores from abmem.services.hpo.objective over the whole run and over the evaluation window if evaluation_periods > 0, legacy scores from legacy_scores.py. Raises a clear error if the run is not FINISHED or has no periods (e.g. purged HPO trials)."
+    },
+    {
+      "module": "abmem/services/analysis/legacy_scores.py",
+      "signature": "def legacy_composite_scores(rows) -> tuple[dict[str, float], float]",
+      "description": "Exact port of abc_log/try/sim/compute_advanced_scores.py (price_cap = 200, capacity = first offer amount, initial budget = first row budget, 0.4/0.4/0.2 agent score clipped to [0, 1], market score 0.6*(1 - MCP/200) + 0.4*MCP/mean offer price), without prints. Docstring states it is the archived pre-B9 definition kept for comparison (docs/legacy_rewards.md)."
+    },
+    {
+      "module": "abmem/services/analysis/exports.py",
+      "signature": "def periods_csv(sim) -> str; def offers_csv(sim) -> str; def step_logs_csv(sim) -> str",
+      "description": "UTF-8 CSV with a header row, decimal point '.', one row per period / offer / step-log row, stable column order documented in the docstring."
+    },
+    {
+      "module": "abmem/views_analysis.py",
+      "signature": "simulation_analysis(request, sim_id); simulation_analysis_data(request, sim_id) -> JsonResponse; simulation_export_csv(request, sim_id, kind)",
+      "description": "Routes: simulation/<id>/analysis/ (page), simulation/<id>/analysis/data/ (JSON for the charts and tables), simulation/<id>/export/<kind>.csv with kind in {periods, offers, steps} (Content-Disposition attachment, filename simulation_<id>_<kind>.csv). 404 for unknown simulation, 409 with a message for runs that are not FINISHED or have no data. Proxy scenarios have no analysis."
+    }
+  ],
+  "ui_contract": {
+    "charts": "Chart.js already bundled (abmem/static/assets/js/plugins/chartjs.min.js). Charts: (1) PTF, demand and met demand per period; (2) all offers per period, accepted vs rejected, with the PTF line; (3) budget per agent per period; (4) agent panel with an agent selector: offers per plant/resource, accepted vs rejected, PTF line, acceptance rate; (5) learning diagnostics per agent: reward, critic and actor loss, mean Q, exploration scale, fail-stack interventions as markers, evaluation window shaded; (6) scores: corrected agent score and market score, legacy composite agent scores and legacy market score, clearly labelled. Legends toggle series. Each chart has a 'PNG' button (chart.toBase64Image). A page-level 'Download all charts' button builds one ZIP with all chart PNGs client-side using abmem/static/assets/js/zip-store.js, a small dependency-free ZIP writer (stored entries, CRC-32) written for this project. No external downloads or CDN libraries.",
+    "tables": "Run settings, agent summary with expandable per-resource rows, period table, offers table with agent and period filters (client-side pagination). CSV buttons for periods, offers and step logs.",
+    "navigation": "Analysis button on the watch page when the run is FINISHED and in the run list. Seed shown on the watch page and as a column in the run list. Run dialog on the scenario (templates) list with a seed field prefilled with the scenario seed and a 'random seed' button; no blocking browser dialogs (use a Bootstrap modal)."
+  },
+  "invariants": [
+    "Analysis is read-only: no writes to the database.",
+    "Budget series reconstructed from offer profits ends at the stored final Agent.budget (within 0.01).",
+    "Corrected scores equal the values hpo.objective computes for the same run.",
+    "Legacy scores reproduce compute_advanced_scores.py on the same data."
+  ],
+  "edge_cases": [
+    "Run not FINISHED, run with zero periods (purged HPO trial), run with one period, agent with no accepted offer, evaluation_periods = 0, step logs missing for baseline agents, multi-plant agents, seed 0 and 2**31 - 1, seed out of range or non-integer."
+  ],
+  "test_plan": [
+    "Analysis aggregates on a small run created with the existing runtime test helpers (tests/runtime/conftest.py, tests/factories.py): summary values against hand-computed numbers, budget series end equals Agent.budget, corrected scores equal hpo.objective, legacy scores equal a direct reimplementation on the same rows.",
+    "CSV: header and row counts, round trip with the csv module.",
+    "Views: page and data endpoint 200 for a finished run, 409 for unfinished/purged, 404 unknown, CSV content type and filename.",
+    "Run seed: POST with seed creates a run with that seed and leaves the scenario seed unchanged, invalid seed -> 400 and no run, GET still works.",
+    "node --check on the rendered inline scripts and on zip-store.js; a JS-free Python test that builds the same ZIP layout is not required."
+  ]
+}

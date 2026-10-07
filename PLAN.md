@@ -216,6 +216,14 @@ Her maddede: **ne yapılacak**, **nasıl doğrulanacak**. Type B/C maddeleri ayr
 
 ---
 
+### 2.5 Çalıştırırken seed seçimi ve çalıştırma analiz sekmesi (İstek 5, onay 2026-10-07)
+- [ ] **Seed seçimi:** şablon listesindeki "çalıştır" düğmesi bir pencere açar. Seed alanı senaryonun seed'iyle dolu gelir ve bir "rastgele" düğmesi bulunur. Seed sadece o çalıştırmaya uygulanır (`clone_scenario_for_run(seed=...)`). Seed çalıştırma listesinde ve izleme ekranında görünür.
+- [ ] **Analiz sekmesi** (`/dev/simulation/<id>/analysis/`): biten çalıştırmanın izleme ekranından ve çalıştırma listesinden açılır. Veriler veritabanından hesaplanır.
+- [ ] **Grafikler** (Chart.js, etkileşimli, her grafikte "PNG indir" + sayfada "tüm grafikleri ZIP olarak indir"): PTF/talep/karşılanan talep, tüm ajanların teklifleri (kabul/red) ve PTF, bütçe seyri, ajan paneli (santral/kaynak bazında teklifler, PTF, kabul oranı), öğrenme tanılamaları (ödül, kayıplar, Q, keşif gürültüsü, müdahaleler, değerlendirme penceresi), skorlar.
+- [ ] **Skorlar (ikisi birden):** (a) düzeltilmiş ajan ve piyasa skoru (`abmem/services/hpo/objective.py`, B9), (b) arşivlenmiş eski bileşik skor (`abc_log/try/sim/compute_advanced_scores.py` tanımı aynen, "legacy" etiketiyle).
+- [ ] **Tablolar:** çalıştırma ayarları, ajan özeti (eski istatistik tablosunun sütunları ve kaynak kırılımı), periyot tablosu, filtrelenebilir teklif tablosu.
+- [ ] **CSV dışa aktarma:** periyotlar, teklifler, adım logu.
+
 ## 4b. Uygulama sırasında çıkan takip işleri
 
 - [x] **B13 (sonradan bulundu, `3b653d9` ile düzeltildi): `Agent.budget` taşabilir.** `max_digits=12` (en fazla ~9.99e9). Büyük kapasiteli uzun çalıştırmalarda periyot yazımı hata verir ve çalıştırma FAILED olarak biter. Alan genişletilmeli (migration). runtime_core worker'ı bildirdi.
