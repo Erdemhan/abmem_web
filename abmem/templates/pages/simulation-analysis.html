@@ -589,6 +589,7 @@
         body.innerHTML = '';
         [['Run', s.name + ' (#' + s.simulation_id + ')'], ['Seed', String(s.seed)],
           ['Periods', String(s.period_number)], ['Mode', s.mode], ['Market strategy', s.strategy],
+          ['Clearing algorithm', s.clearing_algorithm_label || s.clearing_algorithm],
           ['Bid bounds (USD/MWh)', s.lower_bound + ' - ' + s.upper_bound],
           ['Observation lags', s.observation_lags.join(', ')],
           ['Evaluation periods', s.evaluation_periods ? String(s.evaluation_periods) : '0 (no evaluation window)'],
@@ -618,7 +619,7 @@
           var params = Object.keys(a.algorithm_params).sort().map(function (k) {
             return k + '=' + JSON.stringify(a.algorithm_params[k]);
           }).join(', ');
-          agents.appendChild(row([cell(a.name, 'font-weight-bold'), cell(a.algorithm + (a.baseline ? ' (baseline)' : '')),
+          agents.appendChild(row([cell(a.name, 'font-weight-bold'), cell((a.algorithm_label || a.algorithm) + (a.baseline ? ' (baseline)' : '')),
             cell(failstack), cell(plants), cell(params || '-')]));
         });
       }

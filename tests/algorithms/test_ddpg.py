@@ -7,7 +7,6 @@ import pytest
 import torch
 from torch import nn
 
-from abmem.models.enums import AlgorithmType
 from abmem.services.algorithms.algorithm_config import DDPGConfig
 from abmem.services.algorithms.base import PolicySpec, Transition, UpdateStats
 from abmem.services.algorithms.DDPG import DDPGAlgorithm
@@ -79,13 +78,13 @@ def test_contract_default_config(rng: np.random.Generator) -> None:
 
 
 def test_class_attributes_and_registry() -> None:
-    assert DDPGAlgorithm.algorithm_type is AlgorithmType.DDPG
+    assert DDPGAlgorithm.key == "DDPG"
     assert DDPGAlgorithm.is_learning is True
     assert DDPGAlgorithm.is_on_policy is False
     assert DDPGAlgorithm.config_class is DDPGConfig
-    assert get_algorithm_class(AlgorithmType.DDPG) is DDPGAlgorithm
+    assert get_algorithm_class("DDPG") is DDPGAlgorithm
     policy = build_policy(
-        AlgorithmType.DDPG,
+        "DDPG",
         make_spec(),
         {"hidden_sizes": (8,)},
         np.random.default_rng(0),

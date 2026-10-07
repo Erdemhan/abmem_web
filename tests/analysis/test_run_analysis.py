@@ -12,7 +12,7 @@ from django.db import connection
 from django.test.utils import CaptureQueriesContext
 
 from abmem.models import Agent, Simulation
-from abmem.models.enums import AlgorithmType, SimulationState
+from abmem.models.enums import SimulationState
 from abmem.models.models import Offer
 from abmem.services.analysis.run_analysis import (
     RunAnalysisUnavailable,
@@ -72,8 +72,8 @@ def hand_run() -> Simulation:
     r3 = make_resource(name="R3", om_cost=Decimal("2.5"))
     a = make_agent_with_plants(market, [(r1, 100), (r2, 50)], name="A")
     b = make_agent_with_plants(market, [(r3, 80)], name="B")
-    a.algorithm_type = AlgorithmType.MARGINAL_COST
-    b.algorithm_type = AlgorithmType.RANDOM
+    a.algorithm_type = "MARGINAL_COST"
+    b.algorithm_type = "RANDOM"
     a.budget = Decimal("9272.50")
     b.budget = Decimal("100.00")
     a.save()
@@ -125,6 +125,13 @@ def test_hand_run_series_and_summary(hand_run: Simulation) -> None:
     assert [a.name for a in analysis.settings.agents] == ["A", "B"]
     assert analysis.settings.agents[0].plants[0].resource == "R1"
     assert analysis.settings.agents[0].baseline is True
+    first = analysis.settings.agents[0]
+    assert (first.algorithm, first.algorithm_label) == (
+        "MARGINAL_COST",
+        "Marginal cost",
+    )
+    assert analysis.settings.clearing_algorithm == "MERIT_ORDER"
+    assert analysis.settings.clearing_algorithm_label == "Uniform-price merit order"
 
     assert [p.period for p in analysis.periods] == [1, 2]
     assert analysis.periods[1].met_demand == pytest.approx(110.5)
@@ -351,17 +358,17 @@ def finished_run(
         [
             {
                 "plants": [(r[0], 400), (r[1], 200)],
-                "algorithm": AlgorithmType.DDPG,
+                "algorithm": "DDPG",
                 "params": SMALL_DDPG,
                 "budget": Decimal("1234.56"),
                 "failstack": {"failstack_enabled": True, "failstack_limit": 1},
             },
             {
                 "plants": [(r[2], 300)],
-                "algorithm": AlgorithmType.MARGINAL_COST,
+                "algorithm": "MARGINAL_COST",
                 "budget": Decimal("-50.25"),
             },
-            {"plants": [(r[3], 300)], "algorithm": AlgorithmType.RANDOM},
+            {"plants": [(r[3], 300)], "algorithm": "RANDOM"},
         ],
         period_number=30,
         evaluation_periods=5,
@@ -455,10 +462,10 @@ def test_one_period_run(fast_demand) -> None:  # noqa: F811
         [
             {
                 "plants": [(r[0], 400)],
-                "algorithm": AlgorithmType.RANDOM,
+                "algorithm": "RANDOM",
                 "budget": Decimal("10"),
             },
-            {"plants": [(r[1], 400)], "algorithm": AlgorithmType.MARGINAL_COST},
+            {"plants": [(r[1], 400)], "algorithm": "MARGINAL_COST"},
         ],
         period_number=1,
     )

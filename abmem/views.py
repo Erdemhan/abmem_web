@@ -42,7 +42,12 @@ from .services.agent.resource_rules import (
     allowed_energy_types_by_agent_type,
     validate_agent_resources,
 )
-from .services.algorithms.registry import BASELINE_TYPES
+from .services.algorithms import registry as algorithm_registry
+from .services.market.clearing_algorithms.registry import (
+    DEFAULT_CLEARING_ALGORITHM,
+    available_clearing_algorithms,
+    is_known_clearing,
+)
 from .services.market import market_factory as MarketFactory
 from .services.market.demand_generator import PAYLOAD_KEY, normalize_profile
 from .services.simulation import checkpoints
@@ -138,41 +143,37 @@ def _coerce_agent_type(raw_type: Any) -> enums.AgentType:
         raise ValidationError({"type": [f"Unknown agent type: {raw_type}."]})
 
 
-def _coerce_algorithm_type(raw_type: Any) -> enums.AlgorithmType:
-    """Convert a JSON algorithm type (int, digit string or name) to ``AlgorithmType``.
+def _coerce_algorithm_type(raw_type: Any) -> str:
+    """Return the registered algorithm key named by a JSON value (PLAN 2.10).
 
     Args:
-        raw_type: Value of the ``algorithm_type`` key. None or "" selects the
+        raw_type: Value of the ``algorithm_type`` key, an algorithm key such as
+            ``"DDPG"`` (surrounding spaces ignored). None or "" selects the
             model default (DDPG).
 
     Returns:
-        The matching ``AlgorithmType`` member.
+        The algorithm key.
 
     Raises:
-        ValidationError: ``{'algorithm_type': [...]}`` for a value outside the enum.
+        ValidationError: ``{'algorithm_type': [...]}`` for a value that is not
+            the key of a registered algorithm.
     """
     if raw_type is None or raw_type == "":
-        default = Agent._meta.get_field("algorithm_type").get_default()
-        return enums.AlgorithmType.get(getattr(default, "value", default))
-    member = None
-    if isinstance(raw_type, int) and not isinstance(raw_type, bool):
-        member = enums.AlgorithmType.get(raw_type)
-    elif isinstance(raw_type, str):
-        text = raw_type.strip()
-        if text.isdigit():
-            member = enums.AlgorithmType.get(int(text))
-        elif text in enums.AlgorithmType.__members__:
-            member = enums.AlgorithmType[text]
-    if member is None:
-        known = ", ".join(f"{t.value} ({t.name})" for t in enums.AlgorithmType)
+        return str(Agent._meta.get_field("algorithm_type").get_default())
+    key = raw_type.strip() if isinstance(raw_type, str) else raw_type
+    if not algorithm_registry.is_known(key):
+        known = ", ".join(
+            info.key for info in algorithm_registry.available_algorithms()
+        )
         raise ValidationError(
             {
                 "algorithm_type": [
-                    f"Unknown algorithm type: {raw_type!r}. Known types: {known}."
+                    f"Algorithm {raw_type!r} is not available. Known algorithms: "
+                    f"{known}."
                 ]
             }
         )
-    return member
+    return str(key)
 
 
 def _coerce_failstack_value(field_name: str, raw_value: Any) -> Any:
@@ -241,7 +242,7 @@ def _coerce_switch(raw_value: Any) -> bool:
 def _parse_agent_algorithm(agent_data: Mapping[str, Any]) -> dict[str, Any]:
     """Validate the algorithm and fail-stack settings of one agent payload.
 
-    Expected keys: ``algorithm_type`` (int, digit string or enum name) and
+    Expected keys: ``algorithm_type`` (registered algorithm key) and
     ``failstack`` (``{"enabled": bool, "limit": int, "delta": number,
     "min_margin": number}``). Values sent with ``enabled`` False are stored
     so the settings are kept for later, the rule stays inactive.
@@ -298,10 +299,12 @@ def _parse_agent_algorithm(agent_data: Mapping[str, Any]) -> dict[str, Any]:
                 f"Fail-stack {payload_key}: {message}" for message in exc.messages
             )
 
-    if result["failstack_enabled"] and result["algorithm_type"] in BASELINE_TYPES:
+    if result["failstack_enabled"] and algorithm_registry.is_baseline(
+        result["algorithm_type"]
+    ):
         errors.setdefault("failstack_enabled", []).append(
             "The fail-stack rule cannot be enabled for the baseline algorithm "
-            f"{result['algorithm_type'].name}."
+            f"{result['algorithm_type']}."
         )
     if errors:
         raise ValidationError(errors)
@@ -1149,9 +1152,10 @@ class ScenarioHeader:
         name: Scenario name (stripped, at most ``SIMULATION_NAME_MAX_LENGTH``).
         mode: Simulation mode.
         period_type: Period type.
-        strategy: Market pricing strategy.
+        strategy: Market pricing strategy (settlement rule).
         lower_bound: Lower bid bound in USD/MWh.
         upper_bound: Upper bid bound in USD/MWh, greater than ``lower_bound``.
+        clearing_algorithm: Key of a registered clearing algorithm (PLAN 2.10).
     """
 
     name: str
@@ -1160,6 +1164,7 @@ class ScenarioHeader:
     strategy: enums.MarketStrategy
     lower_bound: int
     upper_bound: int
+    clearing_algorithm: str = DEFAULT_CLEARING_ALGORITHM
 
 
 @dataclass(frozen=True)
@@ -1213,8 +1218,9 @@ def _parse_scenario_header(data: Mapping[str, Any]) -> ScenarioHeader:
 
     Raises:
         ValidationError: With field keys ``simulation_name``,
-            ``simulationMode``, ``periodType``, ``strategy``, ``lowerBound``
-            and ``upperBound``.
+            ``simulationMode``, ``periodType``, ``strategy``, ``lowerBound``,
+            ``upperBound`` and ``clearing_algorithm`` (optional, MERIT_ORDER
+            when missing, must be a registered clearing algorithm key).
     """
     errors: dict[str, list[str]] = {}
     values: dict[str, Any] = {}
@@ -1237,6 +1243,15 @@ def _parse_scenario_header(data: Mapping[str, Any]) -> ScenarioHeader:
             values[key] = _coerce_payload_enum(data.get(field), enum_cls, field, label)
         except ValidationError as exc:
             _add_errors(errors, exc, field, "")
+    clearing = data.get("clearing_algorithm")
+    if clearing is None or clearing == "":
+        clearing = DEFAULT_CLEARING_ALGORITHM
+    if not is_known_clearing(clearing):
+        known = ", ".join(info.key for info in available_clearing_algorithms())
+        errors["clearing_algorithm"] = [
+            f"Clearing algorithm {clearing!r} is not available. Known clearing "
+            f"algorithms: {known}."
+        ]
     lower = _coerce_payload_int(data.get("lowerBound"))
     upper = _coerce_payload_int(data.get("upperBound"))
     if lower is None:
@@ -1256,6 +1271,7 @@ def _parse_scenario_header(data: Mapping[str, Any]) -> ScenarioHeader:
         strategy=values["strategy"],
         lower_bound=lower,
         upper_bound=upper,
+        clearing_algorithm=str(clearing),
     )
 
 
@@ -1355,14 +1371,13 @@ def _library_agent_payload(agent: Agent) -> dict[str, Any]:
 
     Returns:
         ``{id, name, type, type_name, budget, algorithm_type,
-        algorithm_name, failstack: {enabled, active, limit, delta,
-        min_margin}, plants: [{resource_id, resource_name, energy_type,
-        capacity}]}``. Decimals are strings.
+        algorithm_name, algorithm_available, failstack: {enabled, active,
+        limit, delta, min_margin}, plants: [{resource_id, resource_name,
+        energy_type, capacity}]}``. ``algorithm_type`` is the algorithm key,
+        ``algorithm_name`` its registry label. Decimals are strings.
     """
     agent_type = enums.AgentType.get(getattr(agent.type, "value", agent.type))
-    algorithm = enums.AlgorithmType.get(
-        getattr(agent.algorithm_type, "value", agent.algorithm_type)
-    )
+    algorithm = str(agent.algorithm_type)
     try:
         plant_rows = list(agent.portfolio.plant_set.all())
     except Portfolio.DoesNotExist:
@@ -1374,11 +1389,13 @@ def _library_agent_payload(agent: Agent) -> dict[str, Any]:
         "type": agent_type.value if agent_type is not None else None,
         "type_name": agent_type.name if agent_type is not None else "",
         "budget": str(agent.budget),
-        "algorithm_type": algorithm.value if algorithm is not None else None,
-        "algorithm_name": algorithm.name if algorithm is not None else "",
+        "algorithm_type": algorithm,
+        "algorithm_name": algorithm_registry.label_for(algorithm),
+        "algorithm_available": algorithm_registry.is_known(algorithm),
         "failstack": {
             "enabled": bool(agent.failstack_enabled),
-            "active": bool(agent.failstack_enabled) and algorithm not in BASELINE_TYPES,
+            "active": bool(agent.failstack_enabled)
+            and not algorithm_registry.is_baseline(algorithm),
             "limit": agent.failstack_limit,
             "delta": str(agent.failstack_delta),
             "min_margin": str(agent.failstack_min_margin),
@@ -1699,17 +1716,15 @@ def get_simulation_status(request):
     agents = list(market.agent_set.all().order_by("-budget"))
     agent_list = []
     for agent in agents:
-        algorithm_type = enums.AlgorithmType.get(
-            getattr(agent.algorithm_type, "value", agent.algorithm_type)
-        )
+        algorithm_type = str(agent.algorithm_type)
         agent_list.append(
             {
                 "name": agent.name,
                 "state": agent.state.name,
                 "budget": agent.budget,
-                "algorithm": algorithm_type.name if algorithm_type is not None else "",
+                "algorithm": algorithm_type,
                 "failstack_enabled": bool(agent.failstack_enabled)
-                and algorithm_type not in BASELINE_TYPES,
+                and not algorithm_registry.is_baseline(algorithm_type),
             }
         )
 
@@ -1859,7 +1874,11 @@ def _warm_start_sources(scenario_ids: list[int]) -> dict[str, list[dict[str, Any
 
 
 def simulation_list_proxy(request):
-    simulations = list(Simulation.objects.filter(proxy=True).order_by("-updated_at"))
+    simulations = list(
+        Simulation.objects.filter(proxy=True)
+        .select_related("market")
+        .order_by("-updated_at")
+    )
     return render(
         request,
         "pages/simulation-list-proxy.html",
@@ -1871,7 +1890,7 @@ def simulation_list_proxy(request):
 
 
 def simulation_list(request):
-    simulations = _user_runs().order_by("-updated_at")
+    simulations = _user_runs().select_related("market").order_by("-updated_at")
     return render(request, "pages/simulation-list.html", {"simulations": simulations})
 
 
@@ -1977,6 +1996,7 @@ def _wizard_context(simulation: Simulation | None = None) -> dict[str, Any]:
             "periodType": _enum_int(simulation.periodType),
             "periodNumber": simulation.periodNumber,
             "strategy": _enum_int(market.strategy),
+            "clearing_algorithm": market.clearing_algorithm,
             "lowerBound": market.lowerBidBound,
             "upperBound": market.upperBidBound,
             "seed": simulation.seed,
@@ -1995,6 +2015,7 @@ def _wizard_context(simulation: Simulation | None = None) -> dict[str, Any]:
             "periodType": enums.PeriodType.HOUR.value,
             "periodNumber": WIZARD_DEFAULT_PERIODS,
             "strategy": enums.MarketStrategy.PAYASPTF.value,
+            "clearing_algorithm": DEFAULT_CLEARING_ALGORITHM,
             "lowerBound": WIZARD_DEFAULT_LOWER_BOUND,
             "upperBound": WIZARD_DEFAULT_UPPER_BOUND,
             "seed": DEFAULT_SEED,
@@ -2037,12 +2058,13 @@ def _wizard_context(simulation: Simulation | None = None) -> dict[str, Any]:
             str(member.value): member.name.title() for member in enums.AgentType
         },
         "algorithms": {
-            str(member.value): {
-                "name": member.name,
-                "baseline": member in BASELINE_TYPES,
-            }
-            for member in enums.AlgorithmType
+            info.key: {"name": info.label, "baseline": info.is_baseline}
+            for info in algorithm_registry.available_algorithms()
         },
+        "clearing_algorithms": [
+            {"key": info.key, "label": info.label, "description": info.description}
+            for info in available_clearing_algorithms()
+        ],
     }
     context: dict[str, Any] = {
         "resources": resources,
@@ -2130,6 +2152,7 @@ def create_simulation(request: HttpRequest) -> HttpResponse:
             lowerBound=header.lower_bound,
             upperBound=header.upper_bound,
             strategy=header.strategy,
+            clearing_algorithm=header.clearing_algorithm,
         )
         _write_scenario_agents(market, validated.entries)
         created["simulation"] = simulation
@@ -2206,6 +2229,7 @@ def update_simulation(request: HttpRequest, simulation_id: int) -> HttpResponse:
         market.lowerBidBound = header.lower_bound
         market.upperBidBound = header.upper_bound
         market.strategy = header.strategy
+        market.clearing_algorithm = header.clearing_algorithm
         market.save()
 
         _write_scenario_agents(market, validated.entries)

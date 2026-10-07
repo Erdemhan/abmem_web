@@ -64,7 +64,7 @@
                   <label class="form-label" for="hpo-algorithm">Algorithm</label>
                   <select class="form-select" id="hpo-algorithm" name="algorithm_type">
                     {% for algorithm in algorithms %}
-                    <option value="{{ algorithm.name }}" {% if algorithm.name == selected_algorithm %}selected{% endif %}>{{ algorithm.name }}</option>
+                    <option value="{{ algorithm.name }}" {% if algorithm.name == selected_algorithm %}selected{% endif %}>{{ algorithm.label }}</option>
                     {% endfor %}
                   </select>
                 </div>

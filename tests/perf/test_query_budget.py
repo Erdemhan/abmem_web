@@ -16,7 +16,7 @@ from django.db import connection
 from django.test.utils import CaptureQueriesContext
 
 from abmem.models import Agent
-from abmem.models.enums import AgentState, AlgorithmType
+from abmem.models.enums import AgentState
 from abmem.services.market import market_service
 from abmem.services.simulation import simulation_service
 from abmem.services.simulation.context import SimulationContext
@@ -48,7 +48,7 @@ def _context(n_agents: int) -> SimulationContext:
         The context, no period run yet.
     """
     r = resources(n_agents + 1)
-    algorithms = [AlgorithmType.DDPG, AlgorithmType.RANDOM, AlgorithmType.TD3]
+    algorithms = ["DDPG", "RANDOM", "TD3"]
     simulation = make_run(
         [
             {

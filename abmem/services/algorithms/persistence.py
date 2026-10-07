@@ -3,16 +3,19 @@
 A checkpoint is one ``torch.save`` file holding a plain dict of tensors and
 plain Python values (dict, list, int, float, bool, str, None), so it can be
 read back with ``torch.load(weights_only=True)``, which executes no arbitrary
-pickle code. Replay and rollout buffers are not saved: a restored policy starts
-with an empty buffer and learns again once ``learning_starts`` transitions are
-stored.
+pickle code. Files written before PLAN 2.10 carry an integer
+``algorithm_type`` instead of ``algorithm_key``, and their ``algorithm_name``
+is the algorithm key, so :func:`check_compatible` reads ``algorithm_name``
+when ``algorithm_key`` is missing. Replay and rollout buffers are not saved:
+a restored policy starts with an empty buffer and learns again once
+``learning_starts`` transitions are stored.
 
 File layout (``FORMAT_VERSION`` 1)::
 
     {
         "format_version": 1,
-        "algorithm_type": int,          # AlgorithmType value
-        "algorithm_name": str,
+        "algorithm_key": str,           # BaseAgentAlgorithm.key
+        "algorithm_name": str,          # same as the key
         "torch_version": str,
         "created_at": str,              # ISO 8601, UTC
         "config": dict,                 # AlgorithmConfig.to_dict()
@@ -33,8 +36,6 @@ from collections.abc import Mapping
 from typing import Any, Final
 
 import torch
-
-from abmem.models.enums import AlgorithmType
 
 from .base import BaseAgentAlgorithm, to_plain
 
@@ -66,8 +67,8 @@ def state_dict_of(
         )
     return {
         "format_version": FORMAT_VERSION,
-        "algorithm_type": int(policy.algorithm_type),
-        "algorithm_name": policy.algorithm_type.name,
+        "algorithm_key": policy.key,
+        "algorithm_name": policy.key,
         "torch_version": str(torch.__version__),
         "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "config": to_plain(policy.config.to_dict()),
@@ -94,12 +95,10 @@ def check_compatible(policy: BaseAgentAlgorithm, checkpoint: Mapping[str, Any]) 
             f"checkpoint format version {version!r} is not supported "
             f"(expected {FORMAT_VERSION})"
         )
-    saved_type = checkpoint.get("algorithm_type")
-    if saved_type != int(policy.algorithm_type):
-        saved_name = AlgorithmType.get(saved_type)
+    saved_key = checkpoint.get("algorithm_key", checkpoint.get("algorithm_name"))
+    if saved_key != policy.key:
         raise CheckpointError(
-            f"checkpoint algorithm {getattr(saved_name, 'name', saved_type)} "
-            f"differs from {policy.algorithm_type.name}"
+            f"checkpoint algorithm {saved_key} differs from {policy.key}"
         )
     spec = checkpoint.get("spec") or {}
     for name in ("obs_dim", "action_dim"):

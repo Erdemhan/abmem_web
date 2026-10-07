@@ -25,7 +25,6 @@ from abmem import views_scenario
 from abmem.models import Agent, Simulation
 from abmem.models.enums import (
     AgentType,
-    AlgorithmType,
     EnergyType,
     MarketStrategy,
     SimulationMode,
@@ -64,7 +63,7 @@ def _library_agent(resource: Resource, name: str = "WizLib", capacity: int = 300
             name=name,
             budget=Decimal("500"),
             type=AgentType.FOSSIL,
-            algorithm_type=AlgorithmType.TD3,
+            algorithm_type="TD3",
             failstack_enabled=True,
             failstack_limit=3,
             failstack_delta=Decimal("10"),
@@ -80,7 +79,7 @@ def _new_agent(resource: Resource, name: str = "WizNew") -> dict[str, Any]:
         "name": name,
         "type": AgentType.FOSSIL.value,
         "budget": "250",
-        "algorithm_type": AlgorithmType.DDPG.value,
+        "algorithm_type": "DDPG",
         "failstack": {"enabled": False, "limit": "6", "delta": "15", "min_margin": "0"},
         "plants": [{"resource": str(resource.id), "capacity": "120"}],
     }

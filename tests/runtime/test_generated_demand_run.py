@@ -7,7 +7,7 @@ from decimal import Decimal
 import pytest
 
 from abmem.models import Simulation
-from abmem.models.enums import AlgorithmType, SimulationState
+from abmem.models.enums import SimulationState
 from abmem.models.models import Period
 from abmem.services.agent import library_service
 from abmem.services.agent.observation import (
@@ -52,8 +52,8 @@ def _scenario(period_number: int, profile: dict | None = PROFILE) -> Simulation:
     r = resources(2)
     simulation = make_run(
         [
-            {"plants": [(r[0], 600)], "algorithm": AlgorithmType.RANDOM},
-            {"plants": [(r[1], 500)], "algorithm": AlgorithmType.MARGINAL_COST},
+            {"plants": [(r[0], 600)], "algorithm": "RANDOM"},
+            {"plants": [(r[1], 500)], "algorithm": "MARGINAL_COST"},
         ],
         period_number=period_number,
     )

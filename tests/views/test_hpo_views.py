@@ -19,7 +19,6 @@ from django.utils import timezone
 from abmem.models import Agent, AlgorithmDefault, HPOStudy, HPOTrial, Market, Simulation
 from abmem.models.enums import (
     AgentType,
-    AlgorithmType,
     HPOPhase,
     HPOStatus,
     HPOTrialStatus,
@@ -63,7 +62,7 @@ def scenario() -> Simulation:
         upperBidBound=200,
         proxy=True,
     )
-    for i, algorithm in enumerate((AlgorithmType.DDPG, AlgorithmType.FIXED_MARKUP)):
+    for i, algorithm in enumerate(("DDPG", "FIXED_MARKUP")):
         agent = Agent.objects.create(
             name=f"a{i}",
             market=market,
@@ -111,7 +110,7 @@ def make_study(scenario: Simulation, **fields: Any) -> HPOStudy:
     """Saved study with small settings."""
     values: dict[str, Any] = {
         "name": "s",
-        "algorithm_type": AlgorithmType.DDPG,
+        "algorithm_type": "DDPG",
         "scenario": scenario,
         "param_bounds": {"gamma": {"low": 0.9, "high": 0.99, "scale": "linear"}},
         "fixed_params": {"failstack_enabled": False},
@@ -226,7 +225,7 @@ def test_create_valid_study_starts_process(
     assert response.json()["watch_url"] == reverse("hpo_watch", args=[study.pk])
     assert started == [study.pk]
     assert study.status == HPOStatus.CREATED
-    assert study.algorithm_type == AlgorithmType.DDPG
+    assert study.algorithm_type == "DDPG"
     assert study.param_bounds == {
         "gamma": {"low": 0.9, "high": 0.99, "scale": "linear"},
         "gradient_steps": {"low": 1, "high": 4, "scale": "int"},
@@ -656,7 +655,7 @@ def test_apply_rejects_unknown_target(scenario: Simulation) -> None:
 
 def test_apply_as_algorithm_default_merges(scenario: Simulation) -> None:
     AlgorithmDefault.objects.create(
-        algorithm_type=AlgorithmType.DDPG, params={"tau": 0.01, "gamma": 0.9}
+        algorithm_type="DDPG", params={"tau": 0.01, "gamma": 0.9}
     )
     study = finished_study(
         scenario,
@@ -667,7 +666,7 @@ def test_apply_as_algorithm_default_merges(scenario: Simulation) -> None:
         Client(), reverse("hpo_apply", args=[study.pk]), {"target": "default"}
     )
     assert response.status_code == 200, response.content
-    row = AlgorithmDefault.objects.get(algorithm_type=AlgorithmType.DDPG)
+    row = AlgorithmDefault.objects.get(algorithm_type="DDPG")
     assert row.params == {"tau": 0.01, "gamma": 0.95, "gradient_steps": 3}
     assert response.json()["not_applied"] == ["failstack_delta"]
     # Scenario agents are untouched.
@@ -682,7 +681,7 @@ def test_apply_as_default_creates_row(scenario: Simulation) -> None:
         Client(), reverse("hpo_apply", args=[study.pk]), {"target": "default"}
     )
     assert response.status_code == 200
-    assert AlgorithmDefault.objects.get(algorithm_type=AlgorithmType.DDPG).params == {
+    assert AlgorithmDefault.objects.get(algorithm_type="DDPG").params == {
         "gamma": 0.95,
         "gradient_steps": 3,
     }
@@ -703,7 +702,7 @@ def test_apply_to_scenario_switches_all_agents(scenario: Simulation) -> None:
     assert response.json()["agents_updated"] == ["a0", "a1"]
     a0, a1 = Agent.objects.filter(market=scenario.market).order_by("id")
     assert a0.algorithm_params == {"batch_size": 8, "gamma": 0.95, "gradient_steps": 3}
-    assert a1.algorithm_type == AlgorithmType.DDPG
+    assert a1.algorithm_type == "DDPG"
     assert a1.algorithm_params == {"gamma": 0.95, "gradient_steps": 3}
     for agent in (a0, a1):
         assert agent.failstack_enabled is True
@@ -721,7 +720,7 @@ def test_apply_to_scenario_only_matching_agents(scenario: Simulation) -> None:
     assert response.status_code == 200
     assert response.json()["agents_updated"] == ["a0"]
     a1 = Agent.objects.get(market=scenario.market, name="a1")
-    assert a1.algorithm_type == AlgorithmType.FIXED_MARKUP
+    assert a1.algorithm_type == "FIXED_MARKUP"
     assert a1.algorithm_params == {"markup": 0.2}
 
 
@@ -729,7 +728,7 @@ def test_apply_to_scenario_without_matching_agent_is_rejected(
     scenario: Simulation,
 ) -> None:
     study = finished_study(
-        scenario, algorithm_type=AlgorithmType.TD3, best_params={"gamma": 0.95}
+        scenario, algorithm_type="TD3", best_params={"gamma": 0.95}
     )
     errors = _errors(
         post_json(
@@ -737,7 +736,7 @@ def test_apply_to_scenario_without_matching_agent_is_rejected(
         )
     )
     assert "TD3" in errors["target"][0]
-    assert not Agent.objects.filter(algorithm_type=AlgorithmType.TD3).exists()
+    assert not Agent.objects.filter(algorithm_type="TD3").exists()
 
 
 def test_apply_to_scenario_blocked_while_another_study_runs(

@@ -17,7 +17,7 @@ from django.urls import reverse
 
 from abmem import forms as abmem_forms
 from abmem.models import Agent, Market
-from abmem.models.enums import AgentType, AlgorithmType, EnergyType
+from abmem.models.enums import AgentType, EnergyType
 from abmem.models.models import Plant, Resource
 from abmem.services.agent import library_service
 from abmem.services.agent.library_service import AgentInput, PlantInput
@@ -45,7 +45,7 @@ def _library_agent(resource: Resource, name: str = "Alpha", **overrides: Any) ->
         "name": name,
         "budget": Decimal("100"),
         "type": AgentType.FOSSIL,
-        "algorithm_type": AlgorithmType.TD3,
+        "algorithm_type": "TD3",
         "failstack_enabled": True,
         "failstack_limit": 3,
         "failstack_delta": Decimal("5"),
@@ -70,7 +70,7 @@ def _form_data(resource: Resource, name: str = "Beta", **extra: Any) -> dict[str
         "name": name,
         "budget": "250",
         "type": str(AgentType.FOSSIL.value),
-        "algorithm_type": str(AlgorithmType.SAC.value),
+        "algorithm_type": "SAC",
         "failstack_enabled": "on",
         "failstack_limit": "4",
         "failstack_delta": "7.5",
@@ -192,7 +192,7 @@ def test_check_name_rejects_post(client: Client) -> None:
 def test_library_json_lists_library_agents_only(
     client: Client, fossil: Resource
 ) -> None:
-    beta = _library_agent(fossil, name="beta", algorithm_type=AlgorithmType.RANDOM)
+    beta = _library_agent(fossil, name="beta", algorithm_type="RANDOM")
     alpha = _library_agent(fossil, name="Alpha")
     library_service.copy_agent(alpha, _scenario_market(), proxy=True, name="Copy")
     response = client.get(reverse("agent_library_json"))
@@ -205,8 +205,9 @@ def test_library_json_lists_library_agents_only(
         "type": AgentType.FOSSIL.value,
         "type_name": "FOSSIL",
         "budget": "100.00",
-        "algorithm_type": AlgorithmType.TD3.value,
+        "algorithm_type": "TD3",
         "algorithm_name": "TD3",
+        "algorithm_available": True,
         "failstack": {
             "enabled": True,
             "active": True,
@@ -242,7 +243,7 @@ def test_create_library_agent_form_post(client: Client, fossil: Resource) -> Non
     agent = Agent.objects.get()
     assert agent.is_library
     assert agent.name == "Beta"
-    assert agent.algorithm_type == AlgorithmType.SAC
+    assert agent.algorithm_type == "SAC"
     assert (agent.failstack_enabled, agent.failstack_limit) == (True, 4)
     assert agent.failstack_delta == Decimal("7.5")
     assert _plants(agent) == [(fossil.id, 120)]
@@ -334,7 +335,7 @@ def test_update_library_agent_leaves_copies_unchanged(
             fossil,
             name="Alpha2",
             type=str(AgentType.HYBRID.value),
-            algorithm_type=str(AlgorithmType.PPO.value),
+            algorithm_type="PPO",
             **{"resources[]": [str(renewable.id)], "capacities[]": ["9"]},
         ),
         **JSON_HEADERS,
@@ -342,9 +343,9 @@ def test_update_library_agent_leaves_copies_unchanged(
     assert response.status_code == 200, response.content
     agent.refresh_from_db()
     copy.refresh_from_db()
-    assert (agent.name, agent.algorithm_type) == ("Alpha2", AlgorithmType.PPO)
+    assert (agent.name, agent.algorithm_type) == ("Alpha2", "PPO")
     assert _plants(agent) == [(renewable.id, 9)]
-    assert (copy.name, copy.algorithm_type) == ("Alpha", AlgorithmType.TD3)
+    assert (copy.name, copy.algorithm_type) == ("Alpha", "TD3")
     assert _plants(copy) == [(fossil.id, 50)]
     assert copy.source_id == agent.id
 

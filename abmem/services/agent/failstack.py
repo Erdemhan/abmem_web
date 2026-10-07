@@ -135,9 +135,9 @@ class FailStackParams:
             agent: Agent instance (or any object with the same attributes).
 
         Returns:
-            None if ``failstack_enabled`` is falsy or ``algorithm_type`` is a
-            baseline (RANDOM, MARGINAL_COST, FIXED_MARKUP), else the
-            validated parameters.
+            None if ``failstack_enabled`` is falsy or ``algorithm_type`` is
+            the key of a non-learning algorithm (RANDOM, MARGINAL_COST,
+            FIXED_MARKUP), else the validated parameters.
 
         Raises:
             ValueError: If the stored parameters are invalid.
@@ -164,24 +164,24 @@ class FailStackParams:
 
 
 def _is_baseline(algorithm_type: Any) -> bool:
-    """Whether ``algorithm_type`` is one of the baseline algorithm types.
+    """Whether ``algorithm_type`` is the key of a non-learning algorithm.
 
-    The enum and the baseline set are imported lazily so this module has no
-    module-level dependency on ``abmem.models``.
+    The registry is imported lazily so this module has no module-level
+    dependency on the algorithm layer.
 
     Args:
-        algorithm_type: An ``AlgorithmType``, its integer value, or None
-            (treated as the model default DDPG, not a baseline).
+        algorithm_type: An algorithm key, or None (treated as the model
+            default DDPG, not a baseline).
 
     Returns:
-        True for RANDOM, MARGINAL_COST and FIXED_MARKUP.
+        True for registered non-learning algorithms such as RANDOM,
+        MARGINAL_COST and FIXED_MARKUP.
     """
     if algorithm_type is None:
         return False
-    from abmem.models.enums import AlgorithmType
-    from abmem.services.algorithms.registry import BASELINE_TYPES
+    from abmem.services.algorithms.registry import is_baseline
 
-    return AlgorithmType(int(algorithm_type)) in BASELINE_TYPES
+    return is_baseline(algorithm_type)
 
 
 @dataclass

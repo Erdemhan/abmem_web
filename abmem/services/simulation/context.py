@@ -35,42 +35,41 @@ from .seeding import seed_everything, spawn_agent_rngs
 if TYPE_CHECKING:
     from abmem.services.market.demand_generator import DemandProfile
     from abmem.models import Agent, Market, Simulation
-    from abmem.models.enums import AlgorithmType
     from abmem.models import PolicyCheckpoint
     from abmem.models.models import Period, Plant
     from abmem.services.algorithms.base import PolicySpec
     from abmem.services.algorithms.base import ActionResult, BaseAgentAlgorithm
+    from abmem.services.market.clearing_algorithms.base import BaseClearingAlgorithm
 
 MARKET_DATA_FILE: Final[str] = "marketData.xlsx"
 DEMAND_COLUMN: Final[str] = "DEMAND"
 
 
-def algorithm_defaults() -> dict[AlgorithmType, dict[str, Any]]:
-    """Return ``AlgorithmDefault.params`` by algorithm type (OQ-9).
+def algorithm_defaults() -> dict[str, dict[str, Any]]:
+    """Return ``AlgorithmDefault.params`` by algorithm key (OQ-9).
 
     Returns:
-        Mapping of algorithm type to a copy of its default parameters.
+        Mapping of algorithm key to a copy of its default parameters.
     """
     from abmem.models import AlgorithmDefault
-    from abmem.models.enums import AlgorithmType as AlgorithmTypeEnum
 
     return {
-        AlgorithmTypeEnum(int(row.algorithm_type)): dict(row.params or {})
+        str(row.algorithm_type): dict(row.params or {})
         for row in AlgorithmDefault.objects.all()
     }
 
 
 def agent_params(
     agent: Agent,
-    algorithm_type: AlgorithmType,
-    defaults: Mapping[AlgorithmType, Mapping[str, Any]],
+    algorithm_type: str,
+    defaults: Mapping[str, Mapping[str, Any]],
     algorithm_overrides: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return the effective parameters of an agent's policy (OQ-9).
 
     Args:
         agent: The agent.
-        algorithm_type: Effective algorithm of the agent in this run.
+        algorithm_type: Key of the effective algorithm of the agent in this run.
         defaults: Output of :func:`algorithm_defaults`.
         algorithm_overrides: HPO overrides applied last.
 
@@ -80,7 +79,7 @@ def agent_params(
         ``algorithm_overrides``.
     """
     params: dict[str, Any] = dict(defaults.get(algorithm_type, {}))
-    if int(algorithm_type) == int(agent.algorithm_type):
+    if str(algorithm_type) == str(agent.algorithm_type):
         params.update(agent.algorithm_params or {})
     if algorithm_overrides is not None:
         params.update(algorithm_overrides)
@@ -178,6 +177,16 @@ def _stored_profile(simulation: Simulation) -> DemandProfile | None:
         ) from error
 
 
+def _default_clearing() -> BaseClearingAlgorithm:
+    """Return an instance of the default clearing algorithm (``MERIT_ORDER``)."""
+    from abmem.services.market.clearing_algorithms.registry import (
+        DEFAULT_CLEARING_ALGORITHM,
+        get_clearing_algorithm,
+    )
+
+    return get_clearing_algorithm(DEFAULT_CLEARING_ALGORITHM)
+
+
 class SimulationValidationError(ValueError):
     """Raised by :meth:`SimulationContext.build` when a run cannot start."""
 
@@ -261,6 +270,8 @@ class SimulationContext:
         warm_start_parents: Checkpoint each warm-started agent was loaded
             from, by ``Agent.id`` (set by ``checkpoints.apply_warm_start``).
         warm_start_warnings: Agents that start fresh in a warm-started run.
+        clearing: Clearing algorithm of ``Market.clearing_algorithm``, resolved
+            once by :meth:`build` (PLAN 2.10).
     """
 
     simulation: Simulation
@@ -279,6 +290,7 @@ class SimulationContext:
     current_period: Period | None = field(default=None)
     warm_start_parents: dict[int, PolicyCheckpoint] = field(default_factory=dict)
     warm_start_warnings: list[str] = field(default_factory=list)
+    clearing: BaseClearingAlgorithm = field(default_factory=lambda: _default_clearing())
 
     def phase_for(self, t: int) -> RunPhase:
         """Return the phase of period ``t``.
@@ -298,7 +310,7 @@ class SimulationContext:
         simulation: Simulation,
         algorithm_overrides: Mapping[str, Any] | None = None,
         *,
-        forced_algorithm: AlgorithmType | None = None,
+        forced_algorithm: str | None = None,
         export_json: bool = True,
         demand: DemandSeries | None = None,
     ) -> SimulationContext:
@@ -312,7 +324,7 @@ class SimulationContext:
         Args:
             simulation: Saved run with a market, agents, portfolios and plants.
             algorithm_overrides: HPO parameter overrides applied to every agent.
-            forced_algorithm: Algorithm used for every agent instead of
+            forced_algorithm: Algorithm key used for every agent instead of
                 ``Agent.algorithm_type`` (HPO, K7).
             export_json: Stored on the context for the run loop.
             demand: Demand series to use. When None, generated from
@@ -323,11 +335,15 @@ class SimulationContext:
             The context. No ``Period`` row has been created.
 
         Raises:
-            SimulationValidationError: If any precondition of the run fails.
+            SimulationValidationError: If any precondition of the run fails,
+                including an agent or clearing algorithm key that is not
+                registered.
         """
-        from abmem.models.enums import AlgorithmType as AlgorithmTypeEnum
         from abmem.models.models import Plant
         from abmem.services.algorithms import registry
+        from abmem.services.market.clearing_algorithms import (
+            registry as clearing_registry,
+        )
 
         market = simulation.market
         period_number = int(simulation.periodNumber)
@@ -341,6 +357,14 @@ class SimulationContext:
             raise SimulationValidationError(
                 f"upperBidBound ({high}) must be greater than lowerBidBound ({low})"
             )
+        clearing_key = str(market.clearing_algorithm)
+        if not clearing_registry.is_known_clearing(clearing_key):
+            raise SimulationValidationError(
+                f"market {market.pk}: clearing algorithm {clearing_key!r} is not "
+                f"available, known keys: "
+                f"{[info.key for info in clearing_registry.available_clearing_algorithms()]}"
+            )
+        clearing = clearing_registry.get_clearing_algorithm(clearing_key)
         lags = tuple(int(k) for k in (simulation.observation_lags or ()))
         if lags not in ALLOWED_LAG_SETS:
             raise SimulationValidationError(
@@ -405,24 +429,27 @@ class SimulationContext:
                 raise SimulationValidationError(
                     f"agent {agent.name!r} has no plant with positive capacity"
                 )
-            algorithm_type = (
-                AlgorithmTypeEnum(int(forced_algorithm))
+            algorithm_type = str(
+                forced_algorithm
                 if forced_algorithm is not None
-                else AlgorithmTypeEnum(int(agent.algorithm_type))
+                else agent.algorithm_type
             )
+            if not registry.is_known(algorithm_type):
+                raise SimulationValidationError(
+                    f"agent {agent.name!r}: algorithm {algorithm_type!r} is not "
+                    f"available, known keys: "
+                    f"{[info.key for info in registry.available_algorithms()]}"
+                )
             params = agent_params(agent, algorithm_type, defaults, algorithm_overrides)
             spec = policy_spec_for(plants, lags, low, high)
             try:
                 policy = registry.build_policy(algorithm_type, spec, params, rng)
                 failstack_params = (
-                    FailStackParams.from_agent(agent)
-                    if policy.is_learning
-                    and algorithm_type not in registry.BASELINE_TYPES
-                    else None
+                    FailStackParams.from_agent(agent) if policy.is_learning else None
                 )
             except (KeyError, TypeError, ValueError) as error:
                 raise SimulationValidationError(
-                    f"agent {agent.name!r} ({algorithm_type.name}): {error}"
+                    f"agent {agent.name!r} ({algorithm_type}): {error}"
                 ) from error
             agent.runtime_policy = policy
             states.append(
@@ -451,4 +478,5 @@ class SimulationContext:
             ptf_history={},
             step_logger=StepLogger(),
             export_json=export_json,
+            clearing=clearing,
         )

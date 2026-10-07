@@ -18,9 +18,7 @@ from typing import Any, Final
 from django import forms
 
 from abmem.models import Simulation
-from abmem.models.enums import AlgorithmType
-from abmem.services.algorithms.algorithm_config import CONFIG_CLASSES
-from abmem.services.algorithms.registry import BASELINE_TYPES
+from abmem.services.algorithms import registry as algorithm_registry
 from abmem.services.hpo.hpo_service import SEED_UPPER
 from abmem.services.hpo.worker import FAILSTACK_SEARCH_KEYS
 
@@ -28,41 +26,45 @@ SCALES: Final[tuple[str, ...]] = ("linear", "log", "int")
 INTEGER_PARAMS_EXTRA: Final[frozenset[str]] = frozenset({"failstack_limit"})
 
 
-def searchable_algorithms() -> list[AlgorithmType]:
+def searchable_algorithms() -> list[str]:
     """Return the algorithms that have at least one default search bound.
 
     Returns:
-        Algorithm types in enum order. RANDOM and MARGINAL_COST have no
-        parameters and are left out.
+        Algorithm keys in the order of ``registry.available_algorithms``.
+        Algorithms without search bounds (RANDOM, MARGINAL_COST) are left out.
     """
-    return [t for t in AlgorithmType if CONFIG_CLASSES[t].default_search_bounds()]
+    return [
+        info.key
+        for info in algorithm_registry.available_algorithms()
+        if algorithm_registry.get_config_class(info.key).default_search_bounds()
+    ]
 
 
-def supports_failstack(algorithm: AlgorithmType) -> bool:
+def supports_failstack(algorithm: str) -> bool:
     """Return True if the fail-stack rule applies to the algorithm.
 
     The runtime applies the rule only to learning algorithms
-    (``SimulationContext`` skips it for ``BASELINE_TYPES``).
+    (``SimulationContext`` skips it for non-learning algorithms).
 
     Args:
-        algorithm: The algorithm.
+        algorithm: Algorithm key.
 
     Returns:
         Whether fail-stack settings have an effect.
     """
-    return algorithm not in BASELINE_TYPES
+    return not algorithm_registry.is_baseline(algorithm)
 
 
-def searchable_params(algorithm: AlgorithmType) -> tuple[set[str], set[str]]:
+def searchable_params(algorithm: str) -> tuple[set[str], set[str]]:
     """Return the scalar parameters of an algorithm's config class.
 
     Args:
-        algorithm: The algorithm.
+        algorithm: Algorithm key.
 
     Returns:
         ``(all int or float field names, int field names)``.
     """
-    config_cls = CONFIG_CLASSES[algorithm]
+    config_cls = algorithm_registry.get_config_class(algorithm)
     hints = typing.get_type_hints(config_cls)
     fields = dataclasses.fields(config_cls)
     numeric = {f.name for f in fields if hints[f.name] in (int, float)}
@@ -219,12 +221,12 @@ class HPOStudyForm(forms.Form):
         """
         super().__init__(*args, **kwargs)
         self.fields["algorithm_type"].choices = [
-            (t.name, t.name) for t in searchable_algorithms()
+            (key, algorithm_registry.label_for(key)) for key in searchable_algorithms()
         ]
 
-    def clean_algorithm_type(self) -> AlgorithmType:
-        """Return the selected algorithm as enum."""
-        return AlgorithmType[self.cleaned_data["algorithm_type"]]
+    def clean_algorithm_type(self) -> str:
+        """Return the selected algorithm key."""
+        return str(self.cleaned_data["algorithm_type"])
 
     def clean_search_seeds(self) -> list[int]:
         """Parse the search seeds."""
@@ -264,15 +266,15 @@ class HPOStudyForm(forms.Form):
         data = super().clean()
         algorithm = data.get("algorithm_type")
         failstack = bool(data.get("failstack_enabled"))
-        if isinstance(algorithm, AlgorithmType) and failstack:
+        if isinstance(algorithm, str) and failstack:
             if not supports_failstack(algorithm):
                 self.add_error(
                     "failstack_enabled",
                     f"Fail-stack applies only to learning algorithms, not to "
-                    f"{algorithm.name}.",
+                    f"{algorithm}.",
                 )
                 failstack = False
-        if isinstance(algorithm, AlgorithmType) and "param_bounds" in data:
+        if isinstance(algorithm, str) and "param_bounds" in data:
             self._clean_bounds(data, algorithm, failstack)
         weights = (data.get("weight_agent"), data.get("weight_market"))
         if all(isinstance(w, float) for w in weights) and not any(weights):
@@ -289,7 +291,7 @@ class HPOStudyForm(forms.Form):
         return data
 
     def _clean_bounds(
-        self, data: dict[str, Any], algorithm: AlgorithmType, failstack: bool
+        self, data: dict[str, Any], algorithm: str, failstack: bool
     ) -> None:
         """Validate ``param_bounds`` rows and store the normalised mapping."""
         raw = data["param_bounds"]
@@ -309,9 +311,7 @@ class HPOStudyForm(forms.Form):
                     if name in FAILSTACK_SEARCH_KEYS
                     else ""
                 )
-                messages.append(
-                    f"{name}: unknown parameter for {algorithm.name}{hint}."
-                )
+                messages.append(f"{name}: unknown parameter for {algorithm}{hint}.")
                 continue
             try:
                 bounds[name] = parse_bound_entry(name, entry, name in integers)

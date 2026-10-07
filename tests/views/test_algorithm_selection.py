@@ -18,12 +18,11 @@ from django.test import Client
 from django.urls import reverse
 
 from abmem.models import Agent, Simulation
-from abmem.models.enums import AgentType, AlgorithmType, EnergyType
+from abmem.models.enums import AgentType, EnergyType
 from abmem.models.models import Resource
 from abmem.services.agent.failstack import FailStackParams
 from abmem.services.algorithms.DDPG import DDPGAlgorithm
 from abmem.services.algorithms.ppo import PPOAlgorithm
-from abmem.services.algorithms.registry import BASELINE_TYPES
 from abmem.services.simulation.context import SimulationContext
 from abmem.services.starter import starter_service
 from abmem.templatetags.abmem_choices import algorithm_choices, failstack_defaults
@@ -84,11 +83,11 @@ def test_create_stores_algorithm_and_failstack(
     response = _post_create(
         client,
         [
-            _agent(fossil, "ddpg", AlgorithmType.DDPG.value),
+            _agent(fossil, "ddpg", "DDPG"),
             _agent(
                 fossil,
                 "ppo",
-                str(AlgorithmType.PPO.value),
+                "PPO",
                 {"enabled": True, "limit": 3, "delta": "7.5", "min_margin": "-0.25"},
             ),
         ],
@@ -96,9 +95,9 @@ def test_create_stores_algorithm_and_failstack(
     assert response.status_code == 200, response.content
     ddpg = Agent.objects.get(name="ddpg", market__isnull=False)
     ppo = Agent.objects.get(name="ppo", market__isnull=False)
-    assert ddpg.algorithm_type == AlgorithmType.DDPG
+    assert ddpg.algorithm_type == "DDPG"
     assert ddpg.failstack_enabled is False
-    assert ppo.algorithm_type == AlgorithmType.PPO
+    assert ppo.algorithm_type == "PPO"
     assert ppo.failstack_enabled is True
     assert ppo.failstack_limit == 3
     assert ppo.failstack_delta == Decimal("7.5")
@@ -112,7 +111,7 @@ def test_create_defaults_without_algorithm_keys(
     response = _post_create(client, [_agent(fossil, "plain")])
     assert response.status_code == 200, response.content
     agent = Agent.objects.get(name="plain", market__isnull=False)
-    assert agent.algorithm_type == AlgorithmType.DDPG
+    assert agent.algorithm_type == "DDPG"
     assert agent.failstack_enabled is False
     assert (
         agent.failstack_limit,
@@ -129,7 +128,7 @@ def test_create_defaults_without_algorithm_keys(
 def test_create_accepts_algorithm_name(client: Client, fossil: Resource) -> None:
     response = _post_create(client, [_agent(fossil, "td3", "TD3")])
     assert response.status_code == 200, response.content
-    assert Agent.objects.get(name="td3", market__isnull=False).algorithm_type == AlgorithmType.TD3
+    assert Agent.objects.get(name="td3", market__isnull=False).algorithm_type == "TD3"
 
 
 @pytest.mark.django_db
@@ -140,7 +139,7 @@ def test_disabled_failstack_values_are_stored(client: Client, fossil: Resource) 
             _agent(
                 fossil,
                 "rnd",
-                AlgorithmType.RANDOM.value,
+                "RANDOM",
                 {"enabled": False, "limit": 9, "delta": 4, "min_margin": 0.5},
             )
         ],
@@ -155,20 +154,20 @@ def test_disabled_failstack_values_are_stored(client: Client, fossil: Resource) 
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize("baseline", sorted(BASELINE_TYPES, key=lambda t: t.value))
+@pytest.mark.parametrize("baseline", ["RANDOM", "MARGINAL_COST", "FIXED_MARKUP"])
 def test_create_rejects_baseline_with_failstack(
-    client: Client, fossil: Resource, baseline: AlgorithmType
+    client: Client, fossil: Resource, baseline: str
 ) -> None:
     response = _post_create(
         client,
         [
-            _agent(fossil, "ok", AlgorithmType.SAC.value),
-            _agent(fossil, "bad", baseline.value, {"enabled": True}),
+            _agent(fossil, "ok", "SAC"),
+            _agent(fossil, "bad", baseline, {"enabled": True}),
         ],
     )
     assert response.status_code == 400
     messages = response.json()["errors"]["failstack_enabled"]
-    assert baseline.name in messages[0]
+    assert baseline in messages[0]
     assert "Agent 2 (bad)" in messages[0]
     assert not Simulation.objects.exists()
     assert not Agent.objects.exists()
@@ -233,7 +232,7 @@ def _scenario(resource: Resource) -> Simulation:
     market.proxy = True
     market.save()
     agent = make_agent_with_plants(market, [(resource, 100)], name="stored")
-    agent.algorithm_type = AlgorithmType.SAC
+    agent.algorithm_type = "SAC"
     agent.failstack_enabled = True
     agent.failstack_limit = 4
     agent.save()
@@ -251,7 +250,7 @@ def test_update_changes_algorithm(client: Client, fossil: Resource) -> None:
                     _agent(
                         fossil,
                         "stored",
-                        AlgorithmType.RDPG.value,
+                        "RDPG",
                         {"enabled": True, "limit": 2, "delta": 1, "min_margin": 0},
                     )
                 ]
@@ -261,7 +260,7 @@ def test_update_changes_algorithm(client: Client, fossil: Resource) -> None:
     )
     assert response.status_code == 200, response.content
     agent = simulation.market.agent_set.get()
-    assert agent.algorithm_type == AlgorithmType.RDPG
+    assert agent.algorithm_type == "RDPG"
     assert (agent.failstack_enabled, agent.failstack_limit) == (True, 2)
 
 
@@ -278,7 +277,7 @@ def test_update_rejects_baseline_failstack_atomically(
                     _agent(
                         fossil,
                         "changed",
-                        AlgorithmType.FIXED_MARKUP.value,
+                        "FIXED_MARKUP",
                         {"enabled": True},
                     )
                 ]
@@ -291,7 +290,7 @@ def test_update_rejects_baseline_failstack_atomically(
     agent = simulation.market.agent_set.get()
     assert (agent.name, agent.algorithm_type, agent.failstack_limit) == (
         "stored",
-        AlgorithmType.SAC,
+        "SAC",
         4,
     )
 
@@ -305,7 +304,7 @@ def test_update_page_prefills_algorithm(client: Client, fossil: Resource) -> Non
     # The wizard renders the stored agent from JSON (PLAN 2.6); the agent form
     # dialog fills the algorithm inputs from it.
     (agent,) = wizard_config(html)["initial"]["agents"]
-    assert agent["algorithm_type"] == AlgorithmType.SAC.value
+    assert agent["algorithm_type"] == "SAC"
     assert agent["algorithm_name"] == "SAC"
     assert agent["failstack"]["enabled"] is True
     assert agent["failstack"]["active"] is True
@@ -336,7 +335,7 @@ def test_agent_form_stores_algorithm(client: Client, fossil: Resource) -> None:
         reverse("agent_create"),
         _form_data(
             fossil,
-            algorithm_type=str(AlgorithmType.TD3.value),
+            algorithm_type="TD3",
             failstack_enabled="on",
             failstack_limit="5",
             failstack_delta="2.5",
@@ -345,7 +344,7 @@ def test_agent_form_stores_algorithm(client: Client, fossil: Resource) -> None:
     )
     assert response.status_code == 302, response.content
     agent = Agent.objects.get(name="lib-alg")
-    assert agent.algorithm_type == AlgorithmType.TD3
+    assert agent.algorithm_type == "TD3"
     assert (agent.failstack_enabled, agent.failstack_limit) == (True, 5)
     assert agent.failstack_delta == Decimal("2.5")
     assert agent.failstack_min_margin == Decimal("0.1")
@@ -358,7 +357,7 @@ def test_agent_form_defaults_without_algorithm(
     response = client.post(reverse("agent_create"), _form_data(fossil))
     assert response.status_code == 302, response.content
     agent = Agent.objects.get(name="lib-alg")
-    assert agent.algorithm_type == AlgorithmType.DDPG
+    assert agent.algorithm_type == "DDPG"
     assert agent.failstack_enabled is False
     assert agent.failstack_limit == 6
 
@@ -369,7 +368,7 @@ def test_agent_form_defaults_without_algorithm(
     [
         (
             {
-                "algorithm_type": str(AlgorithmType.MARGINAL_COST.value),
+                "algorithm_type": "MARGINAL_COST",
                 "failstack_enabled": "on",
             },
             "failstack_enabled",
@@ -396,12 +395,12 @@ def test_update_agent_keeps_algorithm_when_omitted(
     agent = make_agent_with_plants(make_market(), [(fossil, 7)], name="lib-old")
     agent.market = None  # library agent (PLAN 2.3)
     agent.proxy = True
-    agent.algorithm_type = AlgorithmType.PPO
+    agent.algorithm_type = "PPO"
     agent.save()
     response = client.post(reverse("agent_update", args=[agent.id]), _form_data(fossil))
     assert response.status_code == 302, response.content
     agent.refresh_from_db()
-    assert agent.algorithm_type == AlgorithmType.PPO
+    assert agent.algorithm_type == "PPO"
 
 
 @pytest.mark.django_db
@@ -409,7 +408,7 @@ def test_agent_list_shows_algorithm(client: Client, fossil: Resource) -> None:
     agent = make_agent_with_plants(make_market(), [(fossil, 7)], name="lib-list")
     agent.market = None  # library agent (PLAN 2.3)
     agent.proxy = True
-    agent.algorithm_type = AlgorithmType.RANDOM
+    agent.algorithm_type = "RANDOM"
     agent.failstack_enabled = False
     agent.save()
     response = client.get(reverse("agent_list"))
@@ -437,8 +436,10 @@ def test_create_page_renders_algorithm_select(client: Client) -> None:
 
 def test_algorithm_choices_marks_baselines() -> None:
     choices = algorithm_choices()
-    assert [value for value, _, _ in choices] == [t.value for t in AlgorithmType]
-    baselines = {label for _, label, is_baseline in choices if is_baseline}
+    assert [value for value, _, _ in choices] == [
+        "DDPG", "PPO", "RDPG", "SAC", "TD3", "FIXED_MARKUP", "MARGINAL_COST", "RANDOM"
+    ]
+    baselines = {key for key, _, is_baseline in choices if is_baseline}
     assert baselines == {"RANDOM", "MARGINAL_COST", "FIXED_MARKUP"}
 
 
@@ -453,7 +454,7 @@ def test_failstack_defaults_equal_model_defaults() -> None:
 def test_algorithm_fields_default_markup_has_no_template_literal_breakers() -> None:
     html = Template("{% load abmem_choices %}{% algorithm_fields %}").render(Context())
     assert "`" not in html and "${" not in html
-    assert '<option value="0" data-baseline="0" selected>DDPG</option>' in html
+    assert '<option value="DDPG" data-baseline="0" selected>DDPG</option>' in html
     assert 'style="display: none;"' in html
 
 
@@ -497,11 +498,11 @@ def test_two_algorithm_scenario_runs_with_right_policies(
     response = _post_create(
         client,
         [
-            _agent(gas, "ddpg", AlgorithmType.DDPG.value),
+            _agent(gas, "ddpg", "DDPG"),
             _agent(
                 gas,
                 "ppo",
-                AlgorithmType.PPO.value,
+                "PPO",
                 {"enabled": True, "limit": 3, "delta": 10, "min_margin": 0},
             ),
         ],

@@ -17,7 +17,6 @@ from abmem import bootstrap
 from abmem.models import Agent, HPOStudy, HPOTrial, Market, Simulation
 from abmem.models.enums import (
     AgentType,
-    AlgorithmType,
     HPOPhase,
     HPOStatus,
     HPOTrialStatus,
@@ -82,7 +81,7 @@ def make_scenario(period_number: int = 10, evaluation_periods: int = 0) -> Simul
             market=market,
             proxy=True,
             type=AgentType.HYBRID,
-            algorithm_type=AlgorithmType.DDPG if i == 0 else AlgorithmType.FIXED_MARKUP,
+            algorithm_type="DDPG" if i == 0 else "FIXED_MARKUP",
             algorithm_params={"batch_size": 8, "learning_starts": 8} if i == 0 else {},
         )
         portfolio = Portfolio.objects.create(agent=agent, proxy=True)
@@ -113,7 +112,7 @@ def study_input(scenario: Simulation, **changes: Any) -> dict[str, Any]:
 def test_validate_accepts_and_normalises() -> None:
     scenario = make_scenario()
     out = hpo_service.validate_study_input(study_input(scenario, search_seeds="1, 2"))
-    assert out["algorithm_type"] == AlgorithmType.FIXED_MARKUP
+    assert out["algorithm_type"] == "FIXED_MARKUP"
     assert out["scenario"] == scenario
     assert out["search_seeds"] == [1, 2]
     assert out["fixed_params"] == {"failstack_enabled": False}
@@ -183,7 +182,7 @@ def test_validate_failstack_bounds_when_enabled() -> None:
     out = hpo_service.validate_study_input(
         study_input(
             scenario,
-            algorithm_type=AlgorithmType.DDPG,
+            algorithm_type="DDPG",
             fixed_params={"failstack_enabled": True, "failstack_delta": 10},
             param_bounds={
                 "gamma": [0.9, 0.99, "linear"],
@@ -213,7 +212,7 @@ def test_split_params() -> None:
 
 
 def test_param_space_payload() -> None:
-    payload = hpo_service.param_space_payload(AlgorithmType.TD3)
+    payload = hpo_service.param_space_payload("TD3")
     assert payload["algorithm"] == "TD3"
     assert "gradient_steps" in payload["bounds"]
     assert payload["bounds"]["gradient_steps"]["scale"] == "int"
@@ -322,7 +321,7 @@ def test_tiny_study_runs_end_to_end() -> None:
     # DDPG-specific params of scenario agent a0 do not reach the FIXED_MARKUP agents.
     for trial in trials:
         agents = trial.simulation.market.agent_set.all()
-        assert {a.algorithm_type for a in agents} == {AlgorithmType.FIXED_MARKUP}
+        assert {a.algorithm_type for a in agents} == {"FIXED_MARKUP"}
         assert all(a.algorithm_params == trial.params for a in agents)
         assert trial.simulation.seed == trial.seed
         assert not trial.simulation.proxy

@@ -26,9 +26,7 @@ import types
 import typing
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Final, Literal, Self
-
-from abmem.models.enums import AlgorithmType
+from typing import Any, Literal, Self
 
 SearchScale = Literal["linear", "log", "int"]
 SearchBounds = dict[str, tuple[float, float, SearchScale]]
@@ -520,19 +518,3 @@ class FixedMarkupConfig(AlgorithmConfig):
     def default_search_bounds(cls) -> SearchBounds:
         """Return the markup bound only."""
         return {"markup": (0.0, 0.5, "linear")}
-
-
-CONFIG_CLASSES: Final[Mapping[AlgorithmType, type[AlgorithmConfig]]] = (
-    types.MappingProxyType(
-        {
-            AlgorithmType.DDPG: DDPGConfig,
-            AlgorithmType.RDPG: RDPGConfig,
-            AlgorithmType.TD3: TD3Config,
-            AlgorithmType.SAC: SACConfig,
-            AlgorithmType.PPO: PPOConfig,
-            AlgorithmType.RANDOM: RandomConfig,
-            AlgorithmType.MARGINAL_COST: MarginalCostConfig,
-            AlgorithmType.FIXED_MARKUP: FixedMarkupConfig,
-        }
-    )
-)

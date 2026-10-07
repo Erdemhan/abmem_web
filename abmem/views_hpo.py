@@ -37,8 +37,8 @@ from .forms_hpo import (
     supports_failstack,
 )
 from .models import Agent, AlgorithmDefault, HPOStudy, HPOTrial, Simulation
-from .models.enums import AlgorithmType, HPOPhase, HPOStatus, HPOTrialStatus
-from .services.algorithms.algorithm_config import CONFIG_CLASSES
+from .models.enums import HPOPhase, HPOStatus, HPOTrialStatus
+from .services.algorithms import registry as algorithm_registry
 from .services.hpo import hpo_service
 from .services.hpo.abc_optimizer import weighted_score
 from .services.hpo.pareto import pareto_front
@@ -297,7 +297,7 @@ def _status_payload(study: HPOStudy) -> dict[str, Any]:
     return {
         "id": study.pk,
         "name": study.name,
-        "algorithm": _status_name(study.algorithm_type, AlgorithmType),
+        "algorithm": str(study.algorithm_type),
         "status": _status_name(study.status, HPOStatus),
         "cancel_requested": bool(study.cancel_requested),
         "created_at": _iso(study.created_at),
@@ -361,7 +361,7 @@ def study_list(request: HttpRequest) -> HttpResponse:
         {
             "study": study,
             "status": _status_name(study.status, HPOStatus),
-            "algorithm": _status_name(study.algorithm_type, AlgorithmType),
+            "algorithm": str(study.algorithm_type),
             "n_done": study.n_done,
         }
         for study in studies
@@ -388,8 +388,12 @@ def study_create(request: HttpRequest) -> HttpResponse:
     if request.method == "GET":
         scenarios = Simulation.objects.filter(proxy=True).order_by("name", "id")
         algorithms = [
-            {"name": t.name, "failstack": supports_failstack(t)}
-            for t in searchable_algorithms()
+            {
+                "name": key,
+                "label": algorithm_registry.label_for(key),
+                "failstack": supports_failstack(key),
+            }
+            for key in searchable_algorithms()
         ]
         selected_scenario = request.GET.get("scenario", "")
         context = {
@@ -397,7 +401,9 @@ def study_create(request: HttpRequest) -> HttpResponse:
             "algorithms": algorithms,
             "initial": DEFAULT_FORM_VALUES,
             "selected_scenario": selected_scenario,
-            "selected_algorithm": request.GET.get("algorithm", AlgorithmType.DDPG.name),
+            "selected_algorithm": request.GET.get(
+                "algorithm", algorithm_registry.DEFAULT_ALGORITHM
+            ),
         }
         return render(request, "pages/hpo-create.html", context)
 
@@ -438,7 +444,7 @@ def param_space(request: HttpRequest) -> JsonResponse:
     """Return defaults and default search bounds of an algorithm.
 
     Args:
-        request: GET request with ``algorithm`` (name or value).
+        request: GET request with ``algorithm`` (algorithm key).
 
     Returns:
         JSON of ``hpo_service.param_space_payload`` plus ``failstack``
@@ -446,11 +452,9 @@ def param_space(request: HttpRequest) -> JsonResponse:
         or 400 for an unknown or non-searchable algorithm.
     """
     raw = request.GET.get("algorithm", "")
-    names = {t.name for t in searchable_algorithms()}
-    algorithm = AlgorithmType.__members__.get(raw.strip().upper())
-    if algorithm is None and raw.strip().isdigit():
-        algorithm = AlgorithmType.get(int(raw))
-    if algorithm is None or algorithm.name not in names:
+    names = set(searchable_algorithms())
+    algorithm = raw.strip().upper()
+    if algorithm not in names:
         return _errors_response(
             {
                 "algorithm": [
@@ -479,11 +483,11 @@ def study_watch(request: HttpRequest, study_id: int) -> HttpResponse:
     """
     hpo_service.fail_stale_studies()
     study = get_object_or_404(HPOStudy.objects.select_related("scenario"), pk=study_id)
-    algorithm = AlgorithmType(int(study.algorithm_type))
+    algorithm = str(study.algorithm_type)
     context = {
         "study": study,
         "status": _status_name(study.status, HPOStatus),
-        "algorithm": algorithm.name,
+        "algorithm": algorithm,
         "weights": _weights(study),
         "bounds": sorted(study.param_bounds.items()),
         "fixed_params": study.fixed_params or {},
@@ -542,20 +546,23 @@ def study_cancel(request: HttpRequest, study_id: int) -> JsonResponse:
     )
 
 
-def _validated_params(algorithm: AlgorithmType, params: Mapping[str, Any]) -> None:
-    """Check that ``params`` form a valid config of ``algorithm``.
+def _validated_params(algorithm: str, params: Mapping[str, Any]) -> None:
+    """Check that ``params`` form a valid config of the algorithm key ``algorithm``.
 
     Raises:
-        ValueError: If a key is unknown or a value is invalid.
+        ValueError: If the algorithm is not registered, a key is unknown or a
+            value is invalid.
     """
     try:
-        CONFIG_CLASSES[algorithm].from_dict(dict(params))
+        algorithm_registry.get_config_class(algorithm).from_dict(dict(params))
+    except KeyError as error:
+        raise ValueError(str(error.args[0])) from error
     except TypeError as error:
         raise ValueError(str(error)) from error
 
 
 def _apply_to_default(
-    study: HPOStudy, algorithm: AlgorithmType, algo_params: dict[str, Any]
+    study: HPOStudy, algorithm: str, algo_params: dict[str, Any]
 ) -> dict[str, Any]:
     """Merge the best parameters into ``AlgorithmDefault`` of the algorithm.
 
@@ -585,7 +592,7 @@ def _apply_to_default(
 
 def _apply_to_scenario(
     study: HPOStudy,
-    algorithm: AlgorithmType,
+    algorithm: str,
     algo_params: dict[str, Any],
     switch_algorithm: bool,
 ) -> dict[str, Any]:
@@ -612,7 +619,7 @@ def _apply_to_scenario(
     _, agent_fields = split_params(study.best_params or {}, study.fixed_params or {})
     updated: list[str] = []
     for agent in Agent.objects.select_for_update().filter(market=market).order_by("id"):
-        own = AlgorithmType(int(agent.algorithm_type))
+        own = str(agent.algorithm_type)
         if own == algorithm:
             params = {**dict(agent.algorithm_params or {}), **algo_params}
         elif switch_algorithm:
@@ -628,8 +635,8 @@ def _apply_to_scenario(
         updated.append(agent.name)
     if not updated:
         raise ValueError(
-            f"No agent of the scenario uses {algorithm.name}. Enable 'switch all "
-            f"agents to {algorithm.name}' to apply the parameters."
+            f"No agent of the scenario uses {algorithm}. Enable 'switch all "
+            f"agents to {algorithm}' to apply the parameters."
         )
     return {
         "target": "scenario",
@@ -673,7 +680,7 @@ def study_apply(request: HttpRequest, study_id: int) -> JsonResponse:
     form = HPOApplyForm(data)
     if not form.is_valid():
         return _errors_response(form.errors)
-    algorithm = AlgorithmType(int(study.algorithm_type))
+    algorithm = str(study.algorithm_type)
     algo_params = {
         k: v for k, v in study.best_params.items() if k not in FAILSTACK_SEARCH_KEYS
     }
@@ -687,5 +694,5 @@ def study_apply(request: HttpRequest, study_id: int) -> JsonResponse:
                 )
     except ValueError as error:
         return _errors_response({"target": [str(error)]})
-    result["algorithm"] = algorithm.name
+    result["algorithm"] = algorithm
     return JsonResponse(result)

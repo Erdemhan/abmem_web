@@ -44,7 +44,6 @@ from ...models.agent import Agent
 from ...models.enums import (
     AgentState,
     AgentType,
-    AlgorithmType,
     MarketState,
     SimulationState,
 )
@@ -110,7 +109,7 @@ class AgentInput:
         name: Agent name (surrounding whitespace is stripped by the service).
         budget: Initial budget.
         type: Agent type.
-        algorithm_type: Bidding algorithm.
+        algorithm_type: Key of a registered agent algorithm.
         failstack_enabled: Whether the fail-stack rule is active.
         failstack_limit: Fail-stack limit, at least 1.
         failstack_delta: Fail-stack price step, at least 0.
@@ -123,7 +122,7 @@ class AgentInput:
     name: str
     budget: Decimal
     type: AgentType
-    algorithm_type: AlgorithmType
+    algorithm_type: str
     failstack_enabled: bool
     failstack_limit: int
     failstack_delta: Decimal
@@ -312,6 +311,32 @@ def _validate_enum(value: Any, enum_cls: Any, field: str) -> Any:
         raise _error(field, f"Invalid {field}: {value!r}.", "invalid_choice") from exc
 
 
+def validate_algorithm_key(value: Any, field: str = "algorithm_type") -> str:
+    """Return ``value`` when it is the key of a registered agent algorithm.
+
+    Args:
+        value: Algorithm key.
+        field: Field key used in the error.
+
+    Returns:
+        The key.
+
+    Raises:
+        LibraryValidationError: ``value`` is not a registered key (also for a
+            key whose class was removed from the code).
+    """
+    from ..algorithms import registry
+
+    if not registry.is_known(value):
+        known = ", ".join(info.key for info in registry.available_algorithms())
+        raise _error(
+            field,
+            f"Algorithm {value!r} is not available. Known algorithms: {known}.",
+            "invalid_choice",
+        )
+    return str(value)
+
+
 def _validate_failstack(limit: Any, delta: Any, min_margin: Any) -> None:
     """Check the fail-stack values against the database constraints.
 
@@ -403,9 +428,7 @@ def _validated_fields(data: AgentInput, *, exclude_id: int | None) -> dict[str, 
     """
     name = _validate_name(data.name, exclude_id=exclude_id)
     agent_type = _validate_enum(data.type, AgentType, "type")
-    algorithm_type = _validate_enum(
-        data.algorithm_type, AlgorithmType, "algorithm_type"
-    )
+    algorithm_type = validate_algorithm_key(data.algorithm_type)
     try:
         budget = Decimal(data.budget)
     except (TypeError, ValueError, ArithmeticError) as exc:
@@ -726,7 +749,7 @@ def clone_scenario_for_run(
     proxy_sim: Simulation,
     *,
     seed: int | None = None,
-    forced_algorithm: AlgorithmType | None = None,
+    forced_algorithm: str | None = None,
     algorithm_overrides: Mapping[str, Any] | None = None,
     fixed_agent_fields: Mapping[str, Any] | None = None,
     warm_start_from: Simulation | None = None,
@@ -741,7 +764,7 @@ def clone_scenario_for_run(
         proxy_sim: Proxy simulation (scenario template).
         seed: Seed of the run, ``proxy_sim.seed`` when ``None`` (0 is a valid
             seed and is kept).
-        forced_algorithm: When given, ``algorithm_type`` of every copied agent
+        forced_algorithm: When given, the algorithm key of every copied agent
             (K7, HPO).
         algorithm_overrides: Merged into ``algorithm_params`` of every copied
             agent (keys of the override win).
@@ -778,9 +801,7 @@ def clone_scenario_for_run(
     if invalid_keys:
         raise ValueError(f"fixed_agent_fields keys not allowed: {invalid_keys}.")
     if forced_algorithm is not None:
-        forced_algorithm = _validate_enum(
-            forced_algorithm, AlgorithmType, "algorithm_type"
-        )
+        forced_algorithm = validate_algorithm_key(forced_algorithm)
     if freeze_policies and warm_start_from is None:
         raise ValueError("freeze_policies requires warm_start_from.")
     if warm_start_from is not None:

@@ -7,7 +7,6 @@ from decimal import Decimal
 import numpy as np
 import pytest
 
-from abmem.models.enums import AlgorithmType
 from abmem.services.agent.action_space import PRICE_QUANTUM, from_price, to_price
 from abmem.services.algorithms import registry
 from abmem.services.algorithms.algorithm_config import (
@@ -98,14 +97,13 @@ def test_random_policy_non_learning_contract(
     policy.set_frozen(False)
 
 
-@pytest.mark.parametrize(
-    "algorithm_type", sorted(registry.BASELINE_TYPES, key=lambda t: t.value)
-)
-def test_registry_resolves_baselines(algorithm_type: AlgorithmType) -> None:
+@pytest.mark.parametrize("algorithm_type", ["FIXED_MARKUP", "MARGINAL_COST", "RANDOM"])
+def test_registry_resolves_baselines(algorithm_type: str) -> None:
     cls = registry.get_algorithm_class(algorithm_type)
-    assert cls.algorithm_type == algorithm_type
+    assert cls.key == algorithm_type
     assert cls.is_learning is False
-    assert cls.config_class is registry.config_class(algorithm_type)
+    assert registry.is_baseline(algorithm_type)
+    assert cls.config_class is registry.get_config_class(algorithm_type)
     policy = registry.build_policy(
         algorithm_type, make_spec(action_dim=2), None, np.random.default_rng(0)
     )

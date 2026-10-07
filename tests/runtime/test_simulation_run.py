@@ -10,7 +10,7 @@ from decimal import Decimal
 import pytest
 
 from abmem.models import AgentStepLog, AlgorithmDefault
-from abmem.models.enums import AlgorithmType, MarketState, SimulationState
+from abmem.models.enums import MarketState, SimulationState
 from abmem.models.models import Offer, Period
 from abmem.services.simulation import simulation_service
 from abmem.services.simulation.context import (
@@ -40,11 +40,11 @@ def test_baselines_reach_finished(fast_demand) -> None:
     r = resources(3)
     simulation = make_run(
         [
-            {"plants": [(r[0], 400)], "algorithm": AlgorithmType.RANDOM},
-            {"plants": [(r[1], 300)], "algorithm": AlgorithmType.MARGINAL_COST},
+            {"plants": [(r[0], 400)], "algorithm": "RANDOM"},
+            {"plants": [(r[1], 300)], "algorithm": "MARGINAL_COST"},
             {
                 "plants": [(r[2], 300)],
-                "algorithm": AlgorithmType.FIXED_MARKUP,
+                "algorithm": "FIXED_MARKUP",
                 "failstack": {"failstack_enabled": True, "failstack_limit": 1},
             },
         ],
@@ -72,7 +72,7 @@ def test_baselines_reach_finished(fast_demand) -> None:
 def test_ddpg_run_logs_t_minus_one_rows_and_learning_start(fast_demand) -> None:
     r = resources(2)
     simulation = make_run(
-        [{"plants": [(r[0], 500), (r[1], 400)], "algorithm": AlgorithmType.DDPG}],
+        [{"plants": [(r[0], 500), (r[1], 400)], "algorithm": "DDPG"}],
         period_number=200,
     )
     simulation_service.run(simulation, export_json=False)
@@ -97,7 +97,7 @@ def test_ddpg_run_logs_t_minus_one_rows_and_learning_start(fast_demand) -> None:
 def test_single_period_run_has_no_log_rows(fast_demand) -> None:
     r = resources(1)
     simulation = make_run(
-        [{"plants": [(r[0], 400)], "algorithm": AlgorithmType.DDPG}], period_number=1
+        [{"plants": [(r[0], 400)], "algorithm": "DDPG"}], period_number=1
     )
     simulation_service.run(simulation, export_json=False)
     simulation.refresh_from_db()
@@ -109,7 +109,7 @@ def test_single_period_run_has_no_log_rows(fast_demand) -> None:
 def test_short_learning_run_stores_no_transition(fast_demand) -> None:
     r = resources(2)
     simulation = make_run(
-        [{"plants": [(r[0], 400)], "algorithm": AlgorithmType.DDPG}],
+        [{"plants": [(r[0], 400)], "algorithm": "DDPG"}],
         period_number=20,
     )
     ctx_holder = {}
@@ -135,12 +135,12 @@ def test_one_and_five_plant_agents_with_evaluation_window(fast_demand) -> None:
         [
             {
                 "plants": [(r[0], 300)],
-                "algorithm": AlgorithmType.DDPG,
+                "algorithm": "DDPG",
                 "params": SMALL_DDPG,
             },
             {
                 "plants": [(r[i], 60 + i) for i in range(1, 6)],
-                "algorithm": AlgorithmType.TD3,
+                "algorithm": "TD3",
                 "params": SMALL_DDPG,
                 "failstack": {"failstack_enabled": True, "failstack_limit": 2},
             },
@@ -210,7 +210,7 @@ def test_build_rejects_invalid_scenarios(agents, fast_demand) -> None:
             specs.append(
                 {
                     "plants": [(r[0], 10)],
-                    "algorithm": AlgorithmType.DDPG,
+                    "algorithm": "DDPG",
                     "params": {"NOISE_STD": 0.1},
                 }
             )
@@ -245,7 +245,7 @@ def test_exception_in_policy_update_sets_failed_and_rolls_back(
     monkeypatch.setattr(DDPGAlgorithm, "update", _boom)
     r = resources(1)
     simulation = make_run(
-        [{"plants": [(r[0], 400)], "algorithm": AlgorithmType.DDPG}], period_number=40
+        [{"plants": [(r[0], 400)], "algorithm": "DDPG"}], period_number=40
     )
     with pytest.raises(RuntimeError, match="update exploded"):
         simulation_service.run(simulation, export_json=False)
@@ -259,14 +259,14 @@ def test_exception_in_policy_update_sets_failed_and_rolls_back(
 
 def test_parameter_resolution_oq9(fast_demand) -> None:
     AlgorithmDefault.objects.create(
-        algorithm_type=AlgorithmType.DDPG, params={"batch_size": 16, "gamma": 0.5}
+        algorithm_type="DDPG", params={"batch_size": 16, "gamma": 0.5}
     )
     r = resources(1)
     simulation = make_run(
         [
             {
                 "plants": [(r[0], 100)],
-                "algorithm": AlgorithmType.DDPG,
+                "algorithm": "DDPG",
                 "params": {"gamma": 0.8, "learning_starts": 20},
             }
         ]
@@ -286,17 +286,17 @@ def test_forced_algorithm_ignores_agent_params(fast_demand) -> None:
         [
             {
                 "plants": [(r[0], 100)],
-                "algorithm": AlgorithmType.DDPG,
+                "algorithm": "DDPG",
                 "params": {"gamma": 0.8},
                 "failstack": {"failstack_enabled": True},
             }
         ]
     )
-    ctx = SimulationContext.build(simulation, forced_algorithm=AlgorithmType.RANDOM)
-    assert ctx.agents[0].policy.algorithm_type == AlgorithmType.RANDOM
+    ctx = SimulationContext.build(simulation, forced_algorithm="RANDOM")
+    assert ctx.agents[0].policy.key == "RANDOM"
     assert ctx.agents[0].failstack_params is None
     ctx = SimulationContext.build(
-        simulation, {"markup": 0.2}, forced_algorithm=AlgorithmType.FIXED_MARKUP
+        simulation, {"markup": 0.2}, forced_algorithm="FIXED_MARKUP"
     )
     assert ctx.agents[0].policy.config.markup == 0.2
 

@@ -24,7 +24,6 @@ from django.conf import settings
 
 from abmem.models import Simulation
 from abmem.models.enums import (
-    AlgorithmType,
     MarketState,
     SimulationMode,
     SimulationState,
@@ -160,7 +159,7 @@ def run(
     simulation: Simulation | int,
     *,
     algorithm_overrides: Mapping[str, Any] | None = None,
-    forced_algorithm: AlgorithmType | None = None,
+    forced_algorithm: str | None = None,
     export_json: bool = True,
 ) -> Simulation:
     """Run a simulation from period 1 to ``periodNumber``.
@@ -168,7 +167,7 @@ def run(
     Args:
         simulation: The run or its primary key.
         algorithm_overrides: HPO parameter overrides for every agent.
-        forced_algorithm: Algorithm used for every agent (HPO, K7).
+        forced_algorithm: Algorithm key used for every agent (HPO, K7).
         export_json: Write the JSON offer export at the end.
 
     Returns:

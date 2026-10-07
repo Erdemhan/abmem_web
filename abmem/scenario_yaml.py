@@ -5,12 +5,18 @@ File format, version 1 (exact keys)::
     format_version: 1
     scenario: {name, mode, period_type, periods, seed, evaluation_periods,
                observation_lags, demand}
-    market: {strategy, bid_bounds: [low, high]}
+    market: {strategy, clearing_algorithm, bid_bounds: [low, high]}
     resources: [{name, energy_type, fuel_cost, om_cost, investment_cost,
                  co2_cost, emission}]
     agents: [{name, type, budget, algorithm, algorithm_params: {},
               failstack: {enabled, limit, delta, min_margin},
               plants: [{resource: <resource name>, capacity}]}]
+
+``agents[].algorithm`` is the key of a registered agent algorithm (DDPG, TD3,
+SAC, PPO, RDPG, RANDOM, MARGINAL_COST, FIXED_MARKUP or any algorithm class
+discovered from the code, PLAN 2.10). ``market.clearing_algorithm`` is
+optional and is the key of a registered clearing algorithm, ``MERIT_ORDER``
+when missing. Export always writes it.
 
 ``scenario.demand`` is optional (PLAN 2.8). Absent or null means the demand
 file ``marketData.xlsx``; otherwise it is the synthetic demand profile as
@@ -80,7 +86,6 @@ from . import views as wizard
 from .models import Agent, DemandProfileTemplate, Simulation
 from .models.enums import (
     AgentType,
-    AlgorithmType,
     EnergyType,
     MarketStrategy,
     PeriodType,
@@ -92,6 +97,7 @@ from .services.agent.library_service import AgentInput, PlantInput
 from .services.agent.resource_rules import validate_agent_resources
 from .services.algorithms import registry
 from .services.market import demand_library, market_factory
+from .services.market.clearing_algorithms import registry as clearing_registry
 from .services.market.demand_library import DemandLibraryError
 from .services.simulation import simulation_factory
 
@@ -118,7 +124,8 @@ SCENARIO_KEYS: Final[tuple[str, ...]] = (
     "demand_profile",
 )
 SCENARIO_REQUIRED_KEYS: Final[tuple[str, ...]] = ("name", "mode", "period_type", "periods")
-MARKET_KEYS: Final[tuple[str, ...]] = ("strategy", "bid_bounds")
+MARKET_KEYS: Final[tuple[str, ...]] = ("strategy", "clearing_algorithm", "bid_bounds")
+MARKET_REQUIRED_KEYS: Final[tuple[str, ...]] = ("strategy", "bid_bounds")
 RESOURCE_COST_FIELDS: Final[tuple[tuple[str, str], ...]] = (
     ("fuel_cost", "fuelCost"),
     ("om_cost", "omCost"),
@@ -155,6 +162,7 @@ _WIZARD_KEYS: Final[Mapping[str, str]] = {
     "evaluation_periods": "scenario.evaluation_periods",
     "observation_lags": "scenario.observation_lags",
     "strategy": "market.strategy",
+    "clearing_algorithm": "market.clearing_algorithm",
     "lowerBound": "market.bid_bounds",
     "upperBound": "market.bid_bounds",
 }
@@ -274,7 +282,7 @@ def scenario_document(simulation: Simulation) -> dict[str, Any]:
                 "name": agent.name,
                 "type": AgentType(agent.type).name,
                 "budget": Decimal(agent.budget),
-                "algorithm": AlgorithmType(agent.algorithm_type).name,
+                "algorithm": str(agent.algorithm_type),
                 "algorithm_params": copy.deepcopy(dict(agent.algorithm_params or {})),
                 "failstack": {
                     "enabled": bool(agent.failstack_enabled),
@@ -329,6 +337,7 @@ def scenario_document(simulation: Simulation) -> dict[str, Any]:
         },
         "market": {
             "strategy": MarketStrategy(market.strategy).name,
+            "clearing_algorithm": str(market.clearing_algorithm),
             "bid_bounds": [int(market.lowerBidBound), int(market.upperBidBound)],
         },
         "resources": resource_docs,
@@ -492,6 +501,27 @@ def _enum_by_name(raw: Any, enum_cls: Any, path: str, errors: _Errors) -> Any:
     return None
 
 
+def _key_by_name(
+    raw: Any, is_known: Any, known: list[str], path: str, errors: _Errors
+) -> str | None:
+    """Return the registered plugin key named by ``raw`` (case-insensitive).
+
+    Args:
+        raw: Parsed value.
+        is_known: Predicate of the registry (``registry.is_known``).
+        known: Registered keys for the message.
+        path: Document path for messages.
+        errors: Error collection.
+
+    Returns:
+        The key, or None after reporting an error.
+    """
+    if isinstance(raw, str) and is_known(raw.strip().upper()):
+        return raw.strip().upper()
+    errors.add(path, f"{path} must be one of {', '.join(known)}, got {raw!r}.")
+    return None
+
+
 def _to_decimal(raw: Any) -> Any:
     """Prepare a YAML number for a Django DecimalField without float rounding.
 
@@ -648,6 +678,7 @@ class ImportPlan:
                     self.run_settings.demand_profile_source_id
                 ),
                 "strategy": MarketStrategy(self.header.strategy).name,
+                "clearing_algorithm": self.header.clearing_algorithm,
                 "bid_bounds": [self.header.lower_bound, self.header.upper_bound],
                 "agents": [spec.name for spec in self.agents],
             },
@@ -763,7 +794,9 @@ def _parse_header(document: dict[str, Any], errors: _Errors) -> tuple[Any, int |
     scenario = _check_mapping(
         document.get("scenario"), "scenario", SCENARIO_KEYS, SCENARIO_REQUIRED_KEYS, errors
     )
-    market = _check_mapping(document.get("market"), "market", MARKET_KEYS, MARKET_KEYS, errors)
+    market = _check_mapping(
+        document.get("market"), "market", MARKET_KEYS, MARKET_REQUIRED_KEYS, errors
+    )
     if scenario is None or market is None:
         return None, None, None
     payload: dict[str, Any] = {
@@ -788,6 +821,16 @@ def _parse_header(document: dict[str, Any], errors: _Errors) -> tuple[Any, int |
         enum_ok = enum_ok and member is not None
         # A placeholder keeps the wizard validator from repeating the error.
         payload[wizard_key] = (member or next(iter(enum_cls))).value
+    if market.get("clearing_algorithm") is not None:
+        clearing = _key_by_name(
+            market.get("clearing_algorithm"),
+            clearing_registry.is_known_clearing,
+            [info.key for info in clearing_registry.available_clearing_algorithms()],
+            "market.clearing_algorithm",
+            errors,
+        )
+        enum_ok = enum_ok and clearing is not None
+        payload["clearing_algorithm"] = clearing
     bounds = market.get("bid_bounds")
     if isinstance(bounds, list) and len(bounds) == 2:
         payload["lowerBound"], payload["upperBound"] = bounds
@@ -940,7 +983,13 @@ def _parse_agent(
         for message in exc.messages:
             errors.add(f"{path}.budget", label + message)
 
-    algorithm = _enum_by_name(mapping.get("algorithm"), AlgorithmType, f"{path}.algorithm", errors)
+    algorithm = _key_by_name(
+        mapping.get("algorithm"),
+        registry.is_known,
+        [info.key for info in registry.available_algorithms()],
+        f"{path}.algorithm",
+        errors,
+    )
     raw_failstack = mapping.get("failstack", {})
     failstack = _check_mapping(raw_failstack, f"{path}.failstack", FAILSTACK_KEYS, (), errors)
     if algorithm is None or failstack is None:
@@ -949,7 +998,7 @@ def _parse_agent(
         try:
             fields.update(
                 wizard._parse_agent_algorithm(
-                    {"algorithm_type": algorithm.name, "failstack": failstack}
+                    {"algorithm_type": algorithm, "failstack": failstack}
                 )
             )
         except ValidationError as exc:
@@ -973,7 +1022,7 @@ def _parse_agent(
         )
     elif algorithm is not None:
         try:
-            registry.config_class(algorithm).from_dict(params)
+            registry.get_config_class(algorithm).from_dict(params)
         except (TypeError, ValueError) as exc:
             ok = False
             errors.add(f"{path}.algorithm_params", f"{label}{exc}")
@@ -1036,7 +1085,7 @@ def _library_differences(spec: AgentSpec, library: Agent) -> list[str]:
     comparisons = (
         ("type", fields["type"].name, AgentType(library.type).name if library.type is not None else None),
         ("budget", Decimal(fields["budget"]), Decimal(library.budget)),
-        ("algorithm", fields["algorithm_type"].name, AlgorithmType(library.algorithm_type).name),
+        ("algorithm", fields["algorithm_type"], str(library.algorithm_type)),
         ("algorithm_params", spec.algorithm_params, dict(library.algorithm_params or {})),
         ("failstack.enabled", bool(fields["failstack_enabled"]), bool(library.failstack_enabled)),
         ("failstack.limit", int(fields["failstack_limit"]), int(library.failstack_limit)),
@@ -1236,6 +1285,7 @@ def apply_import_plan(plan: ImportPlan) -> Simulation:
         strategy=header.strategy,
         lowerBound=header.lower_bound,
         upperBound=header.upper_bound,
+        clearing_algorithm=header.clearing_algorithm,
     )
     for spec in plan.agents:
         library_service.copy_agent(spec.library, market, proxy=True, name=spec.name)

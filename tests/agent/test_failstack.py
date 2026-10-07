@@ -11,7 +11,6 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from abmem.models.enums import AlgorithmType
 from abmem.services.agent import failstack
 from abmem.services.agent.failstack import (
     FailStackParams,
@@ -78,7 +77,7 @@ def test_params_invalid(kwargs) -> None:
 
 
 def test_from_agent_disabled_returns_none() -> None:
-    agent = SimpleNamespace(failstack_enabled=False, algorithm_type=AlgorithmType.DDPG)
+    agent = SimpleNamespace(failstack_enabled=False, algorithm_type="DDPG")
     assert FailStackParams.from_agent(agent) is None
 
 
@@ -88,7 +87,7 @@ def test_from_agent_without_fields_returns_none() -> None:
 
 @pytest.mark.parametrize(
     "algo",
-    [AlgorithmType.RANDOM, AlgorithmType.MARGINAL_COST, AlgorithmType.FIXED_MARKUP, 5],
+    ["RANDOM", "MARGINAL_COST", "FIXED_MARKUP"],
 )
 def test_from_agent_baseline_returns_none(algo) -> None:
     agent = SimpleNamespace(failstack_enabled=True, algorithm_type=algo)
@@ -96,7 +95,7 @@ def test_from_agent_baseline_returns_none(algo) -> None:
 
 
 def test_from_agent_enabled_uses_defaults() -> None:
-    agent = SimpleNamespace(failstack_enabled=True, algorithm_type=AlgorithmType.PPO)
+    agent = SimpleNamespace(failstack_enabled=True, algorithm_type="PPO")
     assert FailStackParams.from_agent(agent) == _params()
 
 
@@ -112,7 +111,7 @@ def test_from_agent_enabled_without_algorithm_type() -> None:
 
 def test_from_agent_invalid_values_raise() -> None:
     agent = SimpleNamespace(
-        failstack_enabled=True, algorithm_type=AlgorithmType.TD3, failstack_limit=0
+        failstack_enabled=True, algorithm_type="TD3", failstack_limit=0
     )
     with pytest.raises(ValueError):
         FailStackParams.from_agent(agent)

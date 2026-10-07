@@ -9,7 +9,6 @@ import pytest
 from django.db import IntegrityError, transaction
 
 from abmem.models import Agent
-from abmem.models.enums import AlgorithmType
 from tests.factories import make_market
 
 pytestmark = pytest.mark.django_db
@@ -67,7 +66,7 @@ def test_failstack_constraints(fields: dict[str, Any]) -> None:
 def test_defaults_and_role_properties() -> None:
     agent = Agent.objects.create(name="a", market=make_market())
     agent.refresh_from_db()
-    assert agent.algorithm_type == AlgorithmType.DDPG
+    assert agent.algorithm_type == "DDPG"
     assert agent.algorithm_params == {}
     assert agent.failstack_enabled is False
     assert agent.failstack_limit == 6
@@ -76,7 +75,7 @@ def test_defaults_and_role_properties() -> None:
     assert agent.source is None
     assert agent.is_library is False
     assert agent.is_baseline is False
-    library = _library("lib", algorithm_type=AlgorithmType.MARGINAL_COST)
+    library = _library("lib", algorithm_type="MARGINAL_COST")
     assert library.is_library is True
     assert library.is_baseline is True
 

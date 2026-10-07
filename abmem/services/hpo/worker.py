@@ -158,7 +158,7 @@ def evaluate_task(task: EvaluationTask) -> TrialOutcome:
             for name, algorithm in study.scenario.market.agent_set.values_list(
                 "name", "algorithm_type"
             )
-            if int(algorithm) != int(study.algorithm_type)
+            if str(algorithm) != str(study.algorithm_type)
         ]
         for agent in Agent.objects.filter(market=simulation.market, name__in=foreign):
             agent.algorithm_params = dict(overrides)

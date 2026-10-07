@@ -17,7 +17,7 @@ from django.test import Client
 from django.urls import reverse
 
 from abmem.models import Agent, Simulation
-from abmem.models.enums import AgentType, AlgorithmType, EnergyType
+from abmem.models.enums import AgentType, EnergyType
 from abmem.models.models import Resource
 from abmem.models.simulation import DEFAULT_SEED
 from abmem.services.agent import library_service
@@ -38,7 +38,7 @@ def _agent(resource: Resource, name: str = "RsAgent") -> dict[str, Any]:
         "name": name,
         "type": AgentType.FOSSIL.value,
         "budget": "250",
-        "algorithm_type": AlgorithmType.TD3.value,
+        "algorithm_type": "TD3",
         "failstack": {"enabled": False},
         "plants": [{"resource": resource.id, "capacity": "200"}],
     }

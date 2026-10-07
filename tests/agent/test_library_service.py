@@ -13,7 +13,6 @@ from abmem.models import Agent, Market, Simulation
 from abmem.models.enums import (
     AgentState,
     AgentType,
-    AlgorithmType,
     EnergyType,
     MarketState,
     SimulationState,
@@ -47,7 +46,7 @@ def _input(resource: Resource, **overrides: Any) -> AgentInput:
         "name": "Coal",
         "budget": Decimal("1000.50"),
         "type": AgentType.FOSSIL,
-        "algorithm_type": AlgorithmType.TD3,
+        "algorithm_type": "TD3",
         "failstack_enabled": True,
         "failstack_limit": 4,
         "failstack_delta": Decimal("12.50"),
@@ -145,7 +144,7 @@ def test_create_library_agent(fossil: Resource) -> None:
     assert agent.name == "Coal"
     assert agent.budget == Decimal("1000.50")
     assert agent.type == AgentType.FOSSIL
-    assert agent.algorithm_type == AlgorithmType.TD3
+    assert agent.algorithm_type == "TD3"
     assert agent.failstack_enabled is True
     assert agent.failstack_limit == 4
     assert agent.failstack_delta == Decimal("12.50")
@@ -377,7 +376,7 @@ def test_copy_is_independent_of_later_library_edits(fossil: Resource) -> None:
             fossil,
             name="Changed",
             budget=Decimal("1"),
-            algorithm_type=AlgorithmType.SAC,
+            algorithm_type="SAC",
             failstack_limit=9,
             plants=(PlantInput(other.id, 1),),
             algorithm_params={"actor_lr": 0.5},
@@ -480,7 +479,7 @@ def _scenario_with_agents(fossil: Resource) -> Simulation:
     simulation.save()
     ls.add_new_agent_to_scenario(_input(fossil, name="A"), market)
     ls.add_new_agent_to_scenario(
-        _input(fossil, name="B", algorithm_type=AlgorithmType.DDPG), market
+        _input(fossil, name="B", algorithm_type="DDPG"), market
     )
     return simulation
 
@@ -520,17 +519,17 @@ def test_clone_scenario_forced_algorithm_and_overrides(fossil: Resource) -> None
     proxy_sim = _scenario_with_agents(fossil)
     run = ls.clone_scenario_for_run(
         proxy_sim,
-        forced_algorithm=AlgorithmType.PPO,
+        forced_algorithm="PPO",
         algorithm_overrides={"gamma": 0.9},
         fixed_agent_fields={"failstack_enabled": False, "failstack_limit": 2},
     )
     for agent in Agent.objects.filter(market=run.market):
-        assert agent.algorithm_type == AlgorithmType.PPO
+        assert agent.algorithm_type == "PPO"
         assert agent.algorithm_params == {"actor_lr": 0.001, "gamma": 0.9}
         assert agent.failstack_enabled is False
         assert agent.failstack_limit == 2
     for agent in proxy_sim.market.agent_set.all():
-        assert agent.algorithm_type != AlgorithmType.PPO
+        assert agent.algorithm_type != "PPO"
         assert agent.failstack_limit == 4
 
 

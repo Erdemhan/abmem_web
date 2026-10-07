@@ -1,11 +1,9 @@
 """Saved policy of one run agent (finding A9)."""
 
 from django.db import models
-from django_enumfield import enum
 
 from .agent import Agent
 from .base import Base
-from .enums import AlgorithmType
 from .simulation import Simulation
 
 
@@ -20,7 +18,7 @@ class PolicyCheckpoint(Base):
     Attributes:
         simulation: Run that produced the checkpoint.
         agent: Run agent whose policy was saved.
-        algorithm_type: Algorithm of the saved policy.
+        algorithm_type: Algorithm key of the saved policy.
         path: File path relative to ``ABMEM_CHECKPOINT_DIR`` (POSIX separators).
         file_size: Size of the file in bytes.
         sha256: Hex SHA-256 digest of the file, checked before loading.
@@ -40,7 +38,7 @@ class PolicyCheckpoint(Base):
         blank=True,
         related_name="checkpoints",
     )
-    algorithm_type = enum.EnumField(AlgorithmType)
+    algorithm_type = models.CharField(max_length=64)
     path = models.CharField(max_length=500)
     file_size = models.BigIntegerField()
     sha256 = models.CharField(max_length=64)

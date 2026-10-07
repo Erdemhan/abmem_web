@@ -23,7 +23,7 @@ from typing import Any
 import pytest
 
 from abmem.models import AgentStepLog, Simulation
-from abmem.models.enums import AlgorithmType, MarketStrategy
+from abmem.models.enums import MarketStrategy
 from abmem.models.models import Offer, Period
 from abmem.services.simulation import simulation_service
 from tests.runtime.conftest import SMALL_DDPG, make_run, resources
@@ -68,17 +68,17 @@ def _scenario() -> Simulation:
         [
             {
                 "plants": [(r[0], 300), (r[1], 200)],
-                "algorithm": AlgorithmType.DDPG,
+                "algorithm": "DDPG",
                 "params": SMALL_DDPG,
                 "failstack": {"failstack_enabled": True, "failstack_limit": 2},
             },
-            {"plants": [(r[2], 400)], "algorithm": AlgorithmType.RANDOM},
+            {"plants": [(r[2], 400)], "algorithm": "RANDOM"},
             {
                 "plants": [(r[1], 150)],
-                "algorithm": AlgorithmType.TD3,
+                "algorithm": "TD3",
                 "params": SMALL_DDPG,
             },
-            {"plants": [(r[3], 250)], "algorithm": AlgorithmType.MARGINAL_COST},
+            {"plants": [(r[3], 250)], "algorithm": "MARGINAL_COST"},
         ],
         period_number=40,
         seed=21,

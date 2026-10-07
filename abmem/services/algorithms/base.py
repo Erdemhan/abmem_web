@@ -21,10 +21,9 @@ import numpy as np
 import torch
 from torch import nn
 
-from abmem.models.enums import AlgorithmType
-
 from .algorithm_config import AlgorithmConfig
 from .device import get_device
+from .registry import AGENT_ALGORITHMS
 
 if TYPE_CHECKING:
     from .replay_buffer import ReplayBuffer, RolloutBuffer
@@ -398,6 +397,32 @@ def _wrap_select_action(
     return wrapper
 
 
+def _check_registered_class(cls: type[BaseAgentAlgorithm]) -> None:
+    """Check the class variables of a newly registered algorithm class.
+
+    Args:
+        cls: The registered class.
+
+    Raises:
+        django.core.exceptions.ImproperlyConfigured: If ``is_learning`` is not
+            a bool or ``config_class`` is not an AlgorithmConfig subclass. The
+            class is removed from the registry first.
+    """
+    from django.core.exceptions import ImproperlyConfigured
+
+    config = getattr(cls, "config_class", None)
+    problem = ""
+    if not isinstance(getattr(cls, "is_learning", None), bool):
+        problem = "must declare is_learning: bool"
+    elif not (isinstance(config, type) and issubclass(config, AlgorithmConfig)):
+        problem = "must declare config_class, a subclass of AlgorithmConfig"
+    if problem:
+        AGENT_ALGORITHMS.unregister(cls.key)
+        raise ImproperlyConfigured(
+            f"agent algorithm {cls.__module__}.{cls.__qualname__} {problem}"
+        )
+
+
 class BaseAgentAlgorithm(abc.ABC):
     """Template base class of every policy (DRL algorithms and baselines).
 
@@ -420,13 +445,26 @@ class BaseAgentAlgorithm(abc.ABC):
         buffer: Replay or rollout buffer, None for non-learning policies.
     """
 
-    algorithm_type: ClassVar[AlgorithmType]
+    key: ClassVar[str] = ""
+    label: ClassVar[str] = ""
+    description: ClassVar[str] = ""
     is_learning: ClassVar[bool]
     is_on_policy: ClassVar[bool]
     config_class: ClassVar[type[AlgorithmConfig]]
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
-        """Wrap a concrete ``select_action`` defined on the subclass."""
+        """Wrap a concrete ``select_action`` and register the subclass.
+
+        A concrete subclass that declares its own non-empty ``key`` is
+        registered in :data:`~abmem.services.algorithms.registry.AGENT_ALGORITHMS`
+        (PLAN 2.10). It must also declare ``is_learning`` and a
+        ``config_class``.
+
+        Raises:
+            django.core.exceptions.ImproperlyConfigured: If the key is invalid
+                or already used by another class, or a registered class lacks
+                ``is_learning`` or a valid ``config_class``.
+        """
         super().__init_subclass__(**kwargs)
         func = cls.__dict__.get("select_action")
         if (
@@ -436,6 +474,8 @@ class BaseAgentAlgorithm(abc.ABC):
             and not getattr(func, "_abmem_checked", False)
         ):
             cls.select_action = _wrap_select_action(func)  # type: ignore[method-assign]
+        if AGENT_ALGORITHMS.register(cls):
+            _check_registered_class(cls)
 
     def __init__(
         self, spec: PolicySpec, config: AlgorithmConfig, rng: np.random.Generator

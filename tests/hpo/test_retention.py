@@ -7,7 +7,7 @@ from decimal import Decimal
 import pytest
 
 from abmem.models import HPOStudy, HPOTrial, Simulation
-from abmem.models.enums import AgentType, AlgorithmType, HPOPhase, HPOTrialStatus
+from abmem.models.enums import AgentType, HPOPhase, HPOTrialStatus
 from abmem.models.models import Offer, Period
 from abmem.services.hpo.retention import apply_retention, purge_simulation_details
 from tests.factories import (
@@ -48,7 +48,7 @@ def _study() -> HPOStudy:
     scenario.save()
     return HPOStudy.objects.create(
         name="s",
-        algorithm_type=AlgorithmType.FIXED_MARKUP,
+        algorithm_type="FIXED_MARKUP",
         scenario=scenario,
         param_bounds={"markup": {"low": 0.0, "high": 0.5, "scale": "linear"}},
         colony_size=2,

@@ -10,7 +10,7 @@ import pytest
 import torch
 
 from abmem.models import AgentStepLog, HPOStudy, HPOTrial, PolicyCheckpoint, Simulation
-from abmem.models.enums import AlgorithmType, HPOPhase, SimulationState
+from abmem.models.enums import HPOPhase, SimulationState
 from abmem.services.algorithms import persistence
 from abmem.services.market import market_service
 from abmem.services.simulation import checkpoints, simulation_service
@@ -53,10 +53,10 @@ def _agents(r: list[Any], ddpg_plants: int = 2) -> list[dict[str, Any]]:
     return [
         {
             "plants": [(r[i], 100) for i in range(ddpg_plants)],
-            "algorithm": AlgorithmType.DDPG,
+            "algorithm": "DDPG",
             "params": SMALL_DDPG,
         },
-        {"plants": [(r[2], 50)], "algorithm": AlgorithmType.RANDOM},
+        {"plants": [(r[2], 50)], "algorithm": "RANDOM"},
     ]
 
 
@@ -99,7 +99,7 @@ def test_finished_run_saves_one_checkpoint_per_learning_agent(
     row = rows[0]
     agent = simulation.market.agent_set.get(name="a0")
     assert row.agent == agent
-    assert row.algorithm_type == AlgorithmType.DDPG
+    assert row.algorithm_type == "DDPG"
     assert row.periods_trained == PERIODS - 5
     assert row.parent is None
     assert row.format_version == persistence.FORMAT_VERSION
@@ -125,7 +125,7 @@ def test_hpo_trial_runs_save_no_checkpoint(
     simulation = _run(scenario, r)
     study = HPOStudy.objects.create(
         name="s",
-        algorithm_type=AlgorithmType.DDPG,
+        algorithm_type="DDPG",
         scenario=scenario,
         param_bounds={"tau": {"low": 0.001, "high": 0.01, "scale": "log"}},
         colony_size=2,

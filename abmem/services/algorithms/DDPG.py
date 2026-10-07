@@ -21,7 +21,6 @@ import numpy as np
 import torch
 from torch import nn
 
-from abmem.models.enums import AlgorithmType
 
 from .algorithm_config import DDPGConfig
 from .base import ActionResult, BaseAgentAlgorithm, PolicySpec, UpdateStats
@@ -45,7 +44,9 @@ class DDPGAlgorithm(BaseAgentAlgorithm):
         critic_optimizer: Adam optimiser of the critic.
     """
 
-    algorithm_type = AlgorithmType.DDPG
+    key = "DDPG"
+    label = "DDPG"
+    description = "Deep deterministic policy gradient, off-policy actor-critic (Lillicrap et al., 2016)."
     is_learning = True
     is_on_policy = False
     config_class = DDPGConfig

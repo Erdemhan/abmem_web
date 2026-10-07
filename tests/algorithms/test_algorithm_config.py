@@ -8,9 +8,8 @@ import math
 import numpy as np
 import pytest
 
-from abmem.models.enums import AlgorithmType
+from abmem.services.algorithms import registry
 from abmem.services.algorithms.algorithm_config import (
-    CONFIG_CLASSES,
     AlgorithmConfig,
     DDPGConfig,
     FixedMarkupConfig,
@@ -20,7 +19,10 @@ from abmem.services.algorithms.algorithm_config import (
     TD3Config,
 )
 
-ALL_CLASSES = sorted(set(CONFIG_CLASSES.values()), key=lambda c: c.__name__)
+ALL_CLASSES = sorted(
+    {cls.config_class for cls in registry.AGENT_ALGORITHMS.classes().values()},
+    key=lambda c: c.__name__,
+)
 
 
 @pytest.mark.parametrize("cls", ALL_CLASSES, ids=lambda c: c.__name__)
@@ -45,10 +47,11 @@ def test_resolved_defaults() -> None:
     assert RDPGConfig().seq_len == 24
 
 
-def test_config_classes_cover_all_algorithm_types() -> None:
-    assert set(CONFIG_CLASSES) == set(AlgorithmType)
-    with pytest.raises(TypeError):
-        CONFIG_CLASSES[AlgorithmType.DDPG] = TD3Config  # type: ignore[index]
+def test_every_registered_algorithm_has_its_own_config_class() -> None:
+    classes = registry.AGENT_ALGORITHMS.classes()
+    assert len(ALL_CLASSES) == len(classes) == 8
+    for cls in classes.values():
+        assert issubclass(cls.config_class, AlgorithmConfig)
 
 
 def test_frozen() -> None:

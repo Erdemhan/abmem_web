@@ -9,7 +9,6 @@ import pytest
 import torch
 from torch import nn
 
-from abmem.models.enums import AlgorithmType
 from abmem.services.algorithms import TD3 as td3_module
 from abmem.services.algorithms import registry
 from abmem.services.algorithms.algorithm_config import TD3Config
@@ -68,12 +67,12 @@ def test_contract_with_gradient_clipping(rng: np.random.Generator) -> None:
 
 
 def test_registry_resolves_td3() -> None:
-    cls = registry.get_algorithm_class(AlgorithmType.TD3)
+    cls = registry.get_algorithm_class("TD3")
     assert cls is TD3Algorithm
     assert cls.config_class is TD3Config
     assert cls.is_learning and not cls.is_on_policy
     policy = registry.build_policy(
-        AlgorithmType.TD3, make_spec(action_dim=2), None, np.random.default_rng(0)
+        "TD3", make_spec(action_dim=2), None, np.random.default_rng(0)
     )
     assert policy.config == TD3Config()
 

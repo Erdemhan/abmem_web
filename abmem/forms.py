@@ -8,7 +8,7 @@ from .services.agent.library_service import (
     normalize_name,
 )
 from .services.agent.resource_rules import validate_agent_resources
-from .services.algorithms.registry import BASELINE_TYPES
+from .services.algorithms import registry as algorithm_registry
 from .models.models import Resource, Portfolio, Plant, Period, Offer, Agent
 from django.forms import inlineformset_factory
 
@@ -132,11 +132,22 @@ class AgentForm(forms.ModelForm):
         delta = cleaned_data.get("failstack_delta")
         if delta is not None and delta < 0:
             self.add_error("failstack_delta", "Fail-stack delta must be >= 0 USD/MWh.")
-        if cleaned_data.get("failstack_enabled") and algorithm_type in BASELINE_TYPES:
+        if not algorithm_registry.is_known(algorithm_type):
+            known = ", ".join(
+                info.key for info in algorithm_registry.available_algorithms()
+            )
+            self.add_error(
+                "algorithm_type",
+                f"Algorithm {algorithm_type!r} is not available. "
+                f"Known algorithms: {known}.",
+            )
+        elif cleaned_data.get("failstack_enabled") and algorithm_registry.is_baseline(
+            algorithm_type
+        ):
             self.add_error(
                 "failstack_enabled",
                 "The fail-stack rule cannot be enabled for the baseline "
-                f"algorithm {algorithm_type.name}.",
+                f"algorithm {algorithm_type}.",
             )
         agent_type = cleaned_data.get("type")
         if self.plant_resources is not None and agent_type is not None:

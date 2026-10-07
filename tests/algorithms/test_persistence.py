@@ -9,7 +9,6 @@ import numpy as np
 import pytest
 import torch
 
-from abmem.models.enums import AlgorithmType
 from abmem.services.algorithms import persistence
 from abmem.services.algorithms.algorithm_config import (
     DDPGConfig,
@@ -23,17 +22,17 @@ from abmem.services.algorithms.persistence import CheckpointError
 from abmem.services.algorithms.registry import get_algorithm_class
 from tests.algorithms.conftest import make_spec
 
-SMALL_CONFIGS: dict[AlgorithmType, Any] = {
-    AlgorithmType.DDPG: DDPGConfig(
+SMALL_CONFIGS: dict[str, Any] = {
+    "DDPG": DDPGConfig(
         batch_size=8, buffer_size=256, learning_starts=8, hidden_sizes=(16,)
     ),
-    AlgorithmType.TD3: TD3Config(
+    "TD3": TD3Config(
         batch_size=8, buffer_size=256, learning_starts=8, hidden_sizes=(16,)
     ),
-    AlgorithmType.SAC: SACConfig(
+    "SAC": SACConfig(
         batch_size=8, buffer_size=256, learning_starts=8, hidden_sizes=(16,)
     ),
-    AlgorithmType.PPO: PPOConfig(
+    "PPO": PPOConfig(
         batch_size=8,
         buffer_size=64,
         learning_starts=8,
@@ -42,7 +41,7 @@ SMALL_CONFIGS: dict[AlgorithmType, Any] = {
         epochs=2,
         hidden_sizes=(16,),
     ),
-    AlgorithmType.RDPG: RDPGConfig(
+    "RDPG": RDPGConfig(
         batch_size=4,
         buffer_size=256,
         learning_starts=8,
@@ -56,7 +55,7 @@ ALLOWED_LEAF_TYPES = (torch.Tensor, int, float, bool, str, type(None))
 
 
 def _build(
-    algorithm: AlgorithmType, seed: int, action_dim: int = 2, obs_dim: int = 3
+    algorithm: str, seed: int, action_dim: int = 2, obs_dim: int = 3
 ) -> BaseAgentAlgorithm:
     torch.manual_seed(seed)
     cls = get_algorithm_class(algorithm)
@@ -121,9 +120,9 @@ def _leaves(value: Any) -> list[Any]:
     return [value]
 
 
-@pytest.mark.parametrize("algorithm", LEARNING_TYPES, ids=lambda a: a.name)
+@pytest.mark.parametrize("algorithm", LEARNING_TYPES, ids=str)
 def test_round_trip_acts_and_updates_identically(
-    algorithm: AlgorithmType, tmp_path: pathlib.Path
+    algorithm: str, tmp_path: pathlib.Path
 ) -> None:
     original = _build(algorithm, seed=0)
     obs = _train(original, 30, seed=1)
@@ -163,15 +162,17 @@ def test_round_trip_acts_and_updates_identically(
         assert torch.equal(tensor, _parameters(restored)[key]), key
 
 
-@pytest.mark.parametrize("algorithm", LEARNING_TYPES, ids=lambda a: a.name)
+@pytest.mark.parametrize("algorithm", LEARNING_TYPES, ids=str)
 def test_checkpoint_holds_only_tensors_and_plain_types(
-    algorithm: AlgorithmType,
+    algorithm: str,
 ) -> None:
     policy = _build(algorithm, seed=0)
     _train(policy, 12, seed=1)
     data = persistence.state_dict_of(policy, {"agent": "a0"})
     assert data["format_version"] == persistence.FORMAT_VERSION
-    assert data["algorithm_type"] == int(algorithm)
+    assert data["algorithm_key"] == algorithm
+    assert data["algorithm_name"] == algorithm
+    assert "algorithm_type" not in data
     assert data["spec"]["action_dim"] == 2
     for leaf in _leaves(data):
         assert isinstance(leaf, ALLOWED_LEAF_TYPES), type(leaf)
@@ -180,7 +181,7 @@ def test_checkpoint_holds_only_tensors_and_plain_types(
 def test_torch_load_uses_weights_only(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    policy = _build(AlgorithmType.DDPG, seed=0)
+    policy = _build("DDPG", seed=0)
     path = tmp_path / "p.pt"
     persistence.save_checkpoint(path, policy)
     calls: list[dict[str, Any]] = []
@@ -199,11 +200,11 @@ def test_torch_load_uses_weights_only(
 def test_warm_start_mode_keeps_the_generators_of_the_new_policy(
     tmp_path: pathlib.Path,
 ) -> None:
-    original = _build(AlgorithmType.TD3, seed=0)
+    original = _build("TD3", seed=0)
     _train(original, 20, seed=1)
     path = tmp_path / "p.pt"
     persistence.save_checkpoint(path, original)
-    target = _build(AlgorithmType.TD3, seed=42)
+    target = _build("TD3", seed=42)
     rng_state = target.rng.bit_generator.state
     generator_state = target._noise_generator.get_state()
     persistence.load_state_into(
@@ -220,12 +221,12 @@ def test_warm_start_mode_keeps_the_generators_of_the_new_policy(
 
 
 def test_rdpg_warm_start_starts_with_an_empty_history(tmp_path: pathlib.Path) -> None:
-    original = _build(AlgorithmType.RDPG, seed=0)
+    original = _build("RDPG", seed=0)
     _train(original, 10, seed=1)
     assert len(original.history) > 0
     path = tmp_path / "p.pt"
     persistence.save_checkpoint(path, original)
-    target = _build(AlgorithmType.RDPG, seed=3)
+    target = _build("RDPG", seed=3)
     persistence.load_state_into(
         target, persistence.load_checkpoint(path), restore_runtime=False
     )
@@ -235,15 +236,15 @@ def test_rdpg_warm_start_starts_with_an_empty_history(tmp_path: pathlib.Path) ->
 def test_frozen_flag_round_trips_only_with_runtime_restore(
     tmp_path: pathlib.Path,
 ) -> None:
-    original = _build(AlgorithmType.DDPG, seed=0)
+    original = _build("DDPG", seed=0)
     original.set_frozen(True)
     path = tmp_path / "p.pt"
     persistence.save_checkpoint(path, original)
     checkpoint = persistence.load_checkpoint(path)
-    exact = _build(AlgorithmType.DDPG, seed=1)
+    exact = _build("DDPG", seed=1)
     persistence.load_state_into(exact, checkpoint, restore_runtime=True)
     assert exact.frozen
-    warm = _build(AlgorithmType.DDPG, seed=1)
+    warm = _build("DDPG", seed=1)
     persistence.load_state_into(warm, checkpoint, restore_runtime=False)
     assert not warm.frozen
 
@@ -251,12 +252,12 @@ def test_frozen_flag_round_trips_only_with_runtime_restore(
 def test_optimizer_hyperparameters_come_from_the_new_config(
     tmp_path: pathlib.Path,
 ) -> None:
-    original = _build(AlgorithmType.DDPG, seed=0)
+    original = _build("DDPG", seed=0)
     _train(original, 12, seed=1)
     path = tmp_path / "p.pt"
     persistence.save_checkpoint(path, original)
-    config = SMALL_CONFIGS[AlgorithmType.DDPG].replace(lr_actor=1e-5)
-    target = get_algorithm_class(AlgorithmType.DDPG)(
+    config = SMALL_CONFIGS["DDPG"].replace(lr_actor=1e-5)
+    target = get_algorithm_class("DDPG")(
         make_spec(action_dim=2), config, np.random.default_rng(1)
     )
     persistence.load_state_into(target, persistence.load_checkpoint(path))
@@ -267,19 +268,19 @@ def test_optimizer_hyperparameters_come_from_the_new_config(
 @pytest.mark.parametrize(
     ("algorithm", "action_dim", "obs_dim", "message"),
     [
-        (AlgorithmType.TD3, 2, 3, "algorithm"),
-        (AlgorithmType.DDPG, 3, 3, "action_dim"),
-        (AlgorithmType.DDPG, 2, 4, "obs_dim"),
+        ("TD3", 2, 3, "algorithm"),
+        ("DDPG", 3, 3, "action_dim"),
+        ("DDPG", 2, 4, "obs_dim"),
     ],
 )
 def test_incompatible_policy_is_rejected_and_unchanged(
     tmp_path: pathlib.Path,
-    algorithm: AlgorithmType,
+    algorithm: str,
     action_dim: int,
     obs_dim: int,
     message: str,
 ) -> None:
-    source = _build(AlgorithmType.DDPG, seed=0)
+    source = _build("DDPG", seed=0)
     path = tmp_path / "p.pt"
     persistence.save_checkpoint(path, source)
     target = _build(algorithm, seed=1, action_dim=action_dim, obs_dim=obs_dim)
@@ -293,11 +294,11 @@ def test_incompatible_policy_is_rejected_and_unchanged(
 def test_different_network_shape_is_rejected_and_unchanged(
     tmp_path: pathlib.Path,
 ) -> None:
-    source = _build(AlgorithmType.DDPG, seed=0)
+    source = _build("DDPG", seed=0)
     path = tmp_path / "p.pt"
     persistence.save_checkpoint(path, source)
-    config = SMALL_CONFIGS[AlgorithmType.DDPG].replace(hidden_sizes=(8,))
-    target = get_algorithm_class(AlgorithmType.DDPG)(
+    config = SMALL_CONFIGS["DDPG"].replace(hidden_sizes=(8,))
+    target = get_algorithm_class("DDPG")(
         make_spec(action_dim=2), config, np.random.default_rng(1)
     )
     before = _parameters(target)
@@ -310,7 +311,7 @@ def test_different_network_shape_is_rejected_and_unchanged(
 def test_corrupted_missing_and_foreign_files_are_rejected(
     tmp_path: pathlib.Path,
 ) -> None:
-    policy = _build(AlgorithmType.DDPG, seed=0)
+    policy = _build("DDPG", seed=0)
     path = tmp_path / "p.pt"
     _, digest = persistence.save_checkpoint(path, policy)
     with path.open("ab") as handle:
@@ -329,8 +330,20 @@ def test_corrupted_missing_and_foreign_files_are_rejected(
         persistence.load_checkpoint(old)
 
 
+def test_checkpoint_written_before_plan_2_10_is_compatible() -> None:
+    """Old files store the enum value in ``algorithm_type`` and the key as name."""
+    policy = _build("DDPG", seed=0)
+    legacy = persistence.state_dict_of(policy)
+    del legacy["algorithm_key"]
+    legacy["algorithm_type"] = 0
+    persistence.check_compatible(policy, legacy)
+    legacy["algorithm_name"] = "TD3"
+    with pytest.raises(CheckpointError, match="TD3 differs from DDPG"):
+        persistence.check_compatible(policy, legacy)
+
+
 def test_baselines_cannot_be_saved(tmp_path: pathlib.Path) -> None:
-    cls = get_algorithm_class(AlgorithmType.MARGINAL_COST)
+    cls = get_algorithm_class("MARGINAL_COST")
     baseline = cls(
         make_spec(action_dim=2),
         cls.config_class(),

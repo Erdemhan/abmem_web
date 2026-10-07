@@ -12,21 +12,21 @@ from decimal import Decimal
 
 import pytest
 
-from abmem.models.enums import AlgorithmType, SimulationState
+from abmem.models.enums import SimulationState
 from abmem.services.simulation import simulation_service
 from tests.runtime.conftest import make_run, resources
 
 pytestmark = [pytest.mark.slow, pytest.mark.django_db]
 
 ALGORITHMS = [
-    AlgorithmType.DDPG,
-    AlgorithmType.TD3,
-    AlgorithmType.SAC,
-    AlgorithmType.PPO,
-    AlgorithmType.RDPG,
-    AlgorithmType.RANDOM,
-    AlgorithmType.MARGINAL_COST,
-    AlgorithmType.FIXED_MARKUP,
+    "DDPG",
+    "TD3",
+    "SAC",
+    "PPO",
+    "RDPG",
+    "RANDOM",
+    "MARGINAL_COST",
+    "FIXED_MARKUP",
 ]
 
 

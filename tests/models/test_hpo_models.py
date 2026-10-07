@@ -9,7 +9,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import ProtectedError
 
 from abmem.models import AlgorithmDefault, HPOStudy, HPOTrial, Simulation
-from abmem.models.enums import AlgorithmType, HPOPhase, HPOStatus, HPOTrialStatus
+from abmem.models.enums import HPOPhase, HPOStatus, HPOTrialStatus
 from tests.factories import make_simulation
 
 pytestmark = pytest.mark.django_db
@@ -25,7 +25,7 @@ def _scenario() -> Simulation:
 def _study(scenario: Simulation, **fields: Any) -> HPOStudy:
     values: dict[str, Any] = {
         "name": "study",
-        "algorithm_type": AlgorithmType.TD3,
+        "algorithm_type": "TD3",
         "scenario": scenario,
         "param_bounds": {"lr": {"low": 1e-4, "high": 1e-2, "scale": "log"}},
         "colony_size": 4,
@@ -116,11 +116,9 @@ def test_final_eval_phase_and_failed_trial_status() -> None:
 
 
 def test_algorithm_default_unique_per_type() -> None:
-    default = AlgorithmDefault.objects.create(algorithm_type=AlgorithmType.SAC)
+    default = AlgorithmDefault.objects.create(algorithm_type="SAC")
     default.refresh_from_db()
     assert default.params == {}
     assert default.updated_at is not None
     with pytest.raises(IntegrityError), transaction.atomic():
-        AlgorithmDefault.objects.create(
-            algorithm_type=AlgorithmType.SAC, params={"lr": 1}
-        )
+        AlgorithmDefault.objects.create(algorithm_type="SAC", params={"lr": 1})

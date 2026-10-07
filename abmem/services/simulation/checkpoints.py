@@ -33,7 +33,7 @@ from django.db.models.signals import post_delete
 from django.dispatch import receiver
 
 from abmem.models import PolicyCheckpoint, Simulation
-from abmem.models.enums import AlgorithmType, SimulationState
+from abmem.models.enums import SimulationState
 
 if TYPE_CHECKING:
     from abmem.models import Agent
@@ -74,9 +74,9 @@ def checkpoint_path(checkpoint: PolicyCheckpoint) -> pathlib.Path:
 
 def _is_baseline(agent: Agent) -> bool:
     """Return True if the agent's algorithm is a non-learning baseline."""
-    from abmem.services.algorithms.registry import BASELINE_TYPES
+    from abmem.services.algorithms.registry import is_baseline
 
-    return AlgorithmType.get(int(agent.algorithm_type)) in BASELINE_TYPES
+    return is_baseline(agent.algorithm_type)
 
 
 def _match_key(agent: Agent) -> tuple[str, Any]:
@@ -134,7 +134,7 @@ def save_run_checkpoints(ctx: SimulationContext) -> list[PolicyCheckpoint]:
             agent = rt.agent
             relative = (
                 f"run_{simulation.pk}/agent_{agent.pk}_"
-                f"{rt.policy.algorithm_type.name.lower()}.pt"
+                f"{rt.policy.key.lower()}.pt"
             )
             parent = ctx.warm_start_parents.get(agent.pk)
             periods_trained = (0 if rt.evaluate_only else trained_in_run) + (
@@ -159,7 +159,7 @@ def save_run_checkpoints(ctx: SimulationContext) -> list[PolicyCheckpoint]:
                 PolicyCheckpoint(
                     simulation=simulation,
                     agent=agent,
-                    algorithm_type=rt.policy.algorithm_type,
+                    algorithm_type=rt.policy.key,
                     path=relative,
                     file_size=size,
                     sha256=digest,
@@ -350,7 +350,7 @@ def check_warm_start(
     policies: list[tuple[Agent, BaseAgentAlgorithm]] = []
     warnings: list[str] = []
     for agent in market.agent_set.filter(pk__in=plan.matches).order_by("id"):
-        algorithm_type = AlgorithmType.get(int(agent.algorithm_type))
+        algorithm_type = str(agent.algorithm_type)
         try:
             policy = registry.build_policy(
                 algorithm_type,

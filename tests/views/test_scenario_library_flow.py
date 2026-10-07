@@ -18,7 +18,7 @@ from django.urls import reverse
 
 from abmem import views
 from abmem.models import Agent, Simulation
-from abmem.models.enums import AgentType, AlgorithmType, EnergyType
+from abmem.models.enums import AgentType, EnergyType
 from abmem.models.models import Plant, Resource
 from abmem.services.agent import library_service
 from abmem.services.agent.library_service import (
@@ -49,7 +49,7 @@ def _library_agent(resource: Resource, name: str = "LibA", **overrides: Any) -> 
         "name": name,
         "budget": Decimal("500"),
         "type": AgentType.FOSSIL,
-        "algorithm_type": AlgorithmType.PPO,
+        "algorithm_type": "PPO",
         "failstack_enabled": True,
         "failstack_limit": 3,
         "failstack_delta": Decimal("10"),
@@ -67,7 +67,7 @@ def _new_agent(resource: Resource, name: str = "NewB", **extra: Any) -> dict[str
         "name": name,
         "type": AgentType.FOSSIL.value,
         "budget": "250",
-        "algorithm_type": AlgorithmType.TD3.value,
+        "algorithm_type": "TD3",
         "failstack": {"enabled": True, "limit": 5, "delta": "2.5", "min_margin": "0"},
         "plants": [{"resource": resource.id, "capacity": "200"}],
     }
@@ -134,7 +134,7 @@ def test_create_with_new_and_library_agent(
     assert simulation.proxy
     new_library = Agent.objects.get(name="NewB", market__isnull=True)
     assert new_library.is_library
-    assert new_library.algorithm_type == AlgorithmType.TD3
+    assert new_library.algorithm_type == "TD3"
     assert (new_library.failstack_enabled, new_library.failstack_limit) == (True, 5)
     assert _plants(new_library) == [(fossil.id, 200)]
 
@@ -295,7 +295,7 @@ def test_editing_library_agent_leaves_scenario_unchanged(
             "name": "LibA-v2",
             "budget": "1",
             "type": str(AgentType.FOSSIL.value),
-            "algorithm_type": str(AlgorithmType.RANDOM.value),
+            "algorithm_type": "RANDOM",
             "resources[]": [str(coal.id)],
             "capacities[]": ["7"],
         },
@@ -303,7 +303,7 @@ def test_editing_library_agent_leaves_scenario_unchanged(
     assert response.status_code == 302, response.content
     copy.refresh_from_db()
     assert copy.name == "LibA"
-    assert copy.algorithm_type == AlgorithmType.PPO
+    assert copy.algorithm_type == "PPO"
     assert copy.budget == Decimal("500")
     assert _plants(copy) == [(fossil.id, 120), (fossil.id, 300)]
 
@@ -315,7 +315,7 @@ def test_update_keeps_edits_adds_and_removes(
     client: Client, fossil: Resource, coal: Resource
 ) -> None:
     lib_a = _library_agent(fossil)
-    lib_c = _library_agent(coal, name="LibC", algorithm_type=AlgorithmType.SAC)
+    lib_c = _library_agent(coal, name="LibC", algorithm_type="SAC")
     simulation = _scenario(
         client, [_library_entry(lib_a), _new_agent(fossil, name="Gone")]
     )
@@ -332,7 +332,7 @@ def test_update_keeps_edits_adds_and_removes(
                 "name": "LibA-edited",
                 "type": AgentType.FOSSIL.value,
                 "budget": "42",
-                "algorithm_type": AlgorithmType.RDPG.value,
+                "algorithm_type": "RDPG",
                 "failstack": {
                     "enabled": False,
                     "limit": 2,
@@ -355,7 +355,7 @@ def test_update_keeps_edits_adds_and_removes(
     edited = agents["LibA-edited"]
     assert edited.id == kept.id
     assert edited.source_id == lib_a.id
-    assert edited.algorithm_type == AlgorithmType.RDPG
+    assert edited.algorithm_type == "RDPG"
     assert (edited.failstack_enabled, edited.failstack_limit) == (False, 2)
     assert edited.budget == Decimal("42")
     assert _plants(edited) == [(coal.id, 11)]
@@ -370,7 +370,7 @@ def test_update_keeps_edits_adds_and_removes(
 
     # scenario edits never change the library
     lib_a.refresh_from_db()
-    assert (lib_a.name, lib_a.algorithm_type) == ("LibA", AlgorithmType.PPO)
+    assert (lib_a.name, lib_a.algorithm_type) == ("LibA", "PPO")
     assert _plants(lib_a) == [(fossil.id, 120), (fossil.id, 300)]
 
 
@@ -520,7 +520,7 @@ def test_run_uses_clone_scenario_for_run(
         assert run_agent.proxy is False
         assert run_agent.source_id == scenario_agents[name].source_id
         _assert_copy(run_agent, scenario_agents[name])
-    assert run_agents["LibA"].algorithm_type == AlgorithmType.PPO
+    assert run_agents["LibA"].algorithm_type == "PPO"
     assert run_agents["NewB"].failstack_limit == 5
 
 

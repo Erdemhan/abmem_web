@@ -1,17 +1,20 @@
-"""Pure uniform-price merit-order market clearing (PLAN 1.7, B4, B8, B11, OQ-18).
+"""Clearing data types, the clearing result contract and settlement prices.
 
-The module has no ORM access. Bids are grouped by equal price and processed in
-ascending price order. A group whose total quantity fits the remaining demand
-is fully accepted. The first group whose total quantity exceeds the remaining
-demand is split by equal shares capped at bid quantity (water-filling) and the
-clearing stops there. The split is computed with exact rational arithmetic and
-then quantised to ``quantum`` with the largest-remainder method, so the
-accepted quantities sum exactly to the cleared volume.
+The module has no ORM access. It defines the input (:class:`Bid`) and output
+(:class:`ClearingResult`) of every clearing algorithm, the contract a result
+must satisfy before the engine uses it (:func:`validate_clearing_result`,
+PLAN 2.10) and the settlement rule (:func:`acceptance_prices`), which stays
+separate from the clearing algorithm.
+
+Clearing algorithms are subclasses of
+:class:`~abmem.services.market.clearing_algorithms.base.BaseClearingAlgorithm`.
+The default uniform-price merit order (PLAN 1.7, B4, B8, B11, OQ-18) lives in
+:mod:`abmem.services.market.clearing_algorithms.merit_order`.
+:func:`clear_market` is a thin wrapper around it.
 """
 
 from __future__ import annotations
 
-from collections import defaultdict
 from collections.abc import Hashable, Mapping, Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -20,7 +23,16 @@ from typing import Any
 
 from ...models.enums import MarketStrategy
 
-__all__ = ["Bid", "ClearingResult", "acceptance_prices", "clear_market"]
+__all__ = [
+    "Bid",
+    "ClearingContractError",
+    "ClearingResult",
+    "acceptance_prices",
+    "check_decimal",
+    "clear_market",
+    "sort_token",
+    "validate_clearing_result",
+]
 
 _ZERO = Decimal(0)
 
@@ -47,14 +59,12 @@ class ClearingResult:
     Attributes:
         accepted: Accepted quantity per bid key. Every bid has an entry, rejected
             bids map to ``Decimal(0)``.
-        ptf: Price of the highest accepted price group, ``None`` when nothing
-            is accepted.
+        ptf: Market clearing price, ``None`` when nothing is accepted.
         met_demand: Sum of the accepted quantities.
         offered_volume: Sum of all offered quantities (the current semantics of
             ``Period.marketVolume``).
-        marginal_group: Keys of the bids with positive quantity whose price
-            equals ``ptf``, in deterministic key order. Empty when ``ptf`` is
-            ``None``.
+        marginal_group: Keys of the bids that set the price, in deterministic
+            key order. Empty when ``ptf`` is ``None``.
     """
 
     accepted: Mapping[Hashable, Decimal]
@@ -64,7 +74,11 @@ class ClearingResult:
     marginal_group: tuple[Hashable, ...] = field(default_factory=tuple)
 
 
-def _sort_token(key: Hashable) -> tuple[int, Any]:
+class ClearingContractError(ValueError):
+    """A clearing algorithm returned a result that breaks the contract."""
+
+
+def sort_token(key: Hashable) -> tuple[int, Any]:
     """Return a sort token that orders keys deterministically.
 
     Numeric keys are ordered numerically, every other key by ``repr``. This
@@ -81,7 +95,7 @@ def _sort_token(key: Hashable) -> tuple[int, Any]:
     return (1, repr(key))
 
 
-def _check_decimal(value: Any, name: str) -> Decimal:
+def check_decimal(value: Any, name: str) -> Decimal:
     """Validate that ``value`` is a finite, non-negative ``Decimal``.
 
     Args:
@@ -107,94 +121,25 @@ def _check_decimal(value: Any, name: str) -> Decimal:
     return value
 
 
-def _water_fill(
-    quantities: Mapping[Hashable, Fraction], volume: Fraction
-) -> dict[Hashable, Fraction]:
-    """Split ``volume`` equally among bids, capping each bid at its quantity.
-
-    Bids are visited in ascending quantity. While the smallest remaining bid
-    fits the current equal share it is fully accepted and the rest of the
-    volume is re-split among the remaining bids. Once the smallest remaining
-    bid exceeds the equal share, every remaining bid receives that share.
-
-    Args:
-        quantities: Positive quantity per bid key.
-        volume: Volume to split, ``0 <= volume < sum(quantities)``.
-
-    Returns:
-        Exact allocation per bid key. The allocations sum to ``volume``.
-    """
-    ordered = sorted(quantities.items(), key=lambda kv: (kv[1], _sort_token(kv[0])))
-    allocation: dict[Hashable, Fraction] = {}
-    remaining = volume
-    for position, (key, quantity) in enumerate(ordered):
-        share = remaining / (len(ordered) - position)
-        if quantity <= share:
-            allocation[key] = quantity
-            remaining -= quantity
-            continue
-        for other_key, _ in ordered[position:]:
-            allocation[other_key] = share
-        break
-    return allocation
-
-
-def _largest_remainder(
-    allocation: Mapping[Hashable, Fraction], total_units: int, unit: Fraction
-) -> dict[Hashable, int]:
-    """Round exact allocations to whole quanta with the largest-remainder method.
-
-    Args:
-        allocation: Exact allocation per key.
-        total_units: Number of quanta the rounded allocations must sum to.
-        unit: Size of one quantum.
-
-    Returns:
-        Number of quanta per key, summing to ``total_units``. Leftover quanta go
-        to the keys with the largest fractional parts, ties broken by ascending
-        key.
-    """
-    units: dict[Hashable, int] = {}
-    remainders: list[tuple[Fraction, Hashable]] = []
-    for key, value in allocation.items():
-        scaled = value / unit
-        whole = scaled.numerator // scaled.denominator
-        units[key] = whole
-        remainders.append((scaled - whole, key))
-    leftover = total_units - sum(units.values())
-    remainders.sort(key=lambda item: (-item[0], _sort_token(item[1])))
-    for _, key in remainders[:leftover]:
-        units[key] += 1
-    return units
-
-
 def clear_market(
     bids: Sequence[Bid], demand: Decimal, quantum: Decimal = Decimal("0.001")
 ) -> ClearingResult:
-    """Clear the market with a uniform-price merit order.
+    """Clear the market with the default uniform-price merit order.
 
-    Bids are grouped by equal price in ascending order. A group whose total
-    quantity fits the remaining demand ``D_rem`` is fully accepted. The first
-    group whose total exceeds ``D_rem`` is split by equal share capped at bid
-    quantity (water-filling, OQ-18) and the loop stops. The split is quantised
-    to ``quantum`` with the largest-remainder method so that its sum equals
-    ``D_rem`` exactly.
+    Thin wrapper around
+    :class:`~abmem.services.market.clearing_algorithms.merit_order.MeritOrderClearing`
+    (key ``MERIT_ORDER``).
 
     Args:
         bids: Bids to clear. Keys must be unique.
         demand: Demand to cover in MWh.
-        quantum: Resolution of accepted quantities. ``demand`` and every bid
-            quantity must be integer multiples of it.
+        quantum: Resolution of accepted quantities.
 
     Returns:
-        The clearing result. ``sum(accepted.values()) == min(demand,
-        offered_volume)`` holds exactly.
+        The clearing result.
 
     Raises:
-        ValueError: If a price, quantity or the demand is negative, NaN,
-            infinite or not a ``Decimal``, if ``quantum`` is not positive, if
-            a quantity or the demand is not a multiple of ``quantum``, or if
-            bid keys repeat.
+        ValueError: If an input is invalid (see ``MeritOrderClearing.clear``).
 
     Example:
         >>> r = clear_market([Bid(0, Decimal(60), Decimal(100)),
@@ -202,81 +147,155 @@ def clear_market(
         >>> r.accepted[0], r.accepted[1]
         (Decimal('50.000'), Decimal('10'))
     """
-    quantum = _check_decimal(quantum, "quantum")
-    if quantum == 0:
-        raise ValueError("quantum must be positive")
-    demand = _check_decimal(demand, "demand")
-    unit = Fraction(quantum)
-    if Fraction(demand) % unit != 0:
-        raise ValueError(f"demand {demand} is not a multiple of quantum {quantum}")
+    from .clearing_algorithms.merit_order import MeritOrderClearing
 
-    seen: set[Hashable] = set()
-    checked: list[Bid] = []
-    for bid in bids:
-        if bid.key in seen:
-            raise ValueError(f"duplicate bid key {bid.key!r}")
-        seen.add(bid.key)
-        price = _check_decimal(bid.price, f"price of bid {bid.key!r}")
-        quantity = _check_decimal(bid.quantity, f"quantity of bid {bid.key!r}")
-        if Fraction(quantity) % unit != 0:
-            raise ValueError(
-                f"quantity {quantity} of bid {bid.key!r} is not a multiple of quantum {quantum}"
-            )
-        checked.append(Bid(bid.key, price, quantity))
+    return MeritOrderClearing().clear(bids, demand, quantum)
 
-    accepted: dict[Hashable, Decimal] = {bid.key: _ZERO for bid in checked}
-    offered_volume = sum((bid.quantity for bid in checked), _ZERO)
 
-    groups: dict[Decimal, list[Bid]] = defaultdict(list)
-    for bid in checked:
-        if bid.quantity > 0:
-            groups[bid.price].append(bid)
-
-    remaining = Fraction(demand)
-    ptf: Decimal | None = None
-    for price in sorted(groups):
-        if remaining <= 0:
-            break
-        group = groups[price]
-        total = sum((Fraction(bid.quantity) for bid in group), Fraction(0))
-        ptf = price
-        if total <= remaining:
-            for bid in group:
-                accepted[bid.key] = bid.quantity
-            remaining -= total
-            continue
-        exact = _water_fill(
-            {bid.key: Fraction(bid.quantity) for bid in group}, remaining
-        )
-        total_units = remaining / unit
-        units = _largest_remainder(
-            exact, total_units.numerator // total_units.denominator, unit
-        )
-        for key, count in units.items():
-            accepted[key] = Decimal(count) * quantum
-        remaining = Fraction(0)
-        break
-
-    marginal: tuple[Hashable, ...] = ()
-    if ptf is not None:
-        marginal = tuple(sorted((bid.key for bid in groups[ptf]), key=_sort_token))
-    met_demand = sum(accepted.values(), _ZERO)
-    return ClearingResult(
-        accepted=accepted,
-        ptf=ptf,
-        met_demand=met_demand,
-        offered_volume=offered_volume,
-        marginal_group=marginal,
+def _broken(algorithm: str, rule: str) -> ClearingContractError:
+    """Return the contract error of ``algorithm`` for the broken ``rule``."""
+    return ClearingContractError(
+        f"clearing algorithm {algorithm} broke the result contract: {rule}"
     )
+
+
+def validate_clearing_result(
+    result: Any,
+    bids: Sequence[Bid],
+    demand: Decimal,
+    quantum: Decimal,
+    low: Decimal,
+    high: Decimal,
+    *,
+    algorithm: str = "?",
+) -> ClearingResult:
+    """Check a clearing result against the contract of every clearing algorithm.
+
+    The rules (PLAN 2.10, ``specs/pluggable_algorithms.json``):
+
+    1. ``accepted`` has exactly the bid keys.
+    2. Every accepted quantity is a finite ``Decimal`` with
+       ``0 <= accepted <= bid quantity`` and a multiple of ``quantum``.
+    3. ``met_demand == sum(accepted)`` and ``met_demand <= min(demand,
+       offered_volume)``.
+    4. ``offered_volume`` equals the sum of the bid quantities.
+    5. ``ptf`` is None exactly when ``met_demand == 0``. Otherwise it is a
+       finite ``Decimal`` with ``low <= ptf <= high``.
+    6. ``marginal_group`` is a tuple of keys of ``accepted`` without repeats.
+
+    Args:
+        result: Return value of the algorithm.
+        bids: The bids that were cleared.
+        demand: The demand that was cleared.
+        quantum: Resolution of accepted quantities.
+        low: Lower bid bound of the market.
+        high: Upper bid bound of the market.
+        algorithm: Key of the algorithm, used in the error message.
+
+    Returns:
+        ``result`` unchanged.
+
+    Raises:
+        ClearingContractError: Naming the algorithm and the first broken rule.
+    """
+    if not isinstance(result, ClearingResult):
+        raise _broken(
+            algorithm, f"returned {type(result).__name__}, expected ClearingResult"
+        )
+    accepted = result.accepted
+    if not isinstance(accepted, Mapping):
+        raise _broken(algorithm, "accepted is not a mapping")
+    bid_keys = [bid.key for bid in bids]
+    if set(accepted) != set(bid_keys) or len(accepted) != len(set(bid_keys)):
+        missing = [k for k in bid_keys if k not in accepted]
+        extra = [k for k in accepted if k not in set(bid_keys)]
+        raise _broken(
+            algorithm,
+            f"accepted must have exactly the bid keys (missing {missing}, "
+            f"extra {extra})",
+        )
+    unit = Fraction(quantum)
+    total = _ZERO
+    for bid in bids:
+        value = accepted[bid.key]
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, Decimal)
+            or not value.is_finite()
+        ):
+            raise _broken(
+                algorithm,
+                f"accepted quantity of bid {bid.key!r} must be a finite Decimal, "
+                f"got {value!r}",
+            )
+        if value < 0 or value > bid.quantity:
+            raise _broken(
+                algorithm,
+                f"accepted quantity {value} of bid {bid.key!r} is outside "
+                f"[0, {bid.quantity}]",
+            )
+        if Fraction(value) % unit != 0:
+            raise _broken(
+                algorithm,
+                f"accepted quantity {value} of bid {bid.key!r} is not a multiple "
+                f"of quantum {quantum}",
+            )
+        total += value
+    offered = sum((bid.quantity for bid in bids), _ZERO)
+    if result.offered_volume != offered:
+        raise _broken(
+            algorithm,
+            f"offered_volume {result.offered_volume} differs from the sum of bid "
+            f"quantities {offered}",
+        )
+    if result.met_demand != total:
+        raise _broken(
+            algorithm,
+            f"met_demand {result.met_demand} differs from the sum of accepted "
+            f"quantities {total}",
+        )
+    if total > min(demand, offered):
+        raise _broken(
+            algorithm,
+            f"met_demand {total} exceeds min(demand, offered_volume) = "
+            f"{min(demand, offered)}",
+        )
+    ptf = result.ptf
+    if total == 0:
+        if ptf is not None:
+            raise _broken(
+                algorithm, f"ptf must be None when met_demand is 0, got {ptf}"
+            )
+    else:
+        if (
+            isinstance(ptf, bool)
+            or not isinstance(ptf, (Decimal, int))
+            or not Decimal(ptf).is_finite()
+        ):
+            raise _broken(
+                algorithm,
+                f"ptf must be a finite Decimal when met_demand > 0, got {ptf!r}",
+            )
+        if not low <= ptf <= high:
+            raise _broken(
+                algorithm, f"ptf {ptf} is outside the bid bounds [{low}, {high}]"
+            )
+    group = result.marginal_group
+    if not isinstance(group, tuple) or len(set(group)) != len(group):
+        raise _broken(algorithm, "marginal_group must be a tuple without repeated keys")
+    stray = [k for k in group if k not in accepted]
+    if stray:
+        raise _broken(algorithm, f"marginal_group has keys that are not bids: {stray}")
+    return result
 
 
 def acceptance_prices(
     result: ClearingResult, bids: Sequence[Bid], strategy: MarketStrategy
 ) -> dict[Hashable, Decimal | None]:
-    """Return the price paid per accepted MWh for every bid.
+    """Return the price paid per accepted MWh for every bid (settlement rule).
 
     Args:
-        result: Result of :func:`clear_market` for ``bids``.
+        result: Clearing result for ``bids``.
         bids: The bids that were cleared.
         strategy: ``PAYASBID`` pays the bid price, ``PAYASPTF`` pays
             ``result.ptf``.

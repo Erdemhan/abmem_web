@@ -13,7 +13,6 @@ import torch
 from abmem.models import Agent, Market, Simulation
 from abmem.models.enums import (
     AgentType,
-    AlgorithmType,
     MarketStrategy,
     PeriodType,
     SimulationMode,
@@ -102,7 +101,7 @@ def make_run(
             market=market,
             type=AgentType.HYBRID,
             budget=spec.get("budget", Decimal("0")),
-            algorithm_type=spec.get("algorithm", AlgorithmType.RANDOM),
+            algorithm_type=spec.get("algorithm", "RANDOM"),
             algorithm_params=spec.get("params", {}),
             **failstack,
         )

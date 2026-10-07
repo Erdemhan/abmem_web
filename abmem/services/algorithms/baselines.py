@@ -28,7 +28,6 @@ from collections.abc import Sequence
 
 import numpy as np
 
-from abmem.models.enums import AlgorithmType
 
 from .algorithm_config import FixedMarkupConfig, MarginalCostConfig, RandomConfig
 from .base import ActionResult, BaseAgentAlgorithm, PolicySpec
@@ -77,7 +76,11 @@ class RandomPolicy(BaseAgentAlgorithm):
     produce identical action sequences.
     """
 
-    algorithm_type = AlgorithmType.RANDOM
+    key = "RANDOM"
+    label = "Random"
+    description = (
+        "Draws uniform random prices within the bid bounds (comparison baseline)."
+    )
     is_learning = False
     is_on_policy = False
     #: Random even when explore=False (checked by the shared policy contract).
@@ -154,7 +157,9 @@ class MarginalCostPolicy(_CostBasedPolicy):
     ``[price_low, price_high]`` and mapped to ``u``.
     """
 
-    algorithm_type = AlgorithmType.MARGINAL_COST
+    key = "MARGINAL_COST"
+    label = "Marginal cost"
+    description = "Bids the variable cost of every plant (comparison baseline)."
     config_class = MarginalCostConfig
 
     def target_prices(self) -> np.ndarray:
@@ -174,7 +179,11 @@ class FixedMarkupPolicy(_CostBasedPolicy):
     to ``u``.
     """
 
-    algorithm_type = AlgorithmType.FIXED_MARKUP
+    key = "FIXED_MARKUP"
+    label = "Fixed markup"
+    description = (
+        "Bids the full plant cost plus a fixed relative markup (comparison baseline)."
+    )
     config_class = FixedMarkupConfig
 
     def target_prices(self) -> np.ndarray:

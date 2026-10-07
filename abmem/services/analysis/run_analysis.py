@@ -32,7 +32,6 @@ from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_EVEN, Decimal
 from typing import TYPE_CHECKING, Any, Final
 
 from abmem.models.enums import (
-    AlgorithmType,
     MarketStrategy,
     SimulationMode,
     SimulationState,
@@ -72,7 +71,7 @@ class AgentSetting:
 
     Attributes:
         name: Agent name.
-        algorithm: Algorithm name (``AlgorithmType``).
+        algorithm: Algorithm key.
         baseline: True for a non-learning baseline.
         failstack_enabled: Fail-stack switch (always False for baselines).
         failstack_limit: Fail-stack limit L.
@@ -80,6 +79,8 @@ class AgentSetting:
         failstack_min_margin: Fail-stack minimum margin.
         algorithm_params: Per-agent algorithm parameter overrides.
         plants: Plants of the agent.
+        algorithm_label: Display label of the algorithm from the registry, the
+            key when the algorithm is no longer registered.
     """
 
     name: str
@@ -91,6 +92,7 @@ class AgentSetting:
     failstack_min_margin: float
     algorithm_params: dict[str, Any]
     plants: list[PlantSetting]
+    algorithm_label: str = ""
 
 
 @dataclass(frozen=True)
@@ -99,7 +101,7 @@ class CheckpointSetting:
 
     Attributes:
         agent: Agent name (empty if the agent row is gone).
-        algorithm: Algorithm name.
+        algorithm: Algorithm key.
         file_size: Size of the checkpoint file in bytes.
         periods_trained: Learning periods including warm-start ancestors.
         parent_run: Run of the checkpoint the policy was loaded from, if any.
@@ -132,6 +134,8 @@ class RunSettings:
             for fresh policies.
         freeze_policies: The loaded policies ran without learning.
         checkpoints: Policies saved at the end of this run, in agent order.
+        clearing_algorithm: Key of the clearing algorithm of the market.
+        clearing_algorithm_label: Display label of the clearing algorithm.
     """
 
     simulation_id: int
@@ -148,6 +152,8 @@ class RunSettings:
     warm_start_from: int | None = None
     freeze_policies: bool = False
     checkpoints: list[CheckpointSetting] = field(default_factory=list)
+    clearing_algorithm: str = ""
+    clearing_algorithm_label: str = ""
 
 
 @dataclass(frozen=True)
@@ -527,7 +533,8 @@ def build_run_analysis(simulation: Simulation) -> RunAnalysis:
     """
     from abmem.models import AgentStepLog, PolicyCheckpoint
     from abmem.models.models import Offer, Period, Plant
-    from abmem.services.algorithms.registry import BASELINE_TYPES
+    from abmem.services.algorithms import registry as algorithm_registry
+    from abmem.services.market.clearing_algorithms.registry import clearing_label_for
     from abmem.services.hpo.objective import scored_periods
     from abmem.services.market.accounting import offer_profit, outcome_from_offer
 
@@ -662,17 +669,13 @@ def build_run_analysis(simulation: Simulation) -> RunAnalysis:
     summaries: list[AgentSummary] = []
     n_periods = len(period_objects)
     for agent in agents:
-        algorithm = AlgorithmType.get(
-            getattr(agent.algorithm_type, "value", agent.algorithm_type)
-        )
-        baseline = algorithm in BASELINE_TYPES
-        algorithm_name = (
-            algorithm.name if algorithm is not None else str(agent.algorithm_type)
-        )
+        algorithm_name = str(agent.algorithm_type)
+        baseline = algorithm_registry.is_baseline(algorithm_name)
         agent_settings.append(
             AgentSetting(
                 name=agent.name,
                 algorithm=algorithm_name,
+                algorithm_label=algorithm_registry.label_for(algorithm_name),
                 baseline=baseline,
                 failstack_enabled=bool(agent.failstack_enabled) and not baseline,
                 failstack_limit=int(agent.failstack_limit),
@@ -713,6 +716,8 @@ def build_run_analysis(simulation: Simulation) -> RunAnalysis:
         period_number=int(simulation.periodNumber),
         mode=_enum_name(SimulationMode, simulation.mode),
         strategy=_enum_name(MarketStrategy, market.strategy),
+        clearing_algorithm=str(market.clearing_algorithm),
+        clearing_algorithm_label=clearing_label_for(market.clearing_algorithm),
         lower_bound=int(market.lowerBidBound),
         upper_bound=int(market.upperBidBound),
         agents=agent_settings,
@@ -721,7 +726,7 @@ def build_run_analysis(simulation: Simulation) -> RunAnalysis:
         checkpoints=[
             CheckpointSetting(
                 agent=checkpoint.agent.name if checkpoint.agent is not None else "",
-                algorithm=_enum_name(AlgorithmType, checkpoint.algorithm_type),
+                algorithm=str(checkpoint.algorithm_type),
                 file_size=int(checkpoint.file_size),
                 periods_trained=int(checkpoint.periods_trained),
                 parent_run=(

@@ -38,8 +38,9 @@ from django.utils import timezone
 
 from abmem import bootstrap
 from abmem.models import HPOStudy, HPOTrial, Simulation
-from abmem.models.enums import AlgorithmType, HPOPhase, HPOStatus, HPOTrialStatus
-from abmem.services.algorithms.algorithm_config import CONFIG_CLASSES, AlgorithmConfig
+from abmem.models.enums import HPOPhase, HPOStatus, HPOTrialStatus
+from abmem.services.algorithms import registry as algorithm_registry
+from abmem.services.algorithms.algorithm_config import AlgorithmConfig
 from abmem.services.hpo.abc_optimizer import (
     ABCSettings,
     ArtificialBeeColony,
@@ -101,23 +102,17 @@ def _searchable_field_names(config_cls: type[AlgorithmConfig]) -> set[str]:
     }
 
 
-def _parse_algorithm(value: Any) -> AlgorithmType:
-    """Parse an algorithm given as enum, value or member name.
+def _parse_algorithm(value: Any) -> str:
+    """Parse an algorithm key (case-insensitive, surrounding spaces ignored).
 
     Raises:
-        ValueError: If the value is not an algorithm.
+        ValueError: If the value is not the key of a registered algorithm.
     """
-    if isinstance(value, AlgorithmType):
-        return value
-    if isinstance(value, str) and not value.strip().lstrip("-").isdigit():
-        try:
-            return AlgorithmType[value.strip().upper()]
-        except KeyError:
-            raise ValueError(f"unknown algorithm {value!r}") from None
-    try:
-        return AlgorithmType(int(value))
-    except (TypeError, ValueError):
-        raise ValueError(f"unknown algorithm {value!r}") from None
+    key = value.strip().upper() if isinstance(value, str) else value
+    if not algorithm_registry.is_known(key):
+        known = [info.key for info in algorithm_registry.available_algorithms()]
+        raise ValueError(f"unknown algorithm {value!r}, known keys: {known}")
+    return str(key)
 
 
 def _parse_positive_int(value: Any, name: str, minimum: int) -> int:
@@ -323,8 +318,8 @@ def validate_study_input(data: Mapping[str, Any]) -> dict[str, Any]:
 
     Args:
         data: Keys ``name``, ``scenario`` (proxy ``Simulation`` or its id,
-            ``scenario_id`` is accepted too), ``algorithm_type`` (enum, value
-            or name), ``param_bounds`` (``{name: {low, high, scale}}``),
+            ``scenario_id`` is accepted too), ``algorithm_type`` (algorithm
+            key, case-insensitive), ``param_bounds`` (``{name: {low, high, scale}}``),
             optional ``fixed_params`` (``failstack_enabled``,
             ``failstack_limit``, ``failstack_delta``), ``colony_size``,
             ``max_iter``, ``limit``, ``search_seeds``, ``evaluation_seeds``
@@ -333,7 +328,7 @@ def validate_study_input(data: Mapping[str, Any]) -> dict[str, Any]:
 
     Returns:
         The keyword arguments of ``HPOStudy`` (``scenario`` as instance,
-        ``algorithm_type`` as enum).
+        ``algorithm_type`` as key).
 
     Raises:
         ValidationError: With ``message_dict`` keyed by field name.
@@ -369,7 +364,7 @@ def validate_study_input(data: Mapping[str, Any]) -> dict[str, Any]:
         scenario = None
     out["scenario"] = scenario
 
-    algorithm: AlgorithmType | None = None
+    algorithm: str | None = None
     try:
         algorithm = _parse_algorithm(data.get("algorithm_type"))
     except ValueError as error:
@@ -383,7 +378,7 @@ def validate_study_input(data: Mapping[str, Any]) -> dict[str, Any]:
     if algorithm is not None:
         bounds, bound_errors = _validate_bounds(
             data.get("param_bounds"),
-            CONFIG_CLASSES[algorithm],
+            algorithm_registry.get_config_class(algorithm),
             bool(fixed.get("failstack_enabled")),
         )
         if bound_errors:
@@ -436,11 +431,11 @@ def create_study(data: Mapping[str, Any]) -> HPOStudy:
     return HPOStudy.objects.create(**validate_study_input(data))
 
 
-def param_space_payload(algorithm_type: AlgorithmType) -> dict[str, Any]:
+def param_space_payload(algorithm_type: str) -> dict[str, Any]:
     """Return defaults and default search bounds for the create form.
 
     Args:
-        algorithm_type: The algorithm.
+        algorithm_type: Algorithm key.
 
     Returns:
         ``{"algorithm", "defaults", "bounds", "failstack_defaults"}`` with
@@ -451,13 +446,13 @@ def param_space_payload(algorithm_type: AlgorithmType) -> dict[str, Any]:
     from abmem.models import Agent
 
     algorithm = _parse_algorithm(algorithm_type)
-    config_cls = CONFIG_CLASSES[algorithm]
+    config_cls = algorithm_registry.get_config_class(algorithm)
     bounds = {
         name: {"low": low, "high": high, "scale": scale}
         for name, (low, high, scale) in config_cls.default_search_bounds().items()
     }
     return {
-        "algorithm": algorithm.name,
+        "algorithm": algorithm,
         "defaults": config_cls().to_dict(),
         "bounds": bounds,
         "failstack_defaults": {

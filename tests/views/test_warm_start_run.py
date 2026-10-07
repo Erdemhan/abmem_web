@@ -12,7 +12,7 @@ from django.urls import reverse
 
 from abmem import views
 from abmem.models import PolicyCheckpoint, Simulation
-from abmem.models.enums import AlgorithmType, SimulationState
+from abmem.models.enums import SimulationState
 from abmem.models.models import Plant
 from abmem.services.agent import library_service
 from abmem.services.market.demand import DemandSeries
@@ -53,14 +53,14 @@ def _scenario(name: str = "ws-sc") -> Simulation:
         budget=Decimal("10"),
     )
     learner.proxy = True
-    learner.algorithm_type = AlgorithmType.DDPG
+    learner.algorithm_type = "DDPG"
     learner.algorithm_params = dict(SMALL_DDPG)
     learner.save()
     baseline = make_agent_with_plants(
         market, [(make_resource(name=f"{name}-r3"), 80)], name="Baseline"
     )
     baseline.proxy = True
-    baseline.algorithm_type = AlgorithmType.MARGINAL_COST
+    baseline.algorithm_type = "MARGINAL_COST"
     baseline.save()
     return simulation
 

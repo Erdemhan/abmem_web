@@ -13,6 +13,7 @@ from abmem.services.market.clearing import (
     ClearingResult,
     acceptance_prices,
     clear_market,
+    validate_clearing_result,
 )
 
 D = Decimal
@@ -27,7 +28,20 @@ def _bids(specs: list[tuple[int | str, int | str]]) -> list[Bid]:
 
 
 def _check_invariants(bids: list[Bid], demand: Decimal, result: ClearingResult) -> None:
-    """Assert every invariant of the spec on one clearing result."""
+    """Assert every invariant of the spec on one clearing result.
+
+    The result must also satisfy the contract every clearing algorithm is
+    checked against at runtime (PLAN 2.10).
+    """
+    validate_clearing_result(
+        result,
+        bids,
+        demand,
+        D("0.001"),
+        D(0),
+        max((b.price for b in bids), default=D(0)),
+        algorithm="MERIT_ORDER",
+    )
     offered = sum((b.quantity for b in bids), D(0))
     assert result.offered_volume == offered
     assert set(result.accepted) == {b.key for b in bids}

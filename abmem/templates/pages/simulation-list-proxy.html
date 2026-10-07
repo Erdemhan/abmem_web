@@ -1,4 +1,4 @@
-{% load static %}
+{% load static abmem_choices %}
 <!DOCTYPE html>
 <html lang="en">
 
@@ -109,6 +109,7 @@
                         <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">Created</th>
                         <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Last Update</th>
                         <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Seed</th>
+                        <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Clearing</th>
                         <th></th>
                       </tr>
                     </thead>
@@ -139,6 +140,12 @@
                         <td>
                           <div class="d-flex px-2 py-1">
                             <h6 class="mb-0 text-sm">{{ simulation.seed }}</h6>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="d-flex px-2 py-1">
+                            <h6 class="mb-0 text-sm simulation-clearing-label">{{ simulation.market.clearing_algorithm|clearing_algorithm_label }}</h6>
+                            {% if simulation.market and not simulation.market.clearing_algorithm|is_known_clearing_algorithm %}<span class="badge bg-gradient-warning ms-2">unavailable</span>{% endif %}
                           </div>
                         </td>                 
                         <td>
@@ -491,7 +498,7 @@
           ? 'generated (seed ' + s.demand.seed + ', day ' + s.demand.day.distribution + ', night ' +
             s.demand.night.distribution + ')'
           : 'file (marketData.xlsx)')));
-        planBox.appendChild(el('div', '', 'Market: ' + s.strategy + ', bids ' + s.bid_bounds[0] + ' to ' +
+        planBox.appendChild(el('div', '', 'Market: ' + s.strategy + ', clearing ' + s.clearing_algorithm + ', bids ' + s.bid_bounds[0] + ' to ' +
           s.bid_bounds[1] + ' USD/MWh'));
         planBox.appendChild(el('div', '', 'Scenario agents: ' + (s.agents.length ? s.agents.join(', ') : 'none')));
         planBox.appendChild(listLine('Resources reused', plan.resources.reuse));

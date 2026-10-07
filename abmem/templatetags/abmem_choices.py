@@ -1,9 +1,11 @@
 """Template tags for the per-agent algorithm and fail-stack inputs (PLAN 2.1).
 
 The templates render the algorithm select and the fail-stack inputs from
-these tags, so which types are baselines and which defaults the inputs show
-are defined once (``registry.BASELINE_TYPES`` and the ``Agent`` field
-defaults) and never duplicated in JavaScript.
+these tags, so which algorithms exist, which are baselines and which defaults
+the inputs show are defined once (the classes discovered by
+``services/algorithms/registry.py`` and the ``Agent`` field defaults, PLAN
+2.10) and never duplicated in JavaScript. The clearing algorithm tags do the
+same for ``services/market/clearing_algorithms/registry.py``.
 """
 
 from __future__ import annotations
@@ -15,8 +17,8 @@ from django.utils.html import format_html, format_html_join
 from django.utils.safestring import SafeString, mark_safe
 
 from abmem.models import Agent
-from abmem.models.enums import AlgorithmType
-from abmem.services.algorithms.registry import BASELINE_TYPES
+from abmem.services.algorithms import registry as algorithm_registry
+from abmem.services.market.clearing_algorithms import registry as clearing_registry
 
 register = template.Library()
 
@@ -64,7 +66,15 @@ _ALGORITHM_FIELDS_SCRIPT = """<script>
     // Set stored values (edit of an existing agent), then apply the baseline rule.
     function setAlgorithmFields($container, values) {
         var $fields = $container.find('.algorithm-fields').addBack('.algorithm-fields').first();
-        $fields.find('.agent-algorithm').val(String(values.algorithm_type));
+        var $select = $fields.find('.agent-algorithm');
+        var key = String(values.algorithm_type);
+        $select.find('option[data-unavailable="1"]').remove();
+        if (!$select.find('option').filter(function () { return this.value === key; }).length) {
+            // Stored key without a registered class: keep it visible so the user picks a valid one.
+            $('<option data-baseline="0" data-unavailable="1"></option>')
+                .val(key).text(key + ' (unavailable)').prependTo($select);
+        }
+        $select.val(key);
         $fields.find('.agent-failstack-enabled').prop('checked', Boolean(values.failstack_enabled));
         $fields.find('.failstack-limit').val(values.failstack_limit);
         $fields.find('.failstack-delta').val(values.failstack_delta);
@@ -92,33 +102,61 @@ _ALGORITHM_FIELDS_SCRIPT = """<script>
 </script>"""
 
 
-def _enum_value(value: Any) -> Any:
-    """Return the integer value of an enum member, or ``value`` unchanged."""
-    return getattr(value, "value", value)
-
-
 @register.simple_tag
-def algorithm_choices() -> list[tuple[int, str, bool]]:
-    """Return ``(value, label, is_baseline)`` for every ``AlgorithmType``.
+def algorithm_choices() -> list[tuple[str, str, bool]]:
+    """Return ``(key, label, is_baseline)`` for every registered agent algorithm.
 
     Returns:
-        One tuple per member in enum order. ``is_baseline`` is True for the
-        members of ``registry.BASELINE_TYPES``.
+        One tuple per algorithm in the order of
+        ``registry.available_algorithms`` (learning algorithms first).
     """
     return [
-        (member.value, member.name, member in BASELINE_TYPES)
-        for member in AlgorithmType
+        (info.key, info.label, info.is_baseline)
+        for info in algorithm_registry.available_algorithms()
     ]
 
 
 @register.simple_tag
-def default_algorithm() -> int:
-    """Return the value of the ``Agent.algorithm_type`` field default.
+def default_algorithm() -> str:
+    """Return the key of the ``Agent.algorithm_type`` field default (DDPG)."""
+    return str(Agent._meta.get_field("algorithm_type").get_default())
+
+
+@register.filter
+def algorithm_label(value: Any) -> str:
+    """Return the display label of an algorithm key, the key when unknown."""
+    return algorithm_registry.label_for(value)
+
+
+@register.filter
+def is_known_algorithm(value: Any) -> bool:
+    """Return True when ``value`` is the key of a registered agent algorithm."""
+    return algorithm_registry.is_known(value)
+
+
+@register.simple_tag
+def clearing_algorithm_choices() -> list[tuple[str, str, str]]:
+    """Return ``(key, label, description)`` for every registered clearing algorithm.
 
     Returns:
-        The integer value of the default algorithm (DDPG).
+        One tuple per algorithm, the default (MERIT_ORDER) first.
     """
-    return int(_enum_value(Agent._meta.get_field("algorithm_type").get_default()))
+    return [
+        (info.key, info.label, info.description)
+        for info in clearing_registry.available_clearing_algorithms()
+    ]
+
+
+@register.filter
+def clearing_algorithm_label(value: Any) -> str:
+    """Return the display label of a clearing algorithm key, the key when unknown."""
+    return clearing_registry.clearing_label_for(value)
+
+
+@register.filter
+def is_known_clearing_algorithm(value: Any) -> bool:
+    """Return True when ``value`` is the key of a registered clearing algorithm."""
+    return clearing_registry.is_known_clearing(value)
 
 
 @register.simple_tag
@@ -139,15 +177,16 @@ def failstack_defaults() -> dict[str, Any]:
 
 @register.filter
 def is_baseline_algorithm(value: Any) -> bool:
-    """Return True when ``value`` names a baseline algorithm type.
+    """Return True when ``value`` is the key of a registered non-learning algorithm.
 
     Args:
-        value: An ``AlgorithmType`` member or its integer value.
+        value: Algorithm key.
 
     Returns:
-        True for RANDOM, MARGINAL_COST and FIXED_MARKUP, else False.
+        True for RANDOM, MARGINAL_COST and FIXED_MARKUP (and any other
+        registered baseline), else False.
     """
-    return AlgorithmType.get(_enum_value(value)) in BASELINE_TYPES
+    return algorithm_registry.is_baseline(value)
 
 
 @register.filter
@@ -191,7 +230,7 @@ def algorithm_fields(
         enabled = False
         values = defaults
     else:
-        selected = _enum_value(agent.algorithm_type)
+        selected = str(agent.algorithm_type)
         enabled = failstack_active(agent)
         values = {name: getattr(agent, name) for name in FAILSTACK_FIELDS}
 
@@ -200,20 +239,35 @@ def algorithm_fields(
             return mark_safe("")
         return format_html(' name="{}" id="{}"', name, name)
 
-    options = format_html_join(
-        "",
-        '<option value="{}" data-baseline="{}"{}>{}</option>',
-        (
+    choices = algorithm_choices()
+    unavailable: SafeString = mark_safe("")
+    if not any(key == selected for key, _, _ in choices):
+        # A stored key whose class is no longer registered stays visible, so
+        # the user sees it and has to pick a valid algorithm before saving.
+        unavailable = format_html(
+            '<option value="{}" data-baseline="0" data-unavailable="1" selected>'
+            "{} (unavailable)</option>",
+            selected,
+            selected,
+        )
+    options = format_html(
+        "{}{}",
+        unavailable,
+        format_html_join(
+            "",
+            '<option value="{}" data-baseline="{}"{}>{}</option>',
             (
-                value,
-                "1" if is_baseline else "0",
-                mark_safe(" selected") if value == selected else "",
-                label,
-            )
-            for value, label, is_baseline in algorithm_choices()
+                (
+                    key,
+                    "1" if is_baseline else "0",
+                    mark_safe(" selected") if key == selected else "",
+                    label,
+                )
+                for key, label, is_baseline in choices
+            ),
         ),
     )
-    is_baseline = AlgorithmType.get(selected) in BASELINE_TYPES
+    is_baseline = algorithm_registry.is_baseline(selected)
     return format_html(
         '<div class="algorithm-fields">'
         '<select class="form-control agent-algorithm"{} data-default="{}">{}</select>'

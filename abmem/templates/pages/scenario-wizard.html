@@ -262,6 +262,23 @@
                             <div class="invalid-feedback" id="strategy-feedback"></div>
                         </fieldset>
 
+                        <div class="mb-3">
+                            <label for="clearing_algorithm" class="form-label text-sm mb-1">Clearing algorithm
+                                <button type="button" class="btn btn-link p-0 ms-1 mb-0 info-tip" data-bs-toggle="tooltip"
+                                    title="How the accepted quantities and the market clearing price (PTF) of a period are computed from the offers. The pricing strategy above decides what accepted offers are paid."
+                                    aria-label="Help: clearing algorithm"><i class="fas fa-circle-info" aria-hidden="true"></i></button>
+                            </label>
+                            {% clearing_algorithm_choices as clearing_choices %}
+                            {% with selected_clearing=wizard_config.initial.clearing_algorithm %}
+                            <select class="form-control" id="clearing_algorithm" aria-describedby="clearing_algorithm-help clearing_algorithm-feedback">
+                                {% if not selected_clearing|is_known_clearing_algorithm %}<option value="{{ selected_clearing }}" data-unavailable="1" data-description="This clearing algorithm is no longer in the code. Choose another one." selected>{{ selected_clearing }} (unavailable)</option>{% endif %}
+                                {% for key, label, description in clearing_choices %}<option value="{{ key }}" data-description="{{ description }}"{% if key == selected_clearing %} selected{% endif %}>{{ label }}</option>{% endfor %}
+                            </select>
+                            {% endwith %}
+                            <div class="form-text text-xs" id="clearing_algorithm-help"></div>
+                            <div class="invalid-feedback" id="clearing_algorithm-feedback"></div>
+                        </div>
+
                         <fieldset class="mb-3">
                             <legend class="form-label text-sm mb-1">Bid bounds
                                 <button type="button" class="btn btn-link p-0 ms-1 mb-0 info-tip" data-bs-toggle="tooltip"
@@ -447,11 +464,11 @@
             var FIELD_STEP = {
                 simulation_name: 0, periodNumber: 0, periodType: 0, simulationMode: 0,
                 seed: 0, evaluation_periods: 0, observation_lags: 0,
-                strategy: 1, lowerBound: 1, upperBound: 1
+                strategy: 1, clearing_algorithm: 1, lowerBound: 1, upperBound: 1
             };
             var STEP_FIELDS = [
                 ['simulation_name', 'periodNumber', 'simulationMode', 'seed', 'evaluation_periods', 'observation_lags'],
-                ['strategy', 'lowerBound', 'upperBound'],
+                ['strategy', 'clearing_algorithm', 'lowerBound', 'upperBound'],
                 ['agents'],
                 []
             ];
@@ -540,6 +557,7 @@
                     periodType: byId('periodType').value,
                     periodNumber: byId('periodNumber').value.trim(),
                     strategy: radioValue('strategy'),
+                    clearing_algorithm: byId('clearing_algorithm').value,
                     lowerBound: byId('lowerBound').value.trim(),
                     upperBound: byId('upperBound').value.trim(),
                     seed: byId('seed').value.trim(),
@@ -556,6 +574,7 @@
                 byId('periodType').value = values.periodType;
                 byId('periodNumber').value = values.periodNumber;
                 setRadio('strategy', values.strategy);
+                setClearingAlgorithm(values.clearing_algorithm);
                 byId('lowerBound').value = values.lowerBound;
                 byId('upperBound').value = values.upperBound;
                 byId('seed').value = values.seed;
@@ -637,7 +656,32 @@
 
             function algorithmName(algorithmType) {
                 var algorithm = CONFIG.algorithms[String(algorithmType)];
-                return algorithm ? algorithm.name : 'Unknown';
+                return algorithm ? algorithm.name : String(algorithmType) + ' (unavailable)';
+            }
+
+            // Clearing algorithm select (PLAN 2.10). A stored key without a registered class
+            // is shown as unavailable and must be replaced before saving.
+            function selectedClearingOption() {
+                var select = byId('clearing_algorithm');
+                return select.options[select.selectedIndex] || null;
+            }
+
+            function updateClearingHelp() {
+                var option = selectedClearingOption();
+                byId('clearing_algorithm-help').textContent = option ? (option.getAttribute('data-description') || '') : '';
+            }
+
+            function setClearingAlgorithm(key) {
+                var select = byId('clearing_algorithm');
+                if (key && Array.prototype.some.call(select.options, function (o) { return o.value === String(key); })) {
+                    select.value = String(key);
+                }
+                updateClearingHelp();
+            }
+
+            function clearingAlgorithmLabel(key) {
+                var match = (CONFIG.clearing_algorithms || []).filter(function (c) { return c.key === key; })[0];
+                return match ? match.label : String(key) + ' (unavailable)';
             }
 
             function failstackText(row) {
@@ -1115,6 +1159,10 @@
                     if (Object.keys(demandErrors).length > 0) { errors.demand_profile = demandErrors; }
                 } else if (step === 1) {
                     if (values.strategy === '') { errors.strategy = 'Choose a pricing strategy.'; }
+                    var clearingOption = selectedClearingOption();
+                    if (!clearingOption || clearingOption.getAttribute('data-unavailable') === '1') {
+                        errors.clearing_algorithm = 'Choose an available clearing algorithm.';
+                    }
                     if (!isInt(values.lowerBound)) { errors.lowerBound = 'Enter the lower bid bound as a whole number (USD/MWh).'; }
                     if (!isInt(values.upperBound)) {
                         errors.upperBound = 'Enter the upper bid bound as a whole number (USD/MWh).';
@@ -1290,6 +1338,7 @@
                 var market = byId('review-market');
                 market.textContent = '';
                 addReviewItem(market, 'Pricing strategy', STRATEGY_LABELS[values.strategy] || '-');
+                addReviewItem(market, 'Clearing algorithm', clearingAlgorithmLabel(values.clearing_algorithm));
                 addReviewItem(market, 'Bid bounds', values.lowerBound + ' to ' + values.upperBound + ' USD/MWh');
 
                 var body = byId('review-agents');
@@ -1630,6 +1679,11 @@
                 syncDurationPreset();
                 scheduleDemand();
             });
+            byId('clearing_algorithm').addEventListener('change', function () {
+                updateClearingHelp();
+                setFieldError('clearing_algorithm', '');
+            });
+            updateClearingHelp();
             byId('seed-random').addEventListener('click', function () {
                 var buffer = new Uint32Array(1);
                 window.crypto.getRandomValues(buffer);

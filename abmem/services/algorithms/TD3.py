@@ -31,7 +31,6 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 
-from abmem.models.enums import AlgorithmType
 
 from .algorithm_config import TD3Config
 from .base import ActionResult, BaseAgentAlgorithm, PolicySpec, UpdateStats
@@ -55,7 +54,11 @@ class TD3Algorithm(BaseAgentAlgorithm):
         actor_updates: Number of actor gradient steps taken so far.
     """
 
-    algorithm_type = AlgorithmType.TD3
+    key = "TD3"
+    label = "TD3"
+    description = (
+        "Twin delayed DDPG with clipped double Q-learning (Fujimoto et al., 2018)."
+    )
     is_learning = True
     is_on_policy = False
     config_class = TD3Config

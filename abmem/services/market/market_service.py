@@ -1,7 +1,8 @@
 """Market period of a run (ARCHITECTURE.md 6.2).
 
 ``run_period`` collects one offer per plant from every agent in ``Agent.id``
-order, clears the market with the pure merit-order clearing, books profits in
+order, clears the market with the clearing algorithm of the market (PLAN 2.10),
+checks the result against the clearing contract, books profits in
 ``Decimal`` and writes everything with a constant number of statements inside
 one transaction (A10, PLAN 1.12): one period insert, one offer
 ``bulk_create``, one agent ``bulk_update``, one step-log ``bulk_create`` and
@@ -24,7 +25,11 @@ from abmem.models.enums import MarketState, MarketStrategy
 from abmem.models.models import Offer, Period
 from abmem.services.agent import agent_service
 from abmem.services.market.accounting import offer_profit, outcome_from_offer
-from abmem.services.market.clearing import Bid, acceptance_prices, clear_market
+from abmem.services.market.clearing import (
+    Bid,
+    acceptance_prices,
+    validate_clearing_result,
+)
 
 if TYPE_CHECKING:
     from abmem.services.simulation.context import SimulationContext
@@ -56,6 +61,8 @@ def run_period(ctx: SimulationContext, t: int) -> Period:
 
     Raises:
         RuntimeError: If the clearing yields no PTF (no positive bid).
+        ClearingContractError: If the clearing algorithm returns a result that
+            breaks the contract of ``validate_clearing_result``.
         ValueError: If a component rejects its input. The transaction of the
             period is rolled back.
     """
@@ -84,7 +91,15 @@ def run_period(ctx: SimulationContext, t: int) -> Period:
                 )
                 for i, offer in enumerate(offers)
             ]
-            result = clear_market(bids, demand, quantum=QUANTITY_QUANTUM)
+            result = validate_clearing_result(
+                ctx.clearing.clear(bids, demand, QUANTITY_QUANTUM),
+                bids,
+                demand,
+                QUANTITY_QUANTUM,
+                ctx.price_low,
+                ctx.price_high,
+                algorithm=ctx.clearing.key,
+            )
             if result.ptf is None:
                 raise RuntimeError(f"period {t}: clearing produced no PTF")
             prices = acceptance_prices(

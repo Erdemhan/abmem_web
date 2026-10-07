@@ -62,6 +62,9 @@ class AgentType(enum.Enum):
     HYBRID = 3
 
 
+# Legacy: kept only because historical migrations (0006, 0011, 0012, 0014)
+# import it. Live code must not use it. Algorithm keys are strings now, see
+# abmem/services/algorithms/registry.py (PLAN 2.10, migration 0017).
 class AlgorithmType(enum.Enum):
     DDPG = 0
     RDPG = 1

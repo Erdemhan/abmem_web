@@ -129,7 +129,8 @@
                                                 </td>
                                                 <td>
                                                     <div class="d-flex px-2 py-1">
-                                                        <h6 class="mb-0 text-sm agent-algorithm-label">{{ agent.algorithm_type.name }}</h6>
+                                                        <h6 class="mb-0 text-sm agent-algorithm-label">{{ agent.algorithm_type|algorithm_label }}</h6>
+                                                        {% if not agent.algorithm_type|is_known_algorithm %}<span class="badge bg-gradient-warning ms-2 agent-algorithm-unavailable" title="This algorithm is no longer in the code. Choose another algorithm before saving.">unavailable</span>{% endif %}
                                                     </div>
                                                 </td>
                                                 <td>
@@ -318,7 +319,7 @@
             $("#budget").val('{{ agent.budget }}');
             $("#type").val('{{ agent.type.value }}').change();
             setAlgorithmFields($("#agent-form"), {
-                algorithm_type: '{{ agent.algorithm_type.value }}',
+                algorithm_type: '{{ agent.algorithm_type|escapejs }}',
                 failstack_enabled: {% if agent.failstack_enabled %}true{% else %}false{% endif %},
                 failstack_limit: '{{ agent.failstack_limit }}',
                 failstack_delta: '{{ agent.failstack_delta }}',

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from abmem.models import AgentStepLog
-from abmem.models.enums import AlgorithmType, SimulationState
+from abmem.models.enums import SimulationState
 from abmem.models.models import Offer
 from abmem.services.simulation import simulation_service
 from tests.runtime.conftest import SMALL_DDPG, make_run, resources
@@ -19,22 +19,22 @@ def test_back_to_back_runs_keep_offers_in_their_market(fast_demand) -> None:
         [
             {
                 "plants": [(r[0], 300)],
-                "algorithm": AlgorithmType.DDPG,
+                "algorithm": "DDPG",
                 "params": SMALL_DDPG,
             },
-            {"plants": [(r[1], 300), (r[2], 200)], "algorithm": AlgorithmType.RANDOM},
+            {"plants": [(r[1], 300), (r[2], 200)], "algorithm": "RANDOM"},
         ],
         period_number=30,
     )
     second = make_run(
         [
-            {"plants": [(r[3], 500)], "algorithm": AlgorithmType.MARGINAL_COST},
+            {"plants": [(r[3], 500)], "algorithm": "MARGINAL_COST"},
             {
                 "plants": [(r[4], 100)],
-                "algorithm": AlgorithmType.SAC,
+                "algorithm": "SAC",
                 "params": SMALL_DDPG,
             },
-            {"plants": [(r[0], 250)], "algorithm": AlgorithmType.RANDOM},
+            {"plants": [(r[0], 250)], "algorithm": "RANDOM"},
         ],
         period_number=20,
     )

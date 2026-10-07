@@ -26,7 +26,6 @@ import torch
 from torch import Tensor, nn
 from torch.nn import functional as F
 
-from abmem.models.enums import AlgorithmType
 
 from .algorithm_config import PPOConfig
 from .base import ActionResult, BaseAgentAlgorithm, PolicySpec, Transition, UpdateStats
@@ -125,7 +124,11 @@ class PPOAlgorithm(BaseAgentAlgorithm):
         value_opt: Adam optimiser of the value network (``lr_critic``).
     """
 
-    algorithm_type = AlgorithmType.PPO
+    key = "PPO"
+    label = "PPO"
+    description = (
+        "Proximal policy optimization with GAE, on-policy (Schulman et al., 2017)."
+    )
     is_learning = True
     is_on_policy = True
     config_class = PPOConfig

@@ -10,7 +10,7 @@ from django.db import connection
 from django.test.utils import CaptureQueriesContext
 
 from abmem.models import AgentStepLog
-from abmem.models.enums import AlgorithmType, MarketState, MarketStrategy
+from abmem.models.enums import MarketState, MarketStrategy
 from abmem.models.models import Offer, Period
 from abmem.services.agent.action_space import to_price
 from abmem.services.algorithms.base import ActionResult
@@ -175,11 +175,9 @@ def test_policy_error_rolls_back_the_period() -> None:
 
 def test_policy_type_is_from_agent_algorithm_type() -> None:
     r = resources(1)
-    simulation = make_run(
-        [{"plants": [(r[0], 100)], "algorithm": AlgorithmType.MARGINAL_COST}]
-    )
+    simulation = make_run([{"plants": [(r[0], 100)], "algorithm": "MARGINAL_COST"}])
     ctx = SimulationContext.build(
         simulation, demand=constant_demand(), export_json=False
     )
-    assert ctx.agents[0].policy.algorithm_type == AlgorithmType.MARGINAL_COST
+    assert ctx.agents[0].policy.key == "MARGINAL_COST"
     assert ctx.agents[0].agent.runtime_policy is ctx.agents[0].policy

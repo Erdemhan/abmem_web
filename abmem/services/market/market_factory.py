@@ -4,7 +4,13 @@
 from ...models.market import Market
 from ...models.enums import MarketStrategy, MarketState
 
-def create(sim, strategy: MarketStrategy, lowerBound: int, upperBound: int) -> Market:
+def create(
+    sim,
+    strategy: MarketStrategy,
+    lowerBound: int,
+    upperBound: int,
+    clearing_algorithm: str = "MERIT_ORDER",
+) -> Market:
     # Retrieve the proxy from the simulation object
     proxy = sim.proxy
     
@@ -14,6 +20,7 @@ def create(sim, strategy: MarketStrategy, lowerBound: int, upperBound: int) -> M
         state= MarketState.CREATED, 
         lowerBidBound= lowerBound, 
         upperBidBound= upperBound, 
+        clearing_algorithm=clearing_algorithm,
         simulation= sim,
         proxy = proxy
     )

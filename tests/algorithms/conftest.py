@@ -12,7 +12,6 @@ import pytest
 import torch
 from torch import nn
 
-from abmem.models.enums import AlgorithmType
 from abmem.services.algorithms.algorithm_config import DDPGConfig, RandomConfig
 from abmem.services.algorithms.base import (
     ActionResult,
@@ -38,7 +37,6 @@ def make_spec(action_dim: int = 1, obs_dim: int = 3) -> PolicySpec:
 class TinyActorCriticPolicy(BaseAgentAlgorithm):
     """Minimal off-policy learner used to test the template and the contract."""
 
-    algorithm_type = AlgorithmType.DDPG
     is_learning = True
     is_on_policy = False
     config_class = DDPGConfig
@@ -95,7 +93,6 @@ class TinyActorCriticPolicy(BaseAgentAlgorithm):
 class ConstantBaseline(BaseAgentAlgorithm):
     """Non-learning policy that always bids the middle of the action range."""
 
-    algorithm_type = AlgorithmType.RANDOM
     is_learning = False
     is_on_policy = False
     config_class = RandomConfig

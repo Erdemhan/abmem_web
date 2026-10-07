@@ -19,7 +19,7 @@ import pytest
 import torch
 
 from abmem.models import AgentStepLog, Simulation
-from abmem.models.enums import AlgorithmType, MarketStrategy, SimulationState
+from abmem.models.enums import MarketStrategy, SimulationState
 from abmem.models.models import Offer, Period, Resource
 from abmem.services.simulation import simulation_service
 from abmem.services.simulation.context import SimulationContext
@@ -39,18 +39,27 @@ STEP_LOG_FLOATS: Final[tuple[str, ...]] = (
     "exploration_scale",
 )
 
-ALL_TYPES: Final[tuple[AlgorithmType, ...]] = tuple(AlgorithmType)
-LEARNING_TYPES: Final[tuple[AlgorithmType, ...]] = (
-    AlgorithmType.DDPG,
-    AlgorithmType.TD3,
-    AlgorithmType.SAC,
-    AlgorithmType.PPO,
-    AlgorithmType.RDPG,
+ALL_TYPES: Final[tuple[str, ...]] = (
+    "DDPG",
+    "RDPG",
+    "TD3",
+    "SAC",
+    "PPO",
+    "RANDOM",
+    "MARGINAL_COST",
+    "FIXED_MARKUP",
 )
-BASELINE_TYPES: Final[tuple[AlgorithmType, ...]] = (
-    AlgorithmType.RANDOM,
-    AlgorithmType.MARGINAL_COST,
-    AlgorithmType.FIXED_MARKUP,
+LEARNING_TYPES: Final[tuple[str, ...]] = (
+    "DDPG",
+    "TD3",
+    "SAC",
+    "PPO",
+    "RDPG",
+)
+BASELINE_TYPES: Final[tuple[str, ...]] = (
+    "RANDOM",
+    "MARGINAL_COST",
+    "FIXED_MARKUP",
 )
 
 _SMALL_COMMON: Final[dict[str, Any]] = {
@@ -63,17 +72,17 @@ _SMALL_COMMON: Final[dict[str, Any]] = {
 # TEST-ONLY overrides (OQ-7). PPO needs rollout_length >= learning_starts and
 # minibatch_size <= rollout_length, RDPG gets a small LSTM. Network sizes are
 # reduced only to keep the smoke matrix fast on CPU.
-LEARNING_OVERRIDES: Final[Mapping[AlgorithmType, dict[str, Any]]] = {
-    AlgorithmType.DDPG: dict(_SMALL_COMMON),
-    AlgorithmType.TD3: dict(_SMALL_COMMON),
-    AlgorithmType.SAC: dict(_SMALL_COMMON),
-    AlgorithmType.PPO: {
+LEARNING_OVERRIDES: Final[Mapping[str, dict[str, Any]]] = {
+    "DDPG": dict(_SMALL_COMMON),
+    "TD3": dict(_SMALL_COMMON),
+    "SAC": dict(_SMALL_COMMON),
+    "PPO": {
         **_SMALL_COMMON,
         "rollout_length": 8,
         "minibatch_size": 8,
         "epochs": 2,
     },
-    AlgorithmType.RDPG: {**_SMALL_COMMON, "lstm_hidden": 16},
+    "RDPG": {**_SMALL_COMMON, "lstm_hidden": 16},
 }
 
 
@@ -167,7 +176,7 @@ def _install_spies(ctx: SimulationContext, traces: dict[int, PolicyTrace]) -> No
 
 
 def smoke_agents(
-    algorithm: AlgorithmType,
+    algorithm: str,
     plant_resources: Sequence[Resource],
     *,
     params: Mapping[str, Any] | None = None,

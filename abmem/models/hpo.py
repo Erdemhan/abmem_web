@@ -5,7 +5,7 @@ from django.db.models import CheckConstraint, Q
 from django_enumfield import enum
 
 from .base import Base
-from .enums import AlgorithmType, HPOPhase, HPOStatus, HPOTrialStatus
+from .enums import HPOPhase, HPOStatus, HPOTrialStatus
 from .simulation import Simulation
 
 
@@ -18,7 +18,8 @@ class HPOStudy(Base):
     """
 
     name = models.CharField(max_length=100)
-    algorithm_type = enum.EnumField(AlgorithmType)
+    # Key of a registered agent algorithm (services/algorithms/registry.py).
+    algorithm_type = models.CharField(max_length=64)
     scenario = models.ForeignKey(
         Simulation,
         on_delete=models.PROTECT,
@@ -84,13 +85,13 @@ class HPOTrial(Base):
 
 
 class AlgorithmDefault(models.Model):
-    """Default hyperparameters of one algorithm type (OQ-9).
+    """Default hyperparameters of one algorithm key (OQ-9).
 
     Effective parameters are these defaults, overridden by
     ``Agent.algorithm_params``, overridden by HPO overrides.
     """
 
-    algorithm_type = enum.EnumField(AlgorithmType, unique=True)
+    algorithm_type = models.CharField(max_length=64, unique=True)
     params = models.JSONField(default=dict)
     updated_at = models.DateTimeField(auto_now=True)
 

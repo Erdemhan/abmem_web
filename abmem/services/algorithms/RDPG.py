@@ -31,7 +31,6 @@ import numpy as np
 import torch
 from torch import Tensor, nn
 
-from abmem.models.enums import AlgorithmType
 
 from .algorithm_config import RDPGConfig
 from .base import ActionResult, BaseAgentAlgorithm, PolicySpec, UpdateStats
@@ -126,7 +125,9 @@ class RDPGAlgorithm(BaseAgentAlgorithm):
         critic_optimizer: Adam optimiser of the critic.
     """
 
-    algorithm_type = AlgorithmType.RDPG
+    key = "RDPG"
+    label = "RDPG"
+    description = "Recurrent deterministic policy gradient over observation sequences (Heess et al., 2015)."
     is_learning = True
     is_on_policy = False
     config_class = RDPGConfig

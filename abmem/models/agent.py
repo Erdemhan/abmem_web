@@ -11,7 +11,7 @@ from django.db.models.functions import Lower
 from django_enumfield import enum
 
 from .base import Base
-from .enums import AgentState, AgentType, AlgorithmType
+from .enums import AgentState, AgentType
 from .market import Market
 
 if TYPE_CHECKING:
@@ -35,7 +35,8 @@ class Agent(Base):
     state = enum.EnumField(AgentState, null=True, default=AgentState.CREATED)
     budget = models.DecimalField(decimal_places=2, max_digits=20, null=False, default=0)
     type = enum.EnumField(AgentType, null=True, default=AgentType.FOSSIL)
-    algorithm_type = enum.EnumField(AlgorithmType, default=AlgorithmType.DDPG)
+    # Key of a registered agent algorithm (services/algorithms/registry.py).
+    algorithm_type = models.CharField(max_length=64, default="DDPG")
     algorithm_params = models.JSONField(default=dict, blank=True)
     failstack_enabled = models.BooleanField(default=False)
     failstack_limit = models.PositiveIntegerField(default=6)
@@ -84,7 +85,7 @@ class Agent(Base):
 
     @property
     def is_baseline(self) -> bool:
-        """Return True when ``algorithm_type`` is a non-learning baseline."""
+        """Return True when ``algorithm_type`` is a registered non-learning algorithm."""
         from abmem.services.algorithms import registry
 
-        return self.algorithm_type in registry.BASELINE_TYPES
+        return registry.is_baseline(self.algorithm_type)

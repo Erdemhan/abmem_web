@@ -20,7 +20,6 @@ from abmem import scenario_yaml
 from abmem.models import Agent, Simulation
 from abmem.models.enums import (
     AgentType,
-    AlgorithmType,
     EnergyType,
     MarketStrategy,
     SimulationMode,
@@ -30,6 +29,7 @@ from abmem.models.models import Plant, Portfolio, Resource
 from abmem.services.agent import library_service
 from abmem.services.agent.library_service import AgentInput, PlantInput
 from tests.factories import make_market, make_resource
+from tests.plugin_helpers import temporary_clearing_algorithm
 
 pytestmark = pytest.mark.django_db
 
@@ -44,7 +44,7 @@ def _library(
 ) -> Agent:
     values: dict[str, Any] = {
         "budget": Decimal("1500.50"),
-        "algorithm_type": AlgorithmType.TD3,
+        "algorithm_type": "TD3",
         "failstack_enabled": True,
         "failstack_limit": 4,
         "failstack_delta": Decimal("12.50"),
@@ -82,7 +82,7 @@ def scenario() -> Simulation:
         "Green",
         AgentType.RENEWABLE,
         [(wind, 200)],
-        algorithm_type=AlgorithmType.MARGINAL_COST,
+        algorithm_type="MARGINAL_COST",
         failstack_enabled=False,
         algorithm_params={},
         budget=Decimal("0"),
@@ -201,7 +201,11 @@ def test_export_file_content_and_name(client: Client, scenario: Simulation) -> N
         "evaluation_periods": 24,
         "observation_lags": [1, 24, 168],
     }
-    assert document["market"] == {"strategy": "PAYASBID", "bid_bounds": [0, 250]}
+    assert document["market"] == {
+        "strategy": "PAYASBID",
+        "clearing_algorithm": "MERIT_ORDER",
+        "bid_bounds": [0, 250],
+    }
     assert [r["name"] for r in document["resources"]] == ["Gas", "Wind"]
     gas = document["resources"][0]
     assert gas == {
@@ -572,3 +576,57 @@ def test_inline_scripts_pass_node_check(
                 [NODE, "--check", str(path)], capture_output=True, text=True, check=False
             )
             assert result.returncode == 0, f"{name} script {index}: {result.stderr}"
+
+
+# clearing algorithm and algorithm keys (PLAN 2.10) ---------------------------
+
+
+def test_import_without_clearing_algorithm_uses_merit_order(
+    client: Client, scenario: Simulation
+) -> None:
+    document = _base_document(client, scenario)
+    assert document["market"]["clearing_algorithm"] == "MERIT_ORDER"
+    del document["market"]["clearing_algorithm"]
+    response = _confirm(client, _dump(document))
+    assert response.status_code == 200, response.content
+    imported = Simulation.objects.get(id=response.json()["simulation_id"])
+    assert imported.market.clearing_algorithm == "MERIT_ORDER"
+
+
+def test_clearing_algorithm_round_trip(client: Client, scenario: Simulation) -> None:
+    with temporary_clearing_algorithm("TEST_CLEARING"):
+        scenario.market.clearing_algorithm = "TEST_CLEARING"
+        scenario.market.save()
+        text = _export(client, scenario)
+        assert "clearing_algorithm: TEST_CLEARING" in text
+        preview = _preview(client, text)
+        assert preview.status_code == 200, preview.content
+        assert preview.json()["scenario"]["clearing_algorithm"] == "TEST_CLEARING"
+        document = _document(text)
+        document["market"]["clearing_algorithm"] = "test_clearing"
+        response = _confirm(client, _dump(document))
+        assert response.status_code == 200, response.content
+    imported = Simulation.objects.get(id=response.json()["simulation_id"])
+    assert imported.market.clearing_algorithm == "TEST_CLEARING"
+    assert scenario_yaml.scenario_document(imported)["market"]["clearing_algorithm"] == (
+        "TEST_CLEARING"
+    )
+
+
+def test_unknown_clearing_algorithm_is_rejected(client: Client, scenario: Simulation) -> None:
+    document = _base_document(client, scenario)
+    document["market"]["clearing_algorithm"] = "PAY_AS_CLEAR"
+    _assert_rejected(client, _dump(document), "market.clearing_algorithm", "must be one of MERIT_ORDER")
+
+
+def test_agent_algorithm_keys_import_unchanged(client: Client, scenario: Simulation) -> None:
+    document = _base_document(client, scenario)
+    assert [agent["algorithm"] for agent in document["agents"]] == ["TD3", "MARGINAL_COST"]
+    document["agents"][0]["algorithm"] = "ddpg"
+    document["agents"][0]["algorithm_params"] = {}
+    document["agents"][0]["library_agent"] = "Thermal DDPG"
+    response = _confirm(client, _dump(document))
+    assert response.status_code == 200, response.content
+    imported = Simulation.objects.get(id=response.json()["simulation_id"])
+    keys = sorted(imported.market.agent_set.values_list("algorithm_type", flat=True))
+    assert keys == ["DDPG", "MARGINAL_COST"]

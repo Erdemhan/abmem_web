@@ -15,7 +15,7 @@ from decimal import Decimal
 
 import pytest
 
-from abmem.models.enums import AlgorithmType, MarketStrategy
+from abmem.models.enums import MarketStrategy
 from abmem.models.models import Offer
 from abmem.services.agent.action_space import PRICE_QUANTUM
 from abmem.services.agent.failstack import is_failure
@@ -47,7 +47,7 @@ EVALUATION_PERIODS = 10
 STRATEGIES = (MarketStrategy.PAYASBID, MarketStrategy.PAYASPTF)
 
 
-def _expected_update_periods(algorithm: AlgorithmType, last_train: int) -> list[int]:
+def _expected_update_periods(algorithm: str, last_train: int) -> list[int]:
     """Return the periods in which the learning-path run takes gradient steps.
 
     One transition is stored per period from ``FIRST_TRANSITION`` on.
@@ -63,12 +63,14 @@ def _expected_update_periods(algorithm: AlgorithmType, last_train: int) -> list[
     Returns:
         Ascending period numbers.
     """
-    config = registry.config_class(algorithm).from_dict(LEARNING_OVERRIDES[algorithm])
-    if algorithm is AlgorithmType.PPO:
+    config = registry.get_config_class(algorithm).from_dict(
+        LEARNING_OVERRIDES[algorithm]
+    )
+    if algorithm == "PPO":
         length = int(config.rollout_length)
         return list(range(FIRST_TRANSITION + length - 1, last_train + 1, length))
     needed = int(config.learning_starts)
-    if algorithm is AlgorithmType.RDPG:
+    if algorithm == "RDPG":
         needed = max(needed, int(config.seq_len))
     return list(range(FIRST_TRANSITION + needed - 1, last_train + 1))
 
@@ -100,10 +102,8 @@ def _assert_integer_price_share(run: SmokeRun) -> None:
 
 
 @pytest.mark.parametrize("strategy", STRATEGIES, ids=lambda s: s.name)
-@pytest.mark.parametrize("algorithm", ALL_TYPES, ids=lambda a: a.name)
-def test_acting_smoke(
-    algorithm: AlgorithmType, strategy: MarketStrategy, fast_demand
-) -> None:
+@pytest.mark.parametrize("algorithm", ALL_TYPES, ids=str)
+def test_acting_smoke(algorithm: str, strategy: MarketStrategy, fast_demand) -> None:
     """Production defaults: acting, offers and logging, no learning in 60 periods."""
     run = run_smoke(smoke_agents(algorithm, resources(4)), strategy=strategy)
     assert_run_invariants(run)
@@ -128,12 +128,12 @@ def test_acting_smoke(
             assert trace.observe == []
             assert all(row.exploration_scale is None for row in rows)
 
-    if algorithm not in (AlgorithmType.MARGINAL_COST, AlgorithmType.FIXED_MARKUP):
+    if algorithm not in ("MARGINAL_COST", "FIXED_MARKUP"):
         _assert_integer_price_share(run)
 
 
-@pytest.mark.parametrize("algorithm", LEARNING_TYPES, ids=lambda a: a.name)
-def test_learning_smoke(algorithm: AlgorithmType, fast_demand) -> None:
+@pytest.mark.parametrize("algorithm", LEARNING_TYPES, ids=str)
+def test_learning_smoke(algorithm: str, fast_demand) -> None:
     """TEST-ONLY overrides: gradient updates happen, the evaluation window is frozen."""
     run = run_smoke(
         smoke_agents(algorithm, resources(4), params=LEARNING_OVERRIDES[algorithm]),
@@ -155,7 +155,7 @@ def test_learning_smoke(algorithm: AlgorithmType, fast_demand) -> None:
         assert trace.select_action == list(range(FIRST_COMPLETE_OBS, PERIODS + 1))
 
         active = [t for t, row in by_period.items() if row.learning_active]
-        if algorithm is AlgorithmType.PPO:
+        if algorithm == "PPO":
             assert active == expected_updates
         else:
             assert active == list(range(expected_updates[0], last_train + 1))
@@ -178,7 +178,7 @@ def test_failstack_enabled_ddpg_intervenes_only_after_two_failures(
     limit = 2
     run = run_smoke(
         smoke_agents(
-            AlgorithmType.DDPG,
+            "DDPG",
             resources(4),
             failstack={"failstack_enabled": True, "failstack_limit": limit},
         )
@@ -226,10 +226,10 @@ def test_marginal_cost_above_upper_bound_is_clipped(fast_demand) -> None:
     cheap = resources(3)
     run = run_smoke(
         [
-            {"plants": [(expensive, 400)], "algorithm": AlgorithmType.MARGINAL_COST},
+            {"plants": [(expensive, 400)], "algorithm": "MARGINAL_COST"},
             {
                 "plants": list(zip(cheap, (300, 250, 200))),
-                "algorithm": AlgorithmType.MARGINAL_COST,
+                "algorithm": "MARGINAL_COST",
             },
         ]
     )
@@ -240,10 +240,8 @@ def test_marginal_cost_above_upper_bound_is_clipped(fast_demand) -> None:
     assert prices == {Decimal(UPPER)}
 
 
-@pytest.mark.parametrize(
-    "algorithm", BASELINE_TYPES + (AlgorithmType.DDPG,), ids=lambda a: a.name
-)
-def test_supply_shortfall_every_period(algorithm: AlgorithmType, fast_demand) -> None:
+@pytest.mark.parametrize("algorithm", BASELINE_TYPES + ("DDPG",), ids=str)
+def test_supply_shortfall_every_period(algorithm: str, fast_demand) -> None:
     """Total capacity below demand in every period: the run still finishes."""
     r = resources(4)
     run = run_smoke(

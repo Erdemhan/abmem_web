@@ -24,7 +24,6 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
-from abmem.models.enums import AlgorithmType
 
 from .algorithm_config import SACConfig
 from .base import ActionResult, BaseAgentAlgorithm, PolicySpec, UpdateStats
@@ -46,7 +45,11 @@ class SACAlgorithm(BaseAgentAlgorithm):
         target_entropy: Target entropy of the temperature loss.
     """
 
-    algorithm_type: ClassVar[AlgorithmType] = AlgorithmType.SAC
+    key: ClassVar[str] = "SAC"
+    label: ClassVar[str] = "SAC"
+    description: ClassVar[str] = (
+        "Soft actor-critic, maximum-entropy off-policy learning (Haarnoja et al., 2018)."
+    )
     is_learning: ClassVar[bool] = True
     is_on_policy: ClassVar[bool] = False
     config_class: ClassVar[type[SACConfig]] = SACConfig
