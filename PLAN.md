@@ -268,10 +268,10 @@ Spec: `specs/watch_analysis_ui.json`. Independent of 2.10.
 
 ### 2.12 Algorithms tab (request 12, approved 2026-10-07, after 2.10)
 Spec: `specs/algorithms_tab.json`.
-- [ ] **Page:** sidebar entry "Algorithms". Two columns: agent algorithms and market clearing algorithms, discovered from the registries of 2.10. Clicking an algorithm opens its parameters for editing.
-- [ ] **Agent parameters:** editing changes the global default (`AlgorithmDefault`). Agents without their own value use it. Fields, types and bounds come from the algorithm's config class. "Reset to published defaults" restores the class defaults.
-- [ ] **Market parameters:** clearing algorithms get an optional config class like agent algorithms, a `ClearingDefault` table edited on this page and per-scenario overrides in the wizard (`Market.clearing_params`). MERIT_ORDER has no parameters.
-- [ ] **Reproducibility:** every run stores a snapshot of the parameters it actually used (agents and clearing). The analysis tab shows the snapshot. Changing a default affects only runs started afterwards.
+- [x] **Page:** sidebar entry "Algorithms". Two columns: agent algorithms and market clearing algorithms, discovered from the registries of 2.10. Clicking an algorithm opens its parameters for editing.
+- [x] **Agent parameters:** editing changes the global default (`AlgorithmDefault`). Agents without their own value use it. Fields, types and bounds come from the algorithm's config class. "Reset to published defaults" restores the class defaults.
+- [x] **Market parameters:** clearing algorithms get an optional config class like agent algorithms, a `ClearingDefault` table edited on this page and per-scenario overrides in the wizard (`Market.clearing_params`). MERIT_ORDER has no parameters.
+- [x] **Reproducibility:** every run stores a snapshot of the parameters it actually used (agents and clearing). The analysis tab shows the snapshot. Changing a default affects only runs started afterwards.
 
 ## 4b. Uygulama sırasında çıkan takip işleri
 
