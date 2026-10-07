@@ -312,6 +312,8 @@
                                     Click a card to add the agent.</p>
                                 <p class="text-sm mb-2" id="library-status" role="status"></p>
                                 <div class="row g-2" id="library-cards"></div>
+                                <button type="button" class="btn btn-link btn-sm px-0 mt-2 mb-0" id="library-show-all"
+                                    aria-controls="library-cards" aria-expanded="false" hidden></button>
                             </div>
                         </div>
                     </section>
@@ -437,6 +439,7 @@
                 library: null,
                 libraryLoading: false,
                 libraryError: '',
+                libraryShowAll: false,
                 demand: null,
                 demandError: '',
                 demandFor: null,
@@ -805,8 +808,38 @@
                 if (state.library.length === 0) {
                     status.textContent = 'The agent library is empty. Create agents with "New agent".';
                 } else {
-                    status.textContent = shown + ' of ' + state.library.length + ' library agents shown.';
+                    status.textContent = shown + ' of ' + state.library.length + ' library agents match.';
                 }
+                applyLibraryLimit();
+            }
+
+            // Without a search text or type filter only the first row of cards is shown (as many as fit the
+            // current width); "Show all (N)" lists every card. With a filter every matching card is shown.
+            function libraryFiltered() {
+                return byId('library-search').value.trim() !== '' || byId('library-type-filter').value !== '';
+            }
+
+            function applyLibraryLimit() {
+                var container = byId('library-cards');
+                var toggle = byId('library-show-all');
+                var cols = Array.prototype.slice.call(container.children);
+                cols.forEach(function (col) { col.hidden = false; });
+                if (libraryFiltered() || cols.length === 0 || container.offsetParent === null) {
+                    toggle.hidden = true;
+                    return;
+                }
+                var firstTop = cols[0].offsetTop;
+                var perRow = cols.filter(function (col) { return Math.abs(col.offsetTop - firstTop) < 2; }).length;
+                if (cols.length <= perRow) {
+                    toggle.hidden = true;
+                    return;
+                }
+                if (!state.libraryShowAll) {
+                    cols.forEach(function (col, index) { col.hidden = index >= perRow; });
+                }
+                toggle.textContent = state.libraryShowAll ? 'Show fewer' : 'Show all (' + cols.length + ')';
+                toggle.setAttribute('aria-expanded', state.libraryShowAll ? 'true' : 'false');
+                toggle.hidden = false;
             }
 
             // ---------------------------------------------------------------- agent form dialog
@@ -1417,6 +1450,15 @@
             byId('new-agent-button').addEventListener('click', function () { openAgentForm(null); });
             byId('library-search').addEventListener('input', renderLibrary);
             byId('library-type-filter').addEventListener('change', renderLibrary);
+            byId('library-show-all').addEventListener('click', function () {
+                state.libraryShowAll = !state.libraryShowAll;
+                applyLibraryLimit();
+            });
+            var libraryResizeTimer = null;
+            window.addEventListener('resize', function () {
+                window.clearTimeout(libraryResizeTimer);
+                libraryResizeTimer = window.setTimeout(applyLibraryLimit, 150);
+            });
 
             Array.prototype.forEach.call(document.querySelectorAll('input[name="durationPreset"]'), function (radio) {
                 radio.addEventListener('change', function () {

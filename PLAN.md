@@ -230,12 +230,12 @@ Her maddede: **ne yapılacak**, **nasıl doğrulanacak**. Type B/C maddeleri ayr
 - [x] **Yardımcılar:** kapasite/talep uyarısı (seçilen süredeki talebe göre), taslağın tarayıcıda saklanması, şablon listesinde "Kopyala", alan açıklamaları (ⓘ).
 
 ### 2.7 Senaryo YAML içe/dışa aktarma ve kütüphane kartlarının sınırlanması (İstek 7, onay 2026-10-07)
-- [ ] **Dışa aktarma:** şablon listesinde her senaryo için "YAML" düğmesi. Dosya: `format_version`, senaryo (ad, mod, periyot tipi, süre, seed, değerlendirme penceresi, gecikmeler), piyasa (strateji, teklif sınırları), kullanılan kaynaklar (tüm maliyet alanları), ajanlar (tür, bütçe, algoritma, algoritma parametreleri, fail-stack, santraller kaynak adıyla).
-- [ ] **İçe aktarma (önizleme + onay):** dosya yüklenince önce yapılacaklar gösterilir, onayla atomik olarak yazılır, sonra yeni senaryo sihirbazda açılır. Senaryo proxy olarak, ajanlar kütüphaneye proxy olarak eklenir.
+- [x] **Dışa aktarma:** şablon listesinde her senaryo için "YAML" düğmesi. Dosya: `format_version`, senaryo (ad, mod, periyot tipi, süre, seed, değerlendirme penceresi, gecikmeler), piyasa (strateji, teklif sınırları), kullanılan kaynaklar (tüm maliyet alanları), ajanlar (tür, bütçe, algoritma, algoritma parametreleri, fail-stack, santraller kaynak adıyla).
+- [x] **İçe aktarma (önizleme + onay):** dosya yüklenince önce yapılacaklar gösterilir, onayla atomik olarak yazılır, sonra yeni senaryo sihirbazda açılır. Senaryo proxy olarak, ajanlar kütüphaneye proxy olarak eklenir.
   - Kaynak çakışması: aynı ad ve aynı değerler → mevcut kaynak kullanılır. Farklı değerler → hata, farklar listelenir, hiçbir şey yazılmaz.
   - Kütüphane ajanı çakışması: aynı ad ve aynı yapılandırma → mevcut kütüphane ajanı kullanılır. Farklı yapılandırma → hata, çakışan ajanlar listelenir, hiçbir şey yazılmaz.
   - Ajan türü/kaynak kuralı, isim uzunluğu, sınırlar sunucuda aynı kurallarla doğrulanır. Dışa aktarılan dosya tekrar içe aktarılabilir (round trip).
-- [ ] **Sihirbazda kütüphane kartları:** varsayılanda tek satır kart, arama veya filtre sonuçlarının hepsi gösterilir, "Tümünü göster" düğmesi.
+- [x] **Sihirbazda kütüphane kartları:** varsayılanda tek satır kart, arama veya filtre sonuçlarının hepsi gösterilir, "Tümünü göster" düğmesi.
 
 ## 4b. Uygulama sırasında çıkan takip işleri
 

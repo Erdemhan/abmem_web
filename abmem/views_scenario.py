@@ -4,6 +4,9 @@
   wizard's capacity-versus-demand warning.
 * ``duplicate_scenario``: deep copy of a scenario template ("Duplicate" on
   the templates list).
+* ``export_scenario_yaml``, ``import_scenario_preview`` and
+  ``import_scenario_confirm``: scenario YAML export and two-phase import
+  (PLAN 2.7, ``abmem.scenario_yaml``).
 """
 
 from __future__ import annotations
@@ -12,11 +15,14 @@ import functools
 import logging
 
 from django.core.exceptions import ValidationError
-from django.http import HttpRequest, HttpResponse, JsonResponse
+from django.db import IntegrityError
+from django.http import Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.urls import reverse
+from django.utils.text import slugify
 from django.views.decorators.http import require_GET, require_POST
 
+from . import scenario_yaml
 from .constants.paths import DATA_DIR
 from .models import Simulation
 from .services.agent import library_service
@@ -140,3 +146,106 @@ def duplicate_scenario(request: HttpRequest, simulation_id: int) -> HttpResponse
     if "application/json" in request.headers.get("Accept", ""):
         return JsonResponse({"simulation_id": duplicate.id, "edit_url": edit_url})
     return redirect(edit_url)
+
+
+@require_GET
+def export_scenario_yaml(request: HttpRequest, simulation_id: int) -> HttpResponse:
+    """Download a scenario template as a version-1 YAML file.
+
+    Args:
+        request: GET.
+        simulation_id: Id of the proxy scenario.
+
+    Returns:
+        Attachment ``scenario_<slug>.yaml`` (``application/x-yaml``). HTTP 404
+        for an unknown simulation or a run (non-proxy simulation).
+    """
+    simulation = get_object_or_404(Simulation, id=simulation_id)
+    if not simulation.proxy:
+        raise Http404("Only scenario templates can be exported.")
+    text = scenario_yaml.export_scenario_yaml(simulation)
+    slug = slugify(simulation.name) or str(simulation.id)
+    response = HttpResponse(
+        text.encode("utf-8"),
+        content_type=f"{scenario_yaml.CONTENT_TYPE}; charset=utf-8",
+    )
+    response["Content-Disposition"] = f'attachment; filename="scenario_{slug}.yaml"'
+    return response
+
+
+def _uploaded_document(request: HttpRequest) -> object:
+    """Read and parse the ``file`` field of a multipart import request.
+
+    Args:
+        request: POST with a ``file`` upload.
+
+    Returns:
+        The parsed YAML document.
+
+    Raises:
+        ScenarioImportError: No file, too large, not UTF-8 or invalid YAML.
+    """
+    upload = request.FILES.get("file")
+    if upload is None:
+        raise scenario_yaml.ScenarioImportError({"file": ["Select a YAML file."]})
+    if upload.size is not None and upload.size > scenario_yaml.MAX_FILE_BYTES:
+        raise scenario_yaml.ScenarioImportError(
+            {"file": [f"The file is larger than {scenario_yaml.MAX_FILE_BYTES // 1024} KB."]}
+        )
+    return scenario_yaml.load_yaml_bytes(upload.read(scenario_yaml.MAX_FILE_BYTES + 1))
+
+
+@require_POST
+def import_scenario_preview(request: HttpRequest) -> JsonResponse:
+    """Validate an uploaded scenario file and show what the import would do.
+
+    Nothing is written.
+
+    Args:
+        request: Multipart POST with ``file`` (CSRF protected).
+
+    Returns:
+        ``{"scenario", "resources": {"reuse", "create"}, "agents": {"reuse",
+        "create"}, "errors": {}}``, or HTTP 400 ``{"errors": {path: [messages]}}``.
+    """
+    try:
+        plan = scenario_yaml.build_import_plan(_uploaded_document(request))
+    except scenario_yaml.ScenarioImportError as exc:
+        return JsonResponse({"errors": exc.errors}, status=400)
+    return JsonResponse(plan.to_json())
+
+
+@require_POST
+def import_scenario_confirm(request: HttpRequest) -> JsonResponse:
+    """Validate the uploaded file again and write the import in one transaction.
+
+    The preview is not trusted: the file is parsed and validated from scratch.
+
+    Args:
+        request: Multipart POST with ``file`` (CSRF protected).
+
+    Returns:
+        ``{"simulation_id", "edit_url"}``, or HTTP 400 ``{"errors": {...}}``
+        with nothing written.
+    """
+    try:
+        _, simulation = scenario_yaml.import_scenario(_uploaded_document(request))
+    except scenario_yaml.ScenarioImportError as exc:
+        return JsonResponse({"errors": exc.errors}, status=400)
+    except ValidationError as exc:
+        return JsonResponse(
+            {"errors": {"__all__": [f"The scenario could not be imported: {m}" for m in exc.messages]}},
+            status=400,
+        )
+    except IntegrityError as exc:
+        logger.warning("Scenario import rejected by a database constraint: %s", exc)
+        return JsonResponse(
+            {"errors": {"__all__": ["The scenario could not be imported because a database constraint rejected it."]}},
+            status=400,
+        )
+    return JsonResponse(
+        {
+            "simulation_id": simulation.id,
+            "edit_url": reverse("update_simulation", args=[simulation.id]),
+        }
+    )

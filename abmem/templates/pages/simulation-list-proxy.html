@@ -71,6 +71,28 @@
             </div>
           </div>
         </div>
+        <!-- Import a scenario from a YAML file (PLAN 2.7) -->
+        <div class="col-xl-3 col-sm-6 mb-xl-0 mb-4 zoom4-1">
+          <div class="card">
+            <div class="card-body p-3">
+              <button type="button" class="nav-link active btn btn-link text-start w-100 p-0 m-0" id="import-yaml-button"
+                aria-haspopup="dialog">
+                <div class="row align-items-center">
+                  <div class="col-8">
+                    <div class="numbers align-items-center">
+                      <h6 class="font-weight-bolder mb-0">Import YAML</h6>
+                    </div>
+                  </div>
+                  <div class="col-4 text-end">
+                    <div class="icon icon-shape bg-gradient-primary shadow text-center border-radius-md">
+                      <i class="fas fa-file-import" aria-hidden="true"></i>
+                    </div>
+                  </div>
+                </div>
+              </button>
+            </div>
+          </div>
+        </div>
         <!-- END MENU ROW 1  -->
         <div class="row my-4">
           <div class="col-12">
@@ -155,6 +177,15 @@
                             </div>
 
                             <div class="col-2 mx-2">
+                              <!-- YAML export of the scenario (PLAN 2.7) -->
+                              <a href="{% url 'export_scenario_yaml' simulation_id=simulation.id %}"
+                                class="center icon icon-shape bg-gradient-dark shadow text-center border-radius-md zoom4-1 text-white d-inline-flex align-items-center justify-content-center"
+                                title="Export as YAML" aria-label="Export {{ simulation.name }} as YAML">
+                                <span class="text-xxs font-weight-bolder">YAML</span>
+                              </a>
+                            </div>
+
+                            <div class="col-2 mx-2">
                               <form action="delete/{{ simulation.id }}" method="DELETE">
                                 <button type="submit"
                                   class=" center icon icon-shape bg-gradient-danger text-center border-radius-md zoom4-1"
@@ -221,6 +252,32 @@
           <div class="modal-footer">
             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
             <button type="button" class="btn bg-gradient-info" id="run-start">Run</button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- Import dialog: preview, then confirm (PLAN 2.7). The server validates the file again on confirm. -->
+    <div class="modal fade" id="import-modal" tabindex="-1" role="dialog" aria-labelledby="import-modal-title" aria-hidden="true"
+      data-preview-url="{% url 'import_scenario_preview' %}" data-confirm-url="{% url 'import_scenario_confirm' %}">
+      <div class="modal-dialog modal-dialog-centered modal-lg" role="document">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="import-modal-title">Import scenario from YAML</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">
+              <span aria-hidden="true">&times;</span>
+            </button>
+          </div>
+          <div class="modal-body">
+            <label class="form-label text-sm" for="import-file">Scenario file (format_version 1, at most 1 MB)</label>
+            <input type="file" class="form-control" id="import-file" accept=".yaml,.yml,application/x-yaml,text/yaml">
+            <p class="text-xs text-secondary mt-1 mb-0">Resources and library agents with the same name and the same
+              values are reused. A name with different values is reported and nothing is imported.</p>
+            <div class="text-sm mt-3 d-none" id="import-plan" role="status"></div>
+            <div class="text-sm text-danger mt-3 d-none" id="import-errors" role="alert"></div>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="button" class="btn bg-gradient-primary" id="import-confirm" disabled>Import</button>
           </div>
         </div>
       </div>
@@ -384,6 +441,128 @@
       $('run-warm-start').addEventListener('change', checkWarmStart);
       $('run-freeze').addEventListener('change', checkWarmStart);
       $('run-start').addEventListener('click', startRun);
+    })();
+
+    // Scenario YAML import (PLAN 2.7): preview first, then confirm with the same file.
+    (function () {
+      'use strict';
+      var modal = document.getElementById('import-modal');
+      var fileInput = document.getElementById('import-file');
+      var planBox = document.getElementById('import-plan');
+      var errorBox = document.getElementById('import-errors');
+      var confirmButton = document.getElementById('import-confirm');
+      var previewTicket = 0;
+
+      function csrfToken() {
+        var input = document.querySelector('input[name="csrfmiddlewaretoken"]');
+        return input ? input.value : '';
+      }
+
+      function el(tag, className, text) {
+        var node = document.createElement(tag);
+        if (className) { node.className = className; }
+        if (text !== undefined && text !== null) { node.textContent = String(text); }
+        return node;
+      }
+
+      function showErrors(errors) {
+        errorBox.textContent = '';
+        var keys = Object.keys(errors || {});
+        keys.forEach(function (key) {
+          (errors[key] || []).forEach(function (message) {
+            errorBox.appendChild(el('div', '', (key === '__all__' ? '' : key + ': ') + message));
+          });
+        });
+        errorBox.classList.toggle('d-none', keys.length === 0);
+      }
+
+      function listLine(label, names) {
+        return el('div', '', label + ': ' + (names.length ? names.join(', ') : 'none'));
+      }
+
+      function showPlan(plan) {
+        planBox.textContent = '';
+        if (!plan) { planBox.classList.add('d-none'); return; }
+        var s = plan.scenario;
+        planBox.appendChild(el('div', 'font-weight-bold mb-1', 'New scenario "' + s.name + '"'));
+        planBox.appendChild(el('div', '', s.periods + ' ' + s.period_type + ' periods, ' + s.mode + ', seed ' + s.seed +
+          ', evaluation periods ' + s.evaluation_periods + ', lags ' + s.observation_lags.join(', ')));
+        planBox.appendChild(el('div', '', 'Market: ' + s.strategy + ', bids ' + s.bid_bounds[0] + ' to ' +
+          s.bid_bounds[1] + ' TL/MWh'));
+        planBox.appendChild(el('div', '', 'Scenario agents: ' + (s.agents.length ? s.agents.join(', ') : 'none')));
+        planBox.appendChild(listLine('Resources reused', plan.resources.reuse));
+        planBox.appendChild(listLine('Resources created', plan.resources.create));
+        planBox.appendChild(listLine('Library agents reused', plan.agents.reuse));
+        planBox.appendChild(listLine('Library agents created', plan.agents.create));
+        planBox.classList.remove('d-none');
+      }
+
+      function post(url) {
+        var data = new FormData();
+        data.append('file', fileInput.files[0]);
+        return fetch(url, {
+          method: 'POST',
+          headers: { 'Accept': 'application/json', 'X-CSRFToken': csrfToken() },
+          body: data
+        }).then(function (response) {
+          return response.json().then(function (body) {
+            return { ok: response.ok, status: response.status, body: body };
+          });
+        });
+      }
+
+      function reset() {
+        previewTicket += 1;
+        showPlan(null);
+        showErrors({});
+        confirmButton.disabled = true;
+      }
+
+      function preview() {
+        reset();
+        if (!fileInput.files.length) { return; }
+        var ticket = previewTicket;
+        planBox.textContent = 'Checking the file...';
+        planBox.classList.remove('d-none');
+        post(modal.getAttribute('data-preview-url')).then(function (result) {
+          if (ticket !== previewTicket) { return; }
+          if (!result.ok) {
+            showPlan(null);
+            showErrors((result.body && result.body.errors) || { __all__: ['HTTP ' + result.status] });
+            return;
+          }
+          showPlan(result.body);
+          confirmButton.disabled = false;
+        }).catch(function (error) {
+          if (ticket !== previewTicket) { return; }
+          showPlan(null);
+          showErrors({ __all__: ['Request failed: ' + error] });
+        });
+      }
+
+      function confirmImport() {
+        if (!fileInput.files.length) { return; }
+        confirmButton.disabled = true;
+        showErrors({});
+        post(modal.getAttribute('data-confirm-url')).then(function (result) {
+          if (!result.ok) {
+            showErrors((result.body && result.body.errors) || { __all__: ['HTTP ' + result.status] });
+            return;
+          }
+          window.location.href = result.body.edit_url;
+        }).catch(function (error) {
+          confirmButton.disabled = false;
+          showErrors({ __all__: ['Request failed: ' + error] });
+        });
+      }
+
+      document.getElementById('import-yaml-button').addEventListener('click', function () {
+        fileInput.value = '';
+        reset();
+        bootstrap.Modal.getOrCreateInstance(modal).show();
+      });
+      fileInput.addEventListener('change', preview);
+      confirmButton.addEventListener('click', confirmImport);
     })();
   </script>
 
