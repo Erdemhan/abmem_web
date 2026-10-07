@@ -176,12 +176,12 @@ Her maddede: **ne yapılacak**, **nasıl doğrulanacak**. Type B/C maddeleri ayr
 ## 4. Faz 2 — Özellik istekleri
 
 ### 2.1 Ajan başına algoritma seçimi (İstek 1)
-- [ ] **Model:** `Agent.algorithm_type` alanı (`AlgorithmType` enum: `DDPG, RDPG, TD3, SAC, PPO` + 1.10'daki karşılaştırma ajanları), varsayılan `DDPG`. Migration.
-- [ ] **İsim çakışması:** mevcut `Agent.algorithm = 0` sınıf niteliği (çalışma anındaki ağları tutar) yeni alanla karışmasın diye `Agent.runtime_policy` olarak yeniden adlandırılır. Etkilenen yerler (codebase-memory ile tespit edildi): `agent_service.init`, `relearn`, `calculateOffers`, `market_service.saveOffers`.
-- [ ] **Servis:** `AgentService.init` algoritmayı `agent.algorithm_type`'tan seçer. Hiperparametreler algoritmanın varsayılan `AlgorithmConfig`'inden gelir. İsteğe bağlı olarak bir HPO sonucunun en iyi parametreleri seçilebilir (2.4 sonrası).
-- [ ] **Kopyalama:** `run_simulation`'daki derin kopya alanı otomatik taşır. Bu bir testle doğrulanır.
-- [ ] **Fail-stack ayarları (K3):** `Agent` modeline `failstack_enabled`, `failstack_limit`, `failstack_delta`, `failstack_min_margin` alanları eklenir (varsayılanlar madde 1.5'te). Kütüphaneden kopyalanırken ve çalıştırma kopyasında taşınır.
-- [ ] **Arayüz:** ajan formu, simülasyon oluşturma/düzenleme ekranlarındaki ajan satırı ve ajan listesi bir algoritma seçim alanı/sütunu alır. Algoritma seçiminin yanında fail-stack için açık/kapalı anahtarı bulunur. Açıkken *L*, *δ* ve *m_min* alanları görünür. Karşılaştırma ajanlarında (`RANDOM`, `MARGINAL_COST`, `FIXED_MARKUP`) anahtar pasiftir. İzleme ekranında ajan algoritması ve fail-stack durumu gösterilir.
+- [x] **Model:** `Agent.algorithm_type` alanı (`AlgorithmType` enum: `DDPG, RDPG, TD3, SAC, PPO` + 1.10'daki karşılaştırma ajanları), varsayılan `DDPG`. Migration.
+- [x] **İsim çakışması:** mevcut `Agent.algorithm = 0` sınıf niteliği (çalışma anındaki ağları tutar) yeni alanla karışmasın diye `Agent.runtime_policy` olarak yeniden adlandırılır. Etkilenen yerler (codebase-memory ile tespit edildi): `agent_service.init`, `relearn`, `calculateOffers`, `market_service.saveOffers`.
+- [x] **Servis:** `AgentService.init` algoritmayı `agent.algorithm_type`'tan seçer. Hiperparametreler algoritmanın varsayılan `AlgorithmConfig`'inden gelir. İsteğe bağlı olarak bir HPO sonucunun en iyi parametreleri seçilebilir (2.4 sonrası).
+- [x] **Kopyalama:** `run_simulation`'daki derin kopya alanı otomatik taşır. Bu bir testle doğrulanır.
+- [x] **Fail-stack ayarları (K3):** `Agent` modeline `failstack_enabled`, `failstack_limit`, `failstack_delta`, `failstack_min_margin` alanları eklenir (varsayılanlar madde 1.5'te). Kütüphaneden kopyalanırken ve çalıştırma kopyasında taşınır.
+- [x] **Arayüz:** ajan formu, simülasyon oluşturma/düzenleme ekranlarındaki ajan satırı ve ajan listesi bir algoritma seçim alanı/sütunu alır. Algoritma seçiminin yanında fail-stack için açık/kapalı anahtarı bulunur. Açıkken *L*, *δ* ve *m_min* alanları görünür. Karşılaştırma ajanlarında (`RANDOM`, `MARGINAL_COST`, `FIXED_MARKUP`) anahtar pasiftir. İzleme ekranında ajan algoritması ve fail-stack durumu gösterilir.
 - **Doğrulama:** iki farklı algoritmalı ajanla senaryo oluşturulur, çalıştırılır ve her ajanın doğru algoritma sınıfıyla başlatıldığı kontrol edilir.
 
 ### 2.2 Ajan türüne göre kaynak filtresi (İstek 2)
@@ -192,13 +192,13 @@ Her maddede: **ne yapılacak**, **nasıl doğrulanacak**. Type B/C maddeleri ayr
 - **Doğrulama:** her tür için izin verilen/verilmeyen kaynak kombinasyonlarının view testleri.
 
 ### 2.3 Proxy ajan kütüphanesi (İstek 4)
-- [ ] **Model** (K4 = A varsayımıyla): kütüphane ajanı `proxy=True, market=NULL`. Kısıtlar: kütüphane ajanları için `UniqueConstraint(Lower('name'), condition=Q(market__isnull=True))`, her market içinde `UniqueConstraint('market', 'name')`. Kopyaların kaynağını izlemek için `Agent.source` (kütüphane ajanına FK, `SET_NULL`). Migration ve K5'e göre veri aktarımı.
-- [ ] **Ajan sayfası = kütüphane:** oluşturma, düzenleme, silme. Liste sadece kütüphane ajanlarını gösterir.
-- [ ] **Simülasyon oluşturma/düzenleme:** iki yol.
+- [x] **Model** (K4 = A varsayımıyla): kütüphane ajanı `proxy=True, market=NULL`. Kısıtlar: kütüphane ajanları için `UniqueConstraint(Lower('name'), condition=Q(market__isnull=True))`, her market içinde `UniqueConstraint('market', 'name')`. Kopyaların kaynağını izlemek için `Agent.source` (kütüphane ajanına FK, `SET_NULL`). Migration ve K5'e göre veri aktarımı.
+- [x] **Ajan sayfası = kütüphane:** oluşturma, düzenleme, silme. Liste sadece kütüphane ajanlarını gösterir.
+- [x] **Simülasyon oluşturma/düzenleme:** iki yol.
   - "Yeni ajan": formdan oluşturulan ajan önce kütüphaneye eklenir, sonra senaryoya kopyalanır.
   - "Kütüphaneden seç": seçilen ajan santralleri ve algoritmasıyla birlikte senaryoya kopyalanır.
-- [ ] **İsim tekilliği:** anlık kontrol endpoint'i (`/dev/agent/check-name?name=`), sunucu doğrulaması ve veritabanı kısıtı. Çakışmada form gönderilmez ve mesaj gösterilir.
-- [ ] Ajan oluşturma kodu (`create_simulation`, `update_simulation`, `create_agent_and_related`, `run_simulation`'daki kopyalama) tek bir `agent_service.copy_agent(...)` / `create_library_agent(...)` fonksiyonunda toplanır.
+- [x] **İsim tekilliği:** anlık kontrol endpoint'i (`/dev/agent/check-name?name=`), sunucu doğrulaması ve veritabanı kısıtı. Çakışmada form gönderilmez ve mesaj gösterilir.
+- [x] Ajan oluşturma kodu (`create_simulation`, `update_simulation`, `create_agent_and_related`, `run_simulation`'daki kopyalama) tek bir `agent_service.copy_agent(...)` / `create_library_agent(...)` fonksiyonunda toplanır.
 - **Doğrulama:** aynı isimle ikinci kütüphane ajanının reddedilmesi, kütüphaneden seçilen ajanın senaryoya tam kopyalanması ve kütüphane ajanı düzenlendiğinde mevcut senaryoların değişmemesi testleri.
 
 ### 2.4 Hiperparametre araması arayüzü ve izleme ekranı (İstek 3)
@@ -220,9 +220,9 @@ Her maddede: **ne yapılacak**, **nasıl doğrulanacak**. Type B/C maddeleri ayr
 
 - [x] **B13 (sonradan bulundu, `3b653d9` ile düzeltildi): `Agent.budget` taşabilir.** `max_digits=12` (en fazla ~9.99e9). Büyük kapasiteli uzun çalıştırmalarda periyot yazımı hata verir ve çalıştırma FAILED olarak biter. Alan genişletilmeli (migration). runtime_core worker'ı bildirdi.
 - [ ] **Adil karşılaştırma notu (Faz 3):** RDPG, 24 adımlık bir pencere dolmadan öğrenemediği için duman testlerinde t = 49'da, diğer off-policy algoritmalar t = 33'te öğrenmeye başlıyor. PPO ise rollout dolduğunda güncelleniyor. Faz 3 deneylerinde tüm algoritmalar için eğitimin başladığı periyot eşitlenmeli (örn. ortak bir `learning_starts ≥ seq_len + lag`) ya da fark raporlanmalı (`fair-comparison`).
-- [ ] Ajan sayfasındaki modal formun `submitForm()` fonksiyonu sunucuya POST yapmıyor, sadece localStorage'a yazıyor (önceden var olan hata). Kütüphane arayüzü (5. dalga) bu akışı yeniden yazarken düzeltecek.
-- [x] Kullanılmayan dosyalar silindi (`offer_factory.py`, `period_factory.py`, PyYAML). Kalan: `views.py`deki kullanılmayan `AgentFactory` import'u (5. dalga). `PyYAML` artık hiçbir yerde kullanılmıyor (`requirements.txt`).
-- [ ] `views.run_simulation`'ın `except` dalı tanımsız olabilecek `newSimulation`'a başvuruyor. 5. dalgada kütüphane servisine (`clone_scenario_for_run`) taşınırken düzeltilecek.
+- [x] Ajan sayfasındaki modal formun `submitForm()` fonksiyonu sunucuya POST yapmıyor, sadece localStorage'a yazıyor (önceden var olan hata). Kütüphane arayüzü (5. dalga) bu akışı yeniden yazarken düzeltecek.
+- [x] Kullanılmayan dosyalar silindi (`offer_factory.py`, `period_factory.py`, PyYAML). `AgentFactory` ve `agent_factory.py` 5. dalgada kaldırıldı. `PyYAML` artık hiçbir yerde kullanılmıyor (`requirements.txt`).
+- [x] `views.run_simulation`'ın `except` dalı tanımsız olabilecek `newSimulation`'a başvuruyor. 5. dalgada kütüphane servisine (`clone_scenario_for_run`) taşınırken düzeltilecek.
 - [x] `hyperparam_optimization.py` eski `run(sim, hyperparams=...)` imzasını çağırıyor. 4. dalgadaki `hpo.service` bu dosyayı kaldırıyor.
 - [ ] Veritabanı: 0006–0012 henüz uygulanmadı (`BİOFUEL`/`WİND` isim düzeltmesi + yedek + migrate). Kullanıcının bu terminalde teyidini bekliyor.
 
