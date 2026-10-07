@@ -203,11 +203,11 @@ Her maddede: **ne yapılacak**, **nasıl doğrulanacak**. Type B/C maddeleri ayr
 
 ### 2.4 Hiperparametre araması arayüzü ve izleme ekranı (İstek 3)
 Önkoşullar: 1.8, 1.10, 1.11.
-- [ ] **Modeller:**
+- [x] **Modeller:**
   - `HPOStudy`: ad, algoritma, senaryo (proxy `Simulation`'a FK, `PROTECT`), parametre sınırları (JSON), koloni boyutu, iterasyon, limit, arama seed'leri ve değerlendirme seed'leri (JSON), amaç ayarı (JSON), durum (`CREATED, RUNNING, FINISHED, FAILED, CANCELED`), zaman damgaları, en iyi parametreler ve skor, hata metni, `cancel_requested`.
   - `HPOTrial`: çalışma (FK, `CASCADE`), iterasyon, faz (`INIT, EMPLOYED, ONLOOKER, SCOUT`), kaynak indeksi, parametreler (JSON), seed, ajan skoru, piyasa skoru, simülasyon (FK, `SET_NULL`), durum, süre.
-- [ ] **Servis:** `hpo_service.start(study)` K8'e göre ayrı süreç başlatır. Her deneme bittiğinde `HPOTrial` yazılır. Partiler arasında iptal bayrağı kontrol edilir. Saklama politikası K9'a göre. `optimizer.py` aynı servisin ince bir komut satırı sarmalayıcısına dönüşür.
-- [ ] **Arayüz:**
+- [x] **Servis:** `hpo_service.start(study)` K8'e göre ayrı süreç başlatır. Her deneme bittiğinde `HPOTrial` yazılır. Partiler arasında iptal bayrağı kontrol edilir. Saklama politikası K9'a göre. `optimizer.py` aynı servisin ince bir komut satırı sarmalayıcısına dönüşür.
+- [x] **Arayüz:**
   - Kenar çubuğunda yeni "Hiperparametre Araması" sekmesi.
   - Liste sayfası: çalışmalar, durum, en iyi skor.
   - Oluşturma formu: senaryo seçimi (proxy simülasyonlar), algoritma seçimi, fail-stack açık/kapalı (açıksa `failstack_limit` ve `failstack_delta` aranacak parametrelere eklenebilir), algoritmaya göre dinamik parametre sınırları (min/max, varsayılanlar `AlgorithmConfig`'ten), ABC ayarları, seed'ler, amaç ayarı.
@@ -224,7 +224,7 @@ Her maddede: **ne yapılacak**, **nasıl doğrulanacak**. Type B/C maddeleri ayr
 - [x] Kullanılmayan dosyalar silindi (`offer_factory.py`, `period_factory.py`, PyYAML). `AgentFactory` ve `agent_factory.py` 5. dalgada kaldırıldı. `PyYAML` artık hiçbir yerde kullanılmıyor (`requirements.txt`).
 - [x] `views.run_simulation`'ın `except` dalı tanımsız olabilecek `newSimulation`'a başvuruyor. 5. dalgada kütüphane servisine (`clone_scenario_for_run`) taşınırken düzeltilecek.
 - [x] `hyperparam_optimization.py` eski `run(sim, hyperparams=...)` imzasını çağırıyor. 4. dalgadaki `hpo.service` bu dosyayı kaldırıyor.
-- [ ] Veritabanı: 0006–0012 henüz uygulanmadı (`BİOFUEL`/`WİND` isim düzeltmesi + yedek + migrate). Kullanıcının bu terminalde teyidini bekliyor.
+- [ ] Veritabanı: 0006–0013 henüz uygulanmadı (`BİOFUEL`/`WİND` isim düzeltmesi + yedek + migrate). Kullanıcının bu terminalde teyidini bekliyor.
 
 ---
 
