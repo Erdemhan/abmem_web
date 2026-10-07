@@ -1,0 +1,236 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>ABMEM SIMULATION - {% if template %}Edit{% else %}New{% endif %} Demand Profile</title>
+    <!-- Fonts and icons -->
+    <link href="https://fonts.googleapis.com/css?family=Open+Sans:300,400,600,700" rel="stylesheet" />
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
+    <!-- MDB -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/7.2.0/mdb.min.css" rel="stylesheet" />
+    <link href="{% static 'assets/css/nucleo-icons.css' %}" rel="stylesheet" />
+    <link href="{% static 'assets/css/nucleo-svg.css' %}" rel="stylesheet" />
+    <!-- CSS Files -->
+    <link id="pagestyle" href="{% static 'assets/css/soft-ui-dashboard.css' %}" rel="stylesheet" />
+    <link href="{% static 'assets/css/abmem.css' %}" rel="stylesheet" />
+</head>
+
+<body class="g-sidenav-show bg-gray-100">
+
+    <!-- SIDEBAR -->
+    <aside class="sidenav navbar navbar-vertical navbar-expand-xs border-0 border-radius-xl my-3 fixed-start ms-3"
+        id="sidenav-main">
+        {% include '../static/assets/components/sidebar.html' %}
+    </aside>
+    <!-- END SIDEBAR -->
+
+    <main class="main-content position-relative max-height-vh-100 h-100 border-radius-lg">
+
+        {% if template %}
+        {% include '../static/assets/components/navbar.html' with contextName="Demand Profiles" pageName="Edit Profile" topPageName="ABMEM" %}
+        {% else %}
+        {% include '../static/assets/components/navbar.html' with contextName="Demand Profiles" pageName="New Profile" topPageName="ABMEM" %}
+        {% endif %}
+
+        <div class="container-fluid py-4">
+            {{ editor_config|json_script:"demand-editor-config" }}
+            <form id="demand-profile-editor" novalidate>
+                {% csrf_token %}
+                <div class="row">
+                    <div class="col-12 col-xl-7 mb-4">
+                        <div class="card h-100">
+                            <div class="card-header pb-0">
+                                <h6 class="mb-1">{% if template %}Edit demand profile{% else %}New demand profile{% endif %}</h6>
+                                <p class="text-sm mb-0">Settings of synthetic hourly demand. Scenarios that use this profile keep their own copy, so saving here does not change them.</p>
+                            </div>
+                            <div class="card-body">
+                                <div class="alert alert-danger text-white text-sm d-none" id="editor-error" role="alert"></div>
+                                <div class="row">
+                                    <div class="col-12 col-md-6 mb-3">
+                                        <label for="profile-name" class="form-label">Name</label>
+                                        <input type="text" id="profile-name" class="form-control" maxlength="{{ name_max_length }}"
+                                            value="{{ template.name|default:'' }}" required aria-describedby="profile-name-feedback">
+                                        <div class="invalid-feedback" id="profile-name-feedback"></div>
+                                    </div>
+                                    <div class="col-12 col-md-6 mb-3">
+                                        <label for="profile-description" class="form-label">Description (optional)</label>
+                                        <textarea id="profile-description" class="form-control" rows="1"
+                                            aria-describedby="profile-description-feedback">{{ template.description|default:'' }}</textarea>
+                                        <div class="invalid-feedback" id="profile-description-feedback"></div>
+                                    </div>
+                                </div>
+                                <hr class="horizontal dark mt-0">
+                                {% include 'components/demand_profile_form.html' with prefix="editor" initial_profile=profile generated_only=True %}
+                                <div class="d-flex flex-wrap gap-2 mt-2">
+                                    <button type="submit" class="btn btn-primary mb-0" id="profile-save">Save</button>
+                                    <a class="btn btn-outline-secondary mb-0" href="{% url 'demand_profile_list' %}">Back to the library</a>
+                                </div>
+                                <p class="text-sm mt-2 mb-0" id="profile-save-status" role="status" aria-live="polite"></p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12 col-xl-5 mb-4">
+                        <div class="card h-100">
+                            <div class="card-header pb-0 d-flex flex-wrap justify-content-between align-items-center gap-2">
+                                <h6 class="mb-0">Preview</h6>
+                                <div class="d-flex align-items-center gap-2">
+                                    <label for="preview-periods" class="form-label mb-0 text-sm">Hours</label>
+                                    <select id="preview-periods" class="form-control form-control-sm w-auto">
+                                        {% for choice in period_choices %}
+                                        <option value="{{ choice }}"{% if choice == default_periods %} selected{% endif %}>{{ choice }}</option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                {% include 'components/demand_preview.html' with prefix="profile-preview" %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </main>
+
+    <script src="{% static 'assets/js/core/popper.min.js' %}"></script>
+    <script src="{% static 'assets/js/core/bootstrap.min.js' %}"></script>
+    <script src="{% static 'assets/js/plugins/perfect-scrollbar.min.js' %}"></script>
+    <script src="{% static 'assets/js/plugins/smooth-scrollbar.min.js' %}"></script>
+    <script src="{% static 'assets/js/plugins/chartjs.min.js' %}"></script>
+    <script src="{% static 'assets/js/demand-profile.js' %}"></script>
+    <script>
+        // Demand profile editor (PLAN 2.9): the shared editor and preview component. The server
+        // validates the profile again (HTTP 400 {"errors": {field: [messages]}}).
+        (function () {
+            'use strict';
+
+            var CONFIG = JSON.parse(document.getElementById('demand-editor-config').textContent);
+
+            function byId(id) { return document.getElementById(id); }
+
+            function csrfToken() {
+                var input = document.querySelector('#demand-profile-editor input[name="csrfmiddlewaretoken"]');
+                return input ? input.value : '';
+            }
+
+            var form = DemandProfileForm.init(byId('editor-component'));
+            var loader = DemandProfileForm.createLoader(CONFIG.demand_preview_url, { csrfToken: csrfToken });
+            var canvas = byId('profile-preview-chart');
+            var table = byId('profile-preview-stats');
+            var status = byId('profile-preview-status');
+
+            function errorsText(errors) {
+                return Object.keys(errors || {}).map(function (key) { return [].concat(errors[key]).join(' '); }).join(' ');
+            }
+
+            function refreshPreview() {
+                var periods = Number(byId('preview-periods').value);
+                var clientErrors = form.validate();
+                if (Object.keys(clientErrors).length > 0) {
+                    loader.cancel();
+                    DemandProfileForm.clearPreview(canvas, table);
+                    status.textContent = 'Fix the profile to see the preview.';
+                    return;
+                }
+                status.textContent = 'Updating the preview...';
+                loader.request(form.previewRequest(periods), function (error, preview) {
+                    if (error) {
+                        DemandProfileForm.clearPreview(canvas, table);
+                        status.textContent = errorsText(error.errors) || 'The preview is not available.';
+                        if (error.status === 400) { form.showErrors(error.errors); }
+                        return;
+                    }
+                    DemandProfileForm.renderPreview(canvas, preview);
+                    DemandProfileForm.renderStats(table, preview);
+                    status.textContent = 'Generated demand, periods 1 to ' + preview.periods + '.';
+                });
+            }
+
+            function setFieldError(name, message) {
+                byId('profile-' + name).classList.toggle('is-invalid', Boolean(message));
+                var feedback = byId('profile-' + name + '-feedback');
+                feedback.textContent = message || '';
+                feedback.classList.toggle('d-block', Boolean(message));
+            }
+
+            function showBanner(message) {
+                var box = byId('editor-error');
+                box.textContent = message || '';
+                box.classList.toggle('d-none', !message);
+            }
+
+            byId('demand-profile-editor').addEventListener('submit', function (event) {
+                event.preventDefault();
+                setFieldError('name', '');
+                setFieldError('description', '');
+                showBanner('');
+                var name = byId('profile-name').value.trim();
+                var clientErrors = form.validate();
+                if (!name) { setFieldError('name', 'Profile name is required.'); }
+                if (Object.keys(clientErrors).length > 0) { form.showErrors(clientErrors); }
+                if (!name || Object.keys(clientErrors).length > 0) { return; }
+                var button = byId('profile-save');
+                button.disabled = true;
+                byId('profile-save-status').textContent = 'Saving...';
+                fetch(CONFIG.save_url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRFToken': csrfToken() },
+                    body: JSON.stringify({
+                        name: name,
+                        description: byId('profile-description').value,
+                        profile: form.getProfile()
+                    })
+                }).then(function (response) {
+                    return response.json().catch(function () { return {}; }).then(function (body) {
+                        return { ok: response.ok, status: response.status, body: body };
+                    });
+                }).then(function (result) {
+                    button.disabled = false;
+                    if (result.ok) {
+                        byId('profile-save-status').textContent = 'Saved.';
+                        window.location.href = CONFIG.list_url;
+                        return;
+                    }
+                    byId('profile-save-status').textContent = '';
+                    var errors = result.body.errors || {};
+                    var profileErrors = {};
+                    Object.keys(errors).forEach(function (key) {
+                        if (key === 'name' || key === 'description') {
+                            setFieldError(key, [].concat(errors[key]).join(' '));
+                        } else if (key === 'body' || key === 'profile') {
+                            showBanner([].concat(errors[key]).join(' '));
+                        } else {
+                            profileErrors[key] = errors[key];
+                        }
+                    });
+                    form.showErrors(profileErrors);
+                    if (Object.keys(errors).length === 0) {
+                        showBanner('The profile could not be saved (HTTP ' + result.status + ').');
+                    }
+                }).catch(function (error) {
+                    button.disabled = false;
+                    byId('profile-save-status').textContent = '';
+                    showBanner('Request failed: ' + error);
+                });
+            });
+
+            ['profile-name', 'profile-description'].forEach(function (id) {
+                byId(id).addEventListener('input', function () { setFieldError(id.slice('profile-'.length), ''); });
+            });
+            byId('preview-periods').addEventListener('change', refreshPreview);
+            form.onChange(refreshPreview);
+
+            if (window.bootstrap && bootstrap.Tooltip) {
+                Array.prototype.forEach.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'), function (node) {
+                    bootstrap.Tooltip.getOrCreateInstance(node);
+                });
+            }
+            refreshPreview();
+        })();
+    </script>
+</body>
+
+</html>

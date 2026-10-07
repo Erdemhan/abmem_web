@@ -1,5 +1,5 @@
 from django.urls import include, path
-from . import views, views_analysis, views_scenario
+from . import views, views_analysis, views_demand, views_scenario
 
 
 urlpatterns = [
@@ -35,6 +35,16 @@ urlpatterns = [
     path('simulation/<int:sim_id>/analysis/', views_analysis.simulation_analysis, name='simulation_analysis'),
     path('simulation/<int:sim_id>/analysis/data/', views_analysis.simulation_analysis_data, name='simulation_analysis_data'),
     path('simulation/<int:sim_id>/export/<str:kind>.csv', views_analysis.simulation_export_csv, name='simulation_export_csv'),
+    path('demand-profiles/', views_demand.demand_profile_list, name='demand_profile_list'),
+    path('demand-profiles/new/', views_demand.demand_profile_create, name='demand_profile_create'),
+    path('demand-profiles/import/preview/', views_demand.demand_profile_import_preview, name='demand_profile_import_preview'),
+    path('demand-profiles/import/confirm/', views_demand.demand_profile_import_confirm, name='demand_profile_import_confirm'),
+    path('demand-profiles/parse-yaml/', views_demand.demand_profile_parse_yaml, name='demand_profile_parse_yaml'),
+    path('demand-profiles/<int:profile_id>/edit/', views_demand.demand_profile_edit, name='demand_profile_edit'),
+    path('demand-profiles/<int:profile_id>/duplicate/', views_demand.demand_profile_duplicate, name='demand_profile_duplicate'),
+    path('demand-profiles/<int:profile_id>/delete/', views_demand.demand_profile_delete, name='demand_profile_delete'),
+    path('demand-profiles/<int:profile_id>/export.yaml', views_demand.demand_profile_export, name='demand_profile_export'),
+    path('demand-profiles/<int:profile_id>/json/', views_demand.demand_profile_detail_json, name='demand_profile_detail_json'),
     path('hpo/', include('abmem.hpo_urls')),
 ]
 

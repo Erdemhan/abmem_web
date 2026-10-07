@@ -185,6 +185,29 @@
           </div>
         </div>
 
+        <div class="col-xl-3 col-sm-6 mb-xl-0 mb-4 mt-xl-4 zoom4-1">
+          <div class="card">
+            <div class="card-body p-3">
+              <div class="row align-items-center">
+                <div class="col-8">
+                  <a class="nav-link active p-0" href="{% url 'demand_profile_list' %}" id="dashboard-demand-profiles">
+                    <div class="numbers">
+                      <p class="text-sm mb-0 text-capitalize font-weight-bold">Demand Profiles</p>
+                      <h5 class="font-weight-bolder mb-0" id="num-demand-profiles">{{ num_demand_profiles }}</h5>
+                    </div>
+                  </a>
+                  <a class="btn btn-sm btn-outline-primary mt-2 mb-0" href="{% url 'demand_profile_create' %}" id="dashboard-new-demand-profile">New profile</a>
+                </div>
+                <div class="col-4 text-end">
+                  <div class="icon icon-shape bg-gradient-primary shadow text-center border-radius-md">
+                    <i class="fas fa-chart-line" aria-hidden="true"></i>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
     </div>
       <!-- END MENU ROW 1  -->
 

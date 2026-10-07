@@ -99,6 +99,15 @@
           </a>
         </li>
         <li class="nav-item">
+          <a class="nav-link{% if url_name == 'demand_profile_list' or url_name == 'demand_profile_create' or url_name == 'demand_profile_edit' %} active{% endif %}" href="{% url 'demand_profile_list' %}" id="sidebar-demand-profiles-link"{% if url_name == 'demand_profile_list' %} aria-current="page"{% endif %}>
+            <div
+              class="icon icon-shape icon-sm shadow border-radius-md bg-white text-center me-2 d-flex align-items-center justify-content-center">
+              <i class="fas fa-chart-line text-dark text-xs" aria-hidden="true"></i>
+            </div>
+            <span class="nav-link-text ms-1">Demand Profiles</span>
+          </a>
+        </li>
+        <li class="nav-item">
           <a class="nav-link{% if url_name == 'simulation_list' or url_name == 'watch_simulation' or url_name == 'simulation_analysis' %} active{% endif %}" href="{% url 'simulation_list' %}">
             <div
               class="icon icon-shape icon-sm shadow border-radius-md bg-white text-center me-2 d-flex align-items-center justify-content-center">

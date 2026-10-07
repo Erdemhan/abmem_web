@@ -1,3 +1,4 @@
+from .demand import DemandProfileTemplate
 from .simulation import Simulation
 from .market import Market
 from .agent import Agent

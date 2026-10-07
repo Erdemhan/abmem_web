@@ -8,12 +8,20 @@
  * API (global window.DemandProfileForm, no other globals are read):
  *   var form = DemandProfileForm.init(container, options)
  *       options.profile   initial profile or null (default: the include's JSON script, else null = file)
- *       options.defaults  profile used when the user first switches to "Generated"
- *   form.getSource()           'file' | 'generated'
+ *       options.defaults  profile used when the user first switches to "Generate"
+ *       options.libraryId initial library profile id (PLAN 2.9, include with show_library=True), shown
+ *                         read-only with source "From library"
+ *       options.library   [{id, name}] library profiles offered by the "From library" select
+ *       options.loadLibraryProfile(id, callback)  loads one library profile, callback(errorMessage, profile)
+ *       The include flag generated_only=True (data-generated-only) keeps the source on "Generate".
+ *   form.getSource()           'file' | 'generated' | 'library'
  *   form.getProfile()          null for the file, else the profile object sent to the server
- *   form.setProfile(profile)   null selects the file
+ *   form.getLibraryId()        id of the selected library profile when the source is "From library", else null
+ *   form.setProfile(profile, libraryId)  null selects the file, a libraryId selects "From library"
+ *   form.setLibraryOptions(items)        replaces the options of the library select ([{id, name}])
  *   form.validate()            {field: message} keyed like the server ("seed", "day.mean", ...); {} when valid
- *   form.showErrors(errors)    shows server or client errors (keys with or without "demand_profile." prefix)
+ *   form.showErrors(errors)    shows server or client errors (keys with or without a "demand_profile." or
+ *                              "profile." prefix, "demand_profile_source" for the library select)
  *   form.clearErrors()
  *   form.onChange(callback)    called after every change of the source or a profile field
  *   form.previewRequest(periods, extra)  body for the preview endpoint ({periods, source, profile?})
@@ -126,22 +134,41 @@
         var prefix = container.getAttribute('data-prefix');
         var listeners = [];
         var defaults = copy(options.defaults || DEFAULT_PROFILE);
+        var generatedOnly = container.getAttribute('data-generated-only') === 'true';
+        var libraryRequest = 0;
 
         function field(id) { return document.getElementById(prefix + '-' + id); }
         function sourceRadios() { return container.querySelectorAll('input[name="' + prefix + '-source"]'); }
+        function hasLibrary() { return Boolean(field('library-select')); }
 
         function getSource() {
+            if (generatedOnly) { return 'generated'; }
             var checked = container.querySelector('input[name="' + prefix + '-source"]:checked');
-            return checked && checked.value === 'generated' ? 'generated' : 'file';
+            if (!checked) { return 'file'; }
+            if (checked.value === 'library' && hasLibrary()) { return 'library'; }
+            return checked.value === 'generated' ? 'generated' : 'file';
         }
 
         function setSource(source) {
+            if (generatedOnly) { source = 'generated'; }
             Array.prototype.forEach.call(sourceRadios(), function (radio) { radio.checked = radio.value === source; });
             syncVisibility();
         }
 
+        // In "From library" mode the profile fields show the library settings read-only.
+        function setReadOnly(readOnly) {
+            Array.prototype.forEach.call(field('generated').querySelectorAll('input, select, button'), function (node) {
+                node.disabled = readOnly;
+            });
+        }
+
         function syncVisibility() {
-            field('generated').hidden = getSource() !== 'generated';
+            var source = getSource();
+            field('generated').hidden = source === 'file';
+            if (hasLibrary()) {
+                field('library').hidden = source !== 'library';
+                setReadOnly(source === 'library');
+            }
             SEGMENTS.forEach(function (name) {
                 var moments = usesMoments(field(name + '-distribution').value);
                 field(name + '-mean-group').hidden = !moments;
@@ -187,23 +214,62 @@
             });
         }
 
-        function setProfile(profile) {
+        function setLibraryOptions(items) {
+            var select = field('library-select');
+            if (!select) { return; }
+            var current = select.value;
+            while (select.options.length > 1) { select.remove(1); }
+            (items || []).forEach(function (item) {
+                var option = document.createElement('option');
+                option.value = String(item.id);
+                option.textContent = item.name;
+                select.appendChild(option);
+            });
+            select.value = current;
+            if (select.value !== current) { select.value = ''; }
+        }
+
+        function hasLibraryOption(id) {
+            var select = field('library-select');
+            return Boolean(select) && Array.prototype.some.call(select.options, function (option) {
+                return option.value !== '' && option.value === String(id);
+            });
+        }
+
+        function setProfile(profile, libraryId) {
             clearErrors();
+            libraryRequest += 1;
+            var linked = profile && libraryId !== undefined && libraryId !== null && hasLibraryOption(libraryId);
+            if (hasLibrary()) { field('library-select').value = linked ? String(libraryId) : ''; }
             if (profile) {
                 writeProfile(profile);
-                setSource('generated');
+                setSource(linked ? 'library' : 'generated');
             } else {
                 writeProfile(defaults);
-                setSource('file');
+                setSource(generatedOnly ? 'generated' : 'file');
             }
         }
 
-        function getProfile() { return getSource() === 'generated' ? readProfile() : null; }
+        function getProfile() { return getSource() === 'file' ? null : readProfile(); }
 
-        function validate() { return getSource() === 'generated' ? validateProfile(readProfile()) : {}; }
+        function getLibraryId() {
+            if (getSource() !== 'library') { return null; }
+            var value = field('library-select').value;
+            return value === '' ? null : Number(value);
+        }
+
+        function validate() {
+            var source = getSource();
+            if (source === 'file') { return {}; }
+            if (source === 'library' && getLibraryId() === null) {
+                return { demand_profile_source: 'Select a demand profile of the library.' };
+            }
+            return validateProfile(readProfile());
+        }
 
         function inputIdForKey(key) {
-            var name = key.replace(/^demand_profile\.?/, '');
+            if (key === 'demand_profile_source') { return hasLibrary() ? 'library' : 'source'; }
+            var name = key.replace(/^(demand_profile|profile)\.?/, '');
             if (name === '' || name === 'version') { return 'source'; }
             return name.replace('.', '-');
         }
@@ -254,6 +320,29 @@
             listeners.forEach(function (callback) { callback(); });
         }
 
+        function notify() { listeners.forEach(function (callback) { callback(); }); }
+
+        // Loads the selected library profile into the read-only fields (latest selection wins).
+        function loadSelectedLibraryProfile() {
+            var id = getLibraryId();
+            var ticket = ++libraryRequest;
+            setError('library', '');
+            if (id === null || typeof options.loadLibraryProfile !== 'function') {
+                notify();
+                return;
+            }
+            options.loadLibraryProfile(id, function (message, profile) {
+                if (ticket !== libraryRequest) { return; }
+                if (message || !profile) {
+                    setError('library', message || 'The demand profile could not be loaded.');
+                } else {
+                    writeProfile(profile);
+                    syncVisibility();
+                }
+                notify();
+            });
+        }
+
         function previewRequest(periods, extra) {
             var body = { periods: periods };
             var profile = getProfile();
@@ -271,8 +360,25 @@
         }
 
         Array.prototype.forEach.call(sourceRadios(), function (radio) {
-            radio.addEventListener('change', changed);
+            radio.addEventListener('change', function (event) {
+                if (radio.value === 'library' && radio.checked) {
+                    syncVisibility();
+                    loadSelectedLibraryProfile();
+                    return;
+                }
+                changed(event);
+            });
         });
+        if (hasLibrary()) {
+            setLibraryOptions(options.library || []);
+            field('library-select').addEventListener('change', loadSelectedLibraryProfile);
+            // "Edit copy": keep the settings, switch to a generated profile without the library link.
+            field('library-edit').addEventListener('click', function () {
+                field('library-select').value = '';
+                setSource('generated');
+                notify();
+            });
+        }
         ['input', 'change'].forEach(function (type) {
             field('generated').addEventListener(type, changed);
         });
@@ -288,12 +394,14 @@
             var script = document.getElementById(prefix + '-initial');
             initial = script ? JSON.parse(script.textContent) : null;
         }
-        setProfile(initial || null);
+        setProfile(initial || null, options.libraryId);
 
         return {
             getSource: getSource,
             getProfile: getProfile,
+            getLibraryId: getLibraryId,
             setProfile: setProfile,
+            setLibraryOptions: setLibraryOptions,
             validate: validate,
             showErrors: showErrors,
             clearErrors: clearErrors,

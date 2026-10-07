@@ -23,7 +23,7 @@ from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
 
 from .forms import AgentForm, PlantForm, ResourceForm
-from .models import Agent, Simulation, enums
+from .models import Agent, DemandProfileTemplate, Simulation, enums
 from .models.market import Market
 from .models.simulation import (
     ALLOWED_OBSERVATION_LAGS,
@@ -890,12 +890,15 @@ class RunSettings:
         demand_profile: Validated synthetic demand profile
             (``DemandProfile.to_dict``), or None for the demand file
             (PLAN 2.8).
+        demand_profile_source_id: Id of the library profile the stored copy
+            came from (PLAN 2.9), None for the file or a generated profile.
     """
 
     seed: int
     evaluation_periods: int
     observation_lags: list[int]
     demand_profile: dict[str, Any] | None = None
+    demand_profile_source_id: int | None = None
 
     def apply(self, simulation: Simulation) -> None:
         """Set the settings on a simulation (the caller saves it).
@@ -908,6 +911,9 @@ class RunSettings:
         simulation.observation_lags = list(self.observation_lags)
         simulation.demand_profile = (
             None if self.demand_profile is None else dict(self.demand_profile)
+        )
+        simulation.demand_profile_source_id = (
+            None if self.demand_profile is None else self.demand_profile_source_id
         )
 
 
@@ -957,6 +963,7 @@ def _coerce_observation_lags(raw_value: Any) -> list[int] | None:
 
 
 DEMAND_PROFILE_KEY: Final[str] = PAYLOAD_KEY
+DEMAND_SOURCE_KEY: Final[str] = "demand_profile_source"
 
 
 def _parse_run_settings(
@@ -1024,18 +1031,68 @@ def _parse_run_settings(
     else:
         observation_lags = default_observation_lags()
 
-    demand_profile: dict[str, Any] | None = None
-    if DEMAND_PROFILE_KEY in data:
-        try:
-            demand_profile = normalize_profile(data[DEMAND_PROFILE_KEY])
-        except ValidationError as exc:
-            _add_errors(errors, exc, DEMAND_PROFILE_KEY, "")
-    elif current is not None and current.demand_profile is not None:
-        demand_profile = dict(current.demand_profile)
+    demand_profile, source_id = _parse_demand(data, current, errors)
 
     if errors:
         raise ValidationError(errors)
-    return RunSettings(seed, evaluation_periods, observation_lags, demand_profile)
+    return RunSettings(
+        seed, evaluation_periods, observation_lags, demand_profile, source_id
+    )
+
+
+def _parse_demand(
+    data: Mapping[str, Any], current: Simulation | None, errors: dict[str, list[str]]
+) -> tuple[dict[str, Any] | None, int | None]:
+    """Resolve the demand source of a scenario payload (PLAN 2.8, 2.9).
+
+    * ``demand_profile_source`` set to a library profile id: the scenario
+      stores a copy of that library profile and links to it. The library
+      profile is authoritative, a posted ``demand_profile`` is ignored.
+    * Otherwise ``demand_profile`` (null = demand file, a mapping = generated
+      profile) is validated and the link is cleared.
+    * Neither key (update page): the stored profile and link are kept, a
+      ``demand_profile_source: null`` alone only clears the link.
+
+    Args:
+        data: Decoded scenario payload.
+        current: The edited scenario, or None on create.
+        errors: Error mapping, updated in place (keys
+            ``demand_profile[.<field>]`` and ``demand_profile_source``).
+
+    Returns:
+        ``(demand_profile, demand_profile_source_id)``.
+    """
+    raw_source = data.get(DEMAND_SOURCE_KEY)
+    if raw_source not in (None, ""):
+        source_id = _coerce_payload_int(raw_source)
+        template = (
+            DemandProfileTemplate.objects.filter(id=source_id).first()
+            if source_id is not None
+            else None
+        )
+        if template is None:
+            errors[DEMAND_SOURCE_KEY] = [
+                "The selected demand profile is not in the library any more."
+            ]
+            return None, None
+        try:
+            return normalize_profile(template.profile), template.id
+        except ValidationError as exc:
+            _add_errors(errors, exc, DEMAND_PROFILE_KEY, "")
+            return None, None
+    if DEMAND_PROFILE_KEY in data:
+        try:
+            return normalize_profile(data[DEMAND_PROFILE_KEY]), None
+        except ValidationError as exc:
+            _add_errors(errors, exc, DEMAND_PROFILE_KEY, "")
+            return None, None
+    if current is None or current.demand_profile is None:
+        return None, None
+    keep_link = DEMAND_SOURCE_KEY not in data
+    return (
+        dict(current.demand_profile),
+        current.demand_profile_source_id if keep_link else None,
+    )
 
 
 def _parse_period_number(data: Mapping[str, Any]) -> int:
@@ -1122,9 +1179,7 @@ class ScenarioPayload:
     entries: list[ScenarioAgentEntry]
 
 
-def _coerce_payload_enum(
-    raw_value: Any, enum_cls: Any, field: str, label: str
-) -> Any:
+def _coerce_payload_enum(raw_value: Any, enum_cls: Any, field: str, label: str) -> Any:
     """Convert a JSON integer or digit string to a member of ``enum_cls``.
 
     Args:
@@ -1144,9 +1199,7 @@ def _coerce_payload_enum(
         return enum_cls(value)
     except ValueError:
         choices = ", ".join(f"{member.value} ({member.name})" for member in enum_cls)
-        raise ValidationError(
-            {field: [f"{label} must be one of {choices}."]}
-        ) from None
+        raise ValidationError({field: [f"{label} must be one of {choices}."]}) from None
 
 
 def _parse_scenario_header(data: Mapping[str, Any]) -> ScenarioHeader:
@@ -1461,11 +1514,7 @@ def _parse_run_options(request: HttpRequest) -> RunOptions:
     freeze = _coerce_payload_flag(data.get("freeze_policies"), "freeze_policies")
     if freeze and source is None:
         raise ValidationError(
-            {
-                "freeze_policies": [
-                    "Evaluate only requires initial policies from a run."
-                ]
-            }
+            {"freeze_policies": ["Evaluate only requires initial policies from a run."]}
         )
     return RunOptions(
         seed=seed,
@@ -1590,6 +1639,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
     Returns:
         The page. ``num_library_agents`` counts library agents only
         (``proxy=True``, ``market`` NULL), not scenario or run copies.
+        ``num_demand_profiles`` counts the demand profile library (PLAN 2.9).
     """
     num_resources = Resource.objects.count()
     num_library_agents = Agent.objects.filter(proxy=True, market__isnull=True).count()
@@ -1601,6 +1651,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         "num_library_agents": num_library_agents,
         "num_simulations": num_simulations,
         "num_proxy_simulations": num_proxy_simulations,
+        "num_demand_profiles": DemandProfileTemplate.objects.count(),
         "latest_simulations": latest_simulations,
     }
     return render(request, "pages/dashboard.html", context)
@@ -1862,6 +1913,42 @@ def _scenario_agent_payload(agent: Agent) -> dict[str, Any]:
     return payload
 
 
+def _stored_demand_source_id(simulation: Simulation) -> int | None:
+    """Return the library profile shown as the demand source of a scenario.
+
+    The link is shown only while the stored copy still equals the library
+    profile. Otherwise the wizard shows the copy as a generated profile.
+
+    Args:
+        simulation: The edited proxy scenario.
+
+    Returns:
+        The library profile id, or None.
+    """
+    template = simulation.demand_profile_source
+    if template is None or simulation.demand_profile is None:
+        return None
+    try:
+        equal = normalize_profile(template.profile) == normalize_profile(
+            simulation.demand_profile
+        )
+    except ValidationError:
+        return None
+    return template.id if equal else None
+
+
+def _demand_library_options() -> list[dict[str, Any]]:
+    """Return the library profiles offered by the wizard's demand source.
+
+    Returns:
+        ``[{"id", "name"}]`` ordered by name.
+    """
+    return [
+        {"id": template.id, "name": template.name}
+        for template in DemandProfileTemplate.objects.order_by("name", "id")
+    ]
+
+
 def _wizard_context(simulation: Simulation | None = None) -> dict[str, Any]:
     """Return the template context of the scenario wizard (create and update).
 
@@ -1896,6 +1983,7 @@ def _wizard_context(simulation: Simulation | None = None) -> dict[str, Any]:
             "evaluation_periods": simulation.evaluation_periods,
             "observation_lags": list(simulation.observation_lags),
             "demand_profile": simulation.demand_profile,
+            "demand_profile_source": _stored_demand_source_id(simulation),
             "agents": [_scenario_agent_payload(agent) for agent in agents],
         }
         save_url = reverse("update_simulation", args=[simulation.id])
@@ -1913,6 +2001,7 @@ def _wizard_context(simulation: Simulation | None = None) -> dict[str, Any]:
             "evaluation_periods": 0,
             "observation_lags": default_observation_lags(),
             "demand_profile": None,
+            "demand_profile_source": None,
             "agents": [],
         }
         save_url = reverse("create_simulation")
@@ -1926,6 +2015,12 @@ def _wizard_context(simulation: Simulation | None = None) -> dict[str, Any]:
         "check_name_url": reverse("agent_check_name"),
         "demand_stats_url": reverse("demand_stats"),
         "demand_preview_url": reverse("demand_preview"),
+        "demand_library": _demand_library_options(),
+        # The page replaces the id 0 by the selected profile id.
+        "demand_profile_detail_url": reverse("demand_profile_detail_json", args=[0]),
+        "demand_yaml_parse_url": reverse("demand_profile_parse_yaml"),
+        "demand_save_to_library_url": reverse("demand_profile_create"),
+        "demand_library_list_url": reverse("demand_profile_list"),
         "draft_key": draft_key,
         "seed_upper_bound": SEED_UPPER_BOUND,
         "name_max_length": SIMULATION_NAME_MAX_LENGTH,

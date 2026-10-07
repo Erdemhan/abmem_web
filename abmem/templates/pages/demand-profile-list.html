@@ -1,0 +1,357 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>ABMEM SIMULATION - Demand Profiles</title>
+    <!-- Fonts and icons -->
+    <link href="https://fonts.googleapis.com/css?family=Open+Sans:300,400,600,700" rel="stylesheet" />
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
+    <!-- MDB -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/7.2.0/mdb.min.css" rel="stylesheet" />
+    <link href="{% static 'assets/css/nucleo-icons.css' %}" rel="stylesheet" />
+    <link href="{% static 'assets/css/nucleo-svg.css' %}" rel="stylesheet" />
+    <!-- CSS Files -->
+    <link id="pagestyle" href="{% static 'assets/css/soft-ui-dashboard.css' %}" rel="stylesheet" />
+    <link href="{% static 'assets/css/abmem.css' %}" rel="stylesheet" />
+</head>
+
+<body class="g-sidenav-show bg-gray-100">
+
+    <!-- SIDEBAR -->
+    <aside class="sidenav navbar navbar-vertical navbar-expand-xs border-0 border-radius-xl my-3 fixed-start ms-3"
+        id="sidenav-main">
+        {% include '../static/assets/components/sidebar.html' %}
+    </aside>
+    <!-- END SIDEBAR -->
+
+    <main class="main-content position-relative max-height-vh-100 h-100 border-radius-lg">
+
+        {% include '../static/assets/components/navbar.html' with contextName="Demand" pageName="Profiles" topPageName="ABMEM" %}
+
+        <div class="container-fluid py-4">
+            {% csrf_token %}
+            <div class="row">
+                <div class="col-xl-3 col-sm-6 mb-4 zoom4-1">
+                    <div class="card">
+                        <div class="card-body p-3">
+                            <a class="nav-link active" href="{% url 'demand_profile_create' %}" id="demand-profile-new">
+                                <div class="row align-items-center">
+                                    <div class="col-8">
+                                        <h5 class="font-weight-bolder mb-0">New profile</h5>
+                                    </div>
+                                    <div class="col-4 text-end">
+                                        <div class="icon icon-shape bg-gradient-primary shadow text-center border-radius-md">
+                                            <i class="fas fa-plus" aria-hidden="true"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-xl-3 col-sm-6 mb-4 zoom4-1">
+                    <div class="card">
+                        <div class="card-body p-3">
+                            <div role="button" tabindex="0" id="demand-profile-import" aria-label="Import a demand profile YAML file">
+                                <div class="row align-items-center">
+                                    <div class="col-8">
+                                        <h5 class="font-weight-bolder mb-0">Import YAML</h5>
+                                    </div>
+                                    <div class="col-4 text-end">
+                                        <div class="icon icon-shape bg-gradient-primary shadow text-center border-radius-md">
+                                            <i class="fas fa-file-import" aria-hidden="true"></i>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <input type="file" id="demand-import-file" accept=".yaml,.yml" class="d-none" aria-label="Demand profile YAML file">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="row">
+                <div class="col-12">
+                    <div class="card mb-4">
+                        <div class="card-header pb-0">
+                            <h6>Demand Profile Library</h6>
+                            <p class="text-sm mb-0">Library profiles are templates of synthetic hourly demand. A scenario stores its own copy, so editing a library profile does not change existing scenarios or runs. A profile that a scenario uses cannot be deleted.</p>
+                        </div>
+                        <div class="card-body px-0 pb-2 pt-0">
+                            <div class="alert alert-danger text-white text-sm mx-3 mt-3 d-none" id="demand-list-error" role="alert"></div>
+                            <div class="table-responsive">
+                                <table class="table align-items-center mb-0" id="demand-profile-table">
+                                    <thead>
+                                        <tr>
+                                            <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Name</th>
+                                            <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Day hours</th>
+                                            <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Day</th>
+                                            <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Night</th>
+                                            <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 text-end">Scenarios</th>
+                                            <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7"><span class="visually-hidden">Actions</span></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {% for row in rows %}
+                                        <tr data-profile-id="{{ row.template.id }}">
+                                            <td class="ps-4">
+                                                <h6 class="mb-0 text-sm">{{ row.template.name }}</h6>
+                                                {% if row.template.description %}<p class="text-xs text-secondary mb-0 text-wrap">{{ row.template.description }}</p>{% endif %}
+                                            </td>
+                                            <td class="text-sm">{{ row.day_hours }}</td>
+                                            <td class="text-sm text-wrap">{{ row.day }}</td>
+                                            <td class="text-sm text-wrap">{{ row.night }}</td>
+                                            <td class="text-sm text-end">{{ row.scenario_count }}</td>
+                                            <td>
+                                                <div class="d-flex flex-wrap gap-1 pe-3">
+                                                    <a class="btn btn-sm btn-outline-primary mb-0" href="{% url 'demand_profile_edit' row.template.id %}">Edit</a>
+                                                    <form action="{% url 'demand_profile_duplicate' row.template.id %}" method="POST" class="d-inline">
+                                                        {% csrf_token %}
+                                                        <button type="submit" class="btn btn-sm btn-outline-secondary mb-0">Duplicate</button>
+                                                    </form>
+                                                    <a class="btn btn-sm btn-outline-secondary mb-0" href="{% url 'demand_profile_export' row.template.id %}">Export YAML</a>
+                                                    <form action="{% url 'demand_profile_delete' row.template.id %}" method="POST"
+                                                        class="d-inline demand-delete-form" data-profile-name="{{ row.template.name }}">
+                                                        {% csrf_token %}
+                                                        <button type="submit" class="btn btn-sm btn-outline-danger mb-0">Delete</button>
+                                                    </form>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                        {% empty %}
+                                        <tr>
+                                            <td colspan="6" class="text-sm text-secondary ps-4">The library has no demand profiles yet. Create one or import a YAML file.</td>
+                                        </tr>
+                                        {% endfor %}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Delete confirmation -->
+            <div class="modal fade" id="delete-profile-modal" tabindex="-1" role="dialog"
+                aria-labelledby="delete-profile-modal-label" aria-hidden="true">
+                <div class="modal-dialog modal-dialog-centered" role="document">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title" id="delete-profile-modal-label">Delete demand profile</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body">
+                            <p class="mb-0">Delete the demand profile <strong id="delete-profile-name"></strong>?
+                                A profile that a scenario uses cannot be deleted. Runs keep their own copies.</p>
+                            <div class="alert alert-danger text-white text-sm mt-3 mb-0 d-none" id="delete-profile-error" role="alert"></div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button type="button" class="btn btn-danger" id="delete-profile-confirm">Confirm</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Import preview -->
+            <div class="modal fade" id="import-profile-modal" tabindex="-1" role="dialog"
+                aria-labelledby="import-profile-modal-label" aria-hidden="true">
+                <div class="modal-dialog modal-lg modal-dialog-centered" role="document">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title" id="import-profile-modal-label">Import demand profile</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body">
+                            <p class="text-sm mb-2" id="import-profile-summary" role="status" aria-live="polite"></p>
+                            <div class="alert alert-danger text-white text-sm d-none" id="import-profile-error" role="alert"></div>
+                            <div id="import-profile-preview" hidden>
+                                {% include 'components/demand_preview.html' with prefix="import-demand" %}
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button type="button" class="btn btn-primary" id="import-profile-confirm" disabled>Import</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="{% static 'assets/js/core/popper.min.js' %}"></script>
+    <script src="{% static 'assets/js/core/bootstrap.min.js' %}"></script>
+    <script src="{% static 'assets/js/plugins/perfect-scrollbar.min.js' %}"></script>
+    <script src="{% static 'assets/js/plugins/smooth-scrollbar.min.js' %}"></script>
+    <script src="{% static 'assets/js/plugins/chartjs.min.js' %}"></script>
+    <script src="{% static 'assets/js/demand-profile.js' %}"></script>
+    <script>
+        // Demand profile library (PLAN 2.9). The server stays authoritative and replies with
+        // HTTP 400 {"errors": {field: [messages]}}; this page only shows those messages.
+        (function () {
+            'use strict';
+
+            var URLS = {
+                preview: '{% url "demand_preview" %}',
+                importPreview: '{% url "demand_profile_import_preview" %}',
+                importConfirm: '{% url "demand_profile_import_confirm" %}'
+            };
+            var STATUS_TEXT = {
+                new: 'will be added to the library.',
+                reuse: 'is already in the library with the same settings. The import keeps the existing profile.',
+                conflict: 'conflicts with a library profile of the same name.'
+            };
+
+            function byId(id) { return document.getElementById(id); }
+
+            function csrfToken() {
+                var input = document.querySelector('input[name="csrfmiddlewaretoken"]');
+                return input ? input.value : '';
+            }
+
+            function errorsText(errors) {
+                return Object.keys(errors || {}).map(function (key) {
+                    var prefix = key === '__all__' || key === 'file' ? '' : key + ': ';
+                    return prefix + [].concat(errors[key]).join(' ');
+                }).join(' ');
+            }
+
+            function readJsonReply(response) {
+                return response.json().catch(function () { return {}; }).then(function (body) {
+                    return { ok: response.ok, status: response.status, body: body };
+                });
+            }
+
+            function modal(id) { return bootstrap.Modal.getOrCreateInstance(byId(id)); }
+
+            function showError(id, message) {
+                var box = byId(id);
+                box.textContent = message || '';
+                box.classList.toggle('d-none', !message);
+            }
+
+            // ------------------------------------------------------------ delete
+            var pendingDelete = null;
+            Array.prototype.forEach.call(document.querySelectorAll('.demand-delete-form'), function (form) {
+                form.addEventListener('submit', function (event) {
+                    event.preventDefault();
+                    pendingDelete = form;
+                    byId('delete-profile-name').textContent = form.getAttribute('data-profile-name') || '';
+                    showError('delete-profile-error', '');
+                    byId('delete-profile-confirm').disabled = false;
+                    modal('delete-profile-modal').show();
+                });
+            });
+
+            byId('delete-profile-confirm').addEventListener('click', function () {
+                if (pendingDelete === null) { return; }
+                var button = this;
+                button.disabled = true;
+                fetch(pendingDelete.action, {
+                    method: 'POST',
+                    headers: { 'Accept': 'application/json' },
+                    body: new FormData(pendingDelete)
+                }).then(readJsonReply).then(function (result) {
+                    if (result.ok) { window.location.reload(); return; }
+                    showError('delete-profile-error', errorsText(result.body.errors)
+                        || ('The profile could not be deleted (HTTP ' + result.status + ').'));
+                }).catch(function (error) {
+                    showError('delete-profile-error', 'Request failed: ' + error);
+                    button.disabled = false;
+                });
+            });
+
+            byId('delete-profile-modal').addEventListener('hidden.bs.modal', function () { pendingDelete = null; });
+
+            // ------------------------------------------------------------ import (preview, then confirm)
+            var importFile = null;
+
+            function openImport() {
+                byId('demand-import-file').value = '';
+                byId('demand-import-file').click();
+            }
+
+            byId('demand-profile-import').addEventListener('click', openImport);
+            byId('demand-profile-import').addEventListener('keydown', function (event) {
+                if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openImport(); }
+            });
+
+            function uploadBody() {
+                var body = new FormData();
+                body.append('file', importFile);
+                return body;
+            }
+
+            function post(url) {
+                return fetch(url, {
+                    method: 'POST',
+                    headers: { 'Accept': 'application/json', 'X-CSRFToken': csrfToken() },
+                    body: uploadBody()
+                }).then(readJsonReply);
+            }
+
+            function renderImportPreview(profile) {
+                var canvas = byId('import-demand-chart');
+                var table = byId('import-demand-stats');
+                byId('import-profile-preview').hidden = false;
+                byId('import-demand-status').textContent = 'Loading the preview of the first 168 hours...';
+                var loader = DemandProfileForm.createLoader(URLS.preview, { delay: 0, csrfToken: csrfToken });
+                loader.request({ periods: 168, source: 'generated', profile: profile }, function (error, preview) {
+                    if (error) {
+                        DemandProfileForm.clearPreview(canvas, table);
+                        byId('import-demand-status').textContent = errorsText(error.errors) || 'No preview.';
+                        return;
+                    }
+                    DemandProfileForm.renderPreview(canvas, preview);
+                    DemandProfileForm.renderStats(table, preview);
+                    byId('import-demand-status').textContent = 'Generated demand, periods 1 to 168.';
+                });
+            }
+
+            byId('demand-import-file').addEventListener('change', function () {
+                importFile = this.files && this.files[0];
+                if (!importFile) { return; }
+                byId('import-profile-summary').textContent = 'Checking ' + importFile.name + '...';
+                showError('import-profile-error', '');
+                byId('import-profile-preview').hidden = true;
+                byId('import-profile-confirm').disabled = true;
+                modal('import-profile-modal').show();
+                post(URLS.importPreview).then(function (result) {
+                    var plan = result.body || {};
+                    if (plan.status) {
+                        byId('import-profile-summary').textContent = 'Demand profile "' + plan.name + '" '
+                            + (STATUS_TEXT[plan.status] || '') + (plan.description ? ' Description: ' + plan.description : '');
+                        renderImportPreview(plan.demand);
+                    } else {
+                        byId('import-profile-summary').textContent = 'The file cannot be imported.';
+                    }
+                    if (!result.ok) {
+                        showError('import-profile-error', errorsText(plan.errors) || ('HTTP ' + result.status));
+                        return;
+                    }
+                    byId('import-profile-confirm').disabled = false;
+                }).catch(function (error) {
+                    showError('import-profile-error', 'Request failed: ' + error);
+                });
+            });
+
+            byId('import-profile-confirm').addEventListener('click', function () {
+                if (!importFile) { return; }
+                var button = this;
+                button.disabled = true;
+                post(URLS.importConfirm).then(function (result) {
+                    if (result.ok) { window.location.reload(); return; }
+                    showError('import-profile-error', errorsText(result.body.errors) || ('HTTP ' + result.status));
+                }).catch(function (error) {
+                    showError('import-profile-error', 'Request failed: ' + error);
+                    button.disabled = false;
+                });
+            });
+        })();
+    </script>
+</body>
+
+</html>

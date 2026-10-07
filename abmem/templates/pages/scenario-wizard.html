@@ -204,7 +204,33 @@
                                 </div>
                             </div>
                             <hr class="horizontal dark mt-0">
-                            {% include 'components/demand_profile_form.html' with prefix="demand" initial_profile=wizard_config.initial.demand_profile %}
+                            {% include 'components/demand_profile_form.html' with prefix="demand" initial_profile=wizard_config.initial.demand_profile show_library=True %}
+                            <!-- Demand profile library actions (PLAN 2.9) -->
+                            <div class="d-flex flex-wrap align-items-center gap-2 mb-2" id="demand-library-actions">
+                                <input type="file" id="demand-yaml-file" accept=".yaml,.yml" class="d-none" aria-label="Demand profile YAML file">
+                                <button type="button" class="btn btn-outline-secondary btn-sm mb-0" id="demand-yaml-import">Import demand YAML</button>
+                                <button type="button" class="btn btn-outline-secondary btn-sm mb-0" id="demand-save-library-toggle" aria-expanded="false" aria-controls="demand-save-library">Save to library</button>
+                                <a class="text-sm" href="{{ wizard_config.demand_library_list_url }}" target="_blank" rel="noopener">Open the demand profile library</a>
+                            </div>
+                            <p class="text-sm mb-2 d-none" id="demand-library-status" role="status" aria-live="polite"></p>
+                            <div class="border border-radius-lg p-3 mb-3" id="demand-save-library" hidden>
+                                <div class="row">
+                                    <div class="col-12 col-md-5 mb-2">
+                                        <label for="demand-save-name" class="form-label">Library name</label>
+                                        <input type="text" id="demand-save-name" class="form-control" maxlength="100" aria-describedby="demand-save-name-feedback">
+                                        <div class="invalid-feedback" id="demand-save-name-feedback"></div>
+                                    </div>
+                                    <div class="col-12 col-md-5 mb-2">
+                                        <label for="demand-save-description" class="form-label">Description (optional)</label>
+                                        <input type="text" id="demand-save-description" class="form-control" aria-describedby="demand-save-description-feedback">
+                                        <div class="invalid-feedback" id="demand-save-description-feedback"></div>
+                                    </div>
+                                    <div class="col-12 col-md-2 mb-2 d-flex align-items-end">
+                                        <button type="button" class="btn btn-primary btn-sm mb-0 w-100" id="demand-save-library-submit">Save</button>
+                                    </div>
+                                </div>
+                                <p class="text-xs text-secondary mb-0">Adds the current generated profile to the library. The scenario then uses it as "From library".</p>
+                            </div>
                         </div>
                     </section>
 
@@ -431,8 +457,12 @@
             ];
             var ADVANCED_FIELDS = ['seed', 'evaluation_periods', 'observation_lags', 'demand_profile'];
             // Demand-profile component (static assets/js/demand-profile.js, PLAN 2.8).
+            var demandLibrary = (CONFIG.demand_library || []).slice();
             var demandForm = DemandProfileForm.init(document.getElementById('demand-component'), {
-                profile: CONFIG.initial.demand_profile || null
+                profile: CONFIG.initial.demand_profile || null,
+                libraryId: CONFIG.initial.demand_profile_source,
+                library: demandLibrary,
+                loadLibraryProfile: loadLibraryProfile
             });
             var demandLoader = DemandProfileForm.createLoader(CONFIG.demand_preview_url, {
                 delay: 0,
@@ -515,7 +545,8 @@
                     seed: byId('seed').value.trim(),
                     evaluation_periods: byId('evaluation_periods').value.trim(),
                     observation_lags: byId('observation_lags').value.split(',').map(Number),
-                    demand_profile: demandForm.getProfile()
+                    demand_profile: demandForm.getProfile(),
+                    demand_profile_source: demandForm.getLibraryId()
                 };
             }
 
@@ -533,7 +564,7 @@
                 if (Array.prototype.some.call(byId('observation_lags').options, function (o) { return o.value === lags; })) {
                     byId('observation_lags').value = lags;
                 }
-                demandForm.setProfile(values.demand_profile || null);
+                demandForm.setProfile(values.demand_profile || null, values.demand_profile_source);
                 syncDurationPreset();
             }
 
@@ -1237,7 +1268,7 @@
                 addReviewItem(basics, 'Seed', values.seed);
                 addReviewItem(basics, 'Evaluation periods', values.evaluation_periods);
                 addReviewItem(basics, 'Observation lags', values.observation_lags.join(', ') + ' h');
-                addReviewItem(basics, 'Demand', demandText(values.demand_profile));
+                addReviewItem(basics, 'Demand', demandText(values.demand_profile, values.demand_profile_source));
                 var market = byId('review-market');
                 market.textContent = '';
                 addReviewItem(market, 'Pricing strategy', STRATEGY_LABELS[values.strategy] || '-');
@@ -1266,10 +1297,15 @@
                 renderDemandPreview();
             }
 
-            function demandText(profile) {
+            function demandText(profile, libraryId) {
                 if (!profile) { return 'File (marketData.xlsx)'; }
                 var labels = { NORMAL: 'Normal', UNIFORM: 'Uniform', LOGNORMAL: 'Log-normal' };
-                return 'Generated (demand seed ' + profile.seed + ', day ' + profile.day_start_hour + '-' + profile.day_end_hour
+                var origin = 'Generated';
+                if (libraryId !== null && libraryId !== undefined) {
+                    var item = demandLibrary.filter(function (entry) { return entry.id === libraryId; })[0];
+                    origin = 'From library "' + (item ? item.name : '#' + libraryId) + '"';
+                }
+                return origin + ' (demand seed ' + profile.seed + ', day ' + profile.day_start_hour + '-' + profile.day_end_hour
                     + ' h ' + (labels[profile.day.distribution] || profile.day.distribution) + ', night '
                     + (labels[profile.night.distribution] || profile.night.distribution) + ', phi ' + profile.autocorrelation + ')';
             }
@@ -1598,6 +1634,147 @@
                     bootstrap.Tooltip.getOrCreateInstance(node);
                 });
             }
+
+            // ---------------------------------------------------------------- demand profile library (PLAN 2.9)
+
+            function readJsonReply(response) {
+                return response.json().catch(function () { return {}; }).then(function (body) {
+                    return { ok: response.ok, status: response.status, body: body };
+                });
+            }
+
+            function loadLibraryProfile(id, callback) {
+                fetch(CONFIG.demand_profile_detail_url.replace(/\/0\/json\/$/, '/' + id + '/json/'), {
+                    headers: { 'Accept': 'application/json' }
+                }).then(readJsonReply).then(function (result) {
+                    if (result.ok) { callback(null, result.body.profile); return; }
+                    callback(errorsText(result.body.errors) || ('The demand profile could not be loaded (HTTP ' + result.status + ').'), null);
+                }).catch(function (error) {
+                    callback('The demand profile could not be loaded: ' + error, null);
+                });
+            }
+
+            function showDemandLibraryStatus(message, isError) {
+                var box = byId('demand-library-status');
+                box.textContent = message || '';
+                box.classList.toggle('d-none', !message);
+                box.classList.toggle('text-danger', Boolean(isError));
+                box.classList.toggle('text-success', Boolean(message) && !isError);
+            }
+
+            function setSaveFieldError(name, message) {
+                byId('demand-save-' + name).classList.toggle('is-invalid', Boolean(message));
+                var feedback = byId('demand-save-' + name + '-feedback');
+                feedback.textContent = message || '';
+                feedback.classList.toggle('d-block', Boolean(message));
+            }
+
+            function syncDemandLibraryActions() {
+                var generated = demandForm.getSource() === 'generated';
+                byId('demand-save-library-toggle').disabled = !generated;
+                if (!generated) {
+                    byId('demand-save-library').hidden = true;
+                    byId('demand-save-library-toggle').setAttribute('aria-expanded', 'false');
+                }
+            }
+
+            byId('demand-yaml-import').addEventListener('click', function () {
+                byId('demand-yaml-file').value = '';
+                byId('demand-yaml-file').click();
+            });
+
+            // The server validates the file (nothing is written) and the editor takes its settings.
+            byId('demand-yaml-file').addEventListener('change', function () {
+                var file = this.files && this.files[0];
+                if (!file) { return; }
+                var body = new FormData();
+                body.append('file', file);
+                showDemandLibraryStatus('Reading ' + file.name + '...', false);
+                fetch(CONFIG.demand_yaml_parse_url, {
+                    method: 'POST',
+                    headers: { 'Accept': 'application/json', 'X-CSRFToken': csrfToken() },
+                    body: body
+                }).then(readJsonReply).then(function (result) {
+                    if (!result.ok) {
+                        showDemandLibraryStatus('The demand profile file was not loaded: '
+                            + (errorsText(result.body.errors) || ('HTTP ' + result.status)), true);
+                        return;
+                    }
+                    demandForm.setProfile(result.body.profile, null);
+                    byId('demand-save-name').value = result.body.name || '';
+                    byId('demand-save-description').value = result.body.description || '';
+                    showDemandLibraryStatus('Loaded the demand profile "' + result.body.name + '" from ' + file.name
+                        + ' as a generated profile of this scenario.', false);
+                    syncDemandLibraryActions();
+                    scheduleDemand();
+                    scheduleDraft();
+                }).catch(function (error) {
+                    showDemandLibraryStatus('The demand profile file was not loaded: ' + error, true);
+                });
+            });
+
+            byId('demand-save-library-toggle').addEventListener('click', function () {
+                var panel = byId('demand-save-library');
+                panel.hidden = !panel.hidden;
+                this.setAttribute('aria-expanded', panel.hidden ? 'false' : 'true');
+                if (!panel.hidden) { byId('demand-save-name').focus(); }
+            });
+
+            byId('demand-save-library-submit').addEventListener('click', function () {
+                var button = this;
+                setSaveFieldError('name', '');
+                setSaveFieldError('description', '');
+                var clientErrors = demandForm.validate();
+                if (Object.keys(clientErrors).length > 0) {
+                    demandForm.showErrors(clientErrors);
+                    return;
+                }
+                button.disabled = true;
+                fetch(CONFIG.demand_save_to_library_url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRFToken': csrfToken() },
+                    body: JSON.stringify({
+                        name: byId('demand-save-name').value,
+                        description: byId('demand-save-description').value,
+                        profile: demandForm.getProfile()
+                    })
+                }).then(readJsonReply).then(function (result) {
+                    button.disabled = false;
+                    if (!result.ok) {
+                        var errors = result.body.errors || {};
+                        var profileErrors = {};
+                        Object.keys(errors).forEach(function (key) {
+                            if (key === 'name' || key === 'description') {
+                                setSaveFieldError(key, [].concat(errors[key]).join(' '));
+                            } else {
+                                profileErrors[key] = errors[key];
+                            }
+                        });
+                        if (Object.keys(profileErrors).length > 0) { demandForm.showErrors(profileErrors); }
+                        if (!errors.name && !errors.description && Object.keys(profileErrors).length === 0) {
+                            showDemandLibraryStatus('The profile could not be saved (HTTP ' + result.status + ').', true);
+                        }
+                        return;
+                    }
+                    var saved = result.body;
+                    demandLibrary.push({ id: saved.id, name: saved.name });
+                    demandLibrary.sort(function (a, b) { return a.name.toLowerCase() < b.name.toLowerCase() ? -1 : 1; });
+                    demandForm.setLibraryOptions(demandLibrary);
+                    demandForm.setProfile(saved.profile, saved.id);
+                    byId('demand-save-library').hidden = true;
+                    byId('demand-save-library-toggle').setAttribute('aria-expanded', 'false');
+                    showDemandLibraryStatus('Saved "' + saved.name + '" to the demand profile library. The scenario now uses it.', false);
+                    syncDemandLibraryActions();
+                    scheduleDemand();
+                    scheduleDraft();
+                }).catch(function (error) {
+                    button.disabled = false;
+                    showDemandLibraryStatus('The profile could not be saved: ' + error, true);
+                });
+            });
+
+            demandForm.onChange(syncDemandLibraryActions);
+            syncDemandLibraryActions();
 
             // Any change of the demand source or a profile field regenerates the preview (debounced).
             demandForm.onChange(scheduleDemand);

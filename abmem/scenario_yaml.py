@@ -23,6 +23,13 @@ stored in ``Simulation.demand_profile`` (``version`` may be left out)::
 std). Import validates it with ``DemandProfile`` (the wizard's rules);
 export writes it whenever the scenario has a profile.
 
+``scenario.demand_profile`` is optional and informational (PLAN 2.9): the
+name of the library demand profile the scenario's copy came from. Export
+writes it when the scenario is linked to a library profile. Import links the
+new scenario to the library profile of that name only when its settings
+equal ``scenario.demand``. An unknown name or different settings are
+ignored, ``scenario.demand`` is always the profile that is stored.
+
 Enum values are written as member names (``ONLYRESULT``, ``FOSSIL``, ...).
 Decimal values are written as plain YAML numbers when a float holds them
 exactly, else as quoted strings, and are always read back with
@@ -70,7 +77,7 @@ from django.db.models.functions import Lower
 from django.utils import timezone
 
 from . import views as wizard
-from .models import Agent, Simulation
+from .models import Agent, DemandProfileTemplate, Simulation
 from .models.enums import (
     AgentType,
     AlgorithmType,
@@ -84,7 +91,8 @@ from .services.agent import library_service
 from .services.agent.library_service import AgentInput, PlantInput
 from .services.agent.resource_rules import validate_agent_resources
 from .services.algorithms import registry
-from .services.market import market_factory
+from .services.market import demand_library, market_factory
+from .services.market.demand_library import DemandLibraryError
 from .services.simulation import simulation_factory
 
 FORMAT_VERSION: Final[int] = 1
@@ -107,6 +115,7 @@ SCENARIO_KEYS: Final[tuple[str, ...]] = (
     "evaluation_periods",
     "observation_lags",
     "demand",
+    "demand_profile",
 )
 SCENARIO_REQUIRED_KEYS: Final[tuple[str, ...]] = ("name", "mode", "period_type", "periods")
 MARKET_KEYS: Final[tuple[str, ...]] = ("strategy", "bid_bounds")
@@ -309,6 +318,12 @@ def scenario_document(simulation: Simulation) -> dict[str, Any]:
             **(
                 {"demand": copy.deepcopy(simulation.demand_profile)}
                 if simulation.demand_profile is not None
+                else {}
+            ),
+            **(
+                {"demand_profile": simulation.demand_profile_source.name}
+                if simulation.demand_profile is not None
+                and simulation.demand_profile_source is not None
                 else {}
             ),
         },
@@ -629,6 +644,9 @@ class ImportPlan:
                 "evaluation_periods": self.run_settings.evaluation_periods,
                 "observation_lags": list(self.run_settings.observation_lags),
                 "demand": self.run_settings.demand_profile,
+                "demand_profile": _library_profile_name(
+                    self.run_settings.demand_profile_source_id
+                ),
                 "strategy": MarketStrategy(self.header.strategy).name,
                 "bid_bounds": [self.header.lower_bound, self.header.upper_bound],
                 "agents": [spec.name for spec in self.agents],
@@ -683,6 +701,55 @@ def _settings_keys(exc: ValidationError) -> dict[str, str]:
     return keys
 
 
+def _library_profile_name(source_id: int | None) -> str | None:
+    """Return the name of a library demand profile for the import preview.
+
+    Args:
+        source_id: Id of the linked library profile, or None.
+
+    Returns:
+        The library name, or None.
+    """
+    if source_id is None:
+        return None
+    template = DemandProfileTemplate.objects.filter(id=source_id).first()
+    return template.name if template is not None else None
+
+
+def _demand_source_id(scenario: Mapping[str, Any], errors: _Errors) -> int | None:
+    """Return the library profile a scenario's demand is linked to on import.
+
+    Args:
+        scenario: The ``scenario`` mapping of the document.
+        errors: Error collection (``scenario.demand_profile`` must be text
+            or null).
+
+    Returns:
+        The id of the library profile named ``scenario.demand_profile`` when
+        its settings equal ``scenario.demand``, else None.
+    """
+    name = scenario.get("demand_profile")
+    if name is None:
+        return None
+    if not isinstance(name, str):
+        errors.add(
+            "scenario.demand_profile",
+            "scenario.demand_profile must be the name of a library demand profile.",
+        )
+        return None
+    template = demand_library.find_by_name(name)
+    if template is None or scenario.get("demand") is None:
+        return None
+    try:
+        equal = demand_library.validate_profile(
+            scenario["demand"]
+        ) == demand_library.validate_profile(template.profile)
+    except DemandLibraryError:
+        # scenario.demand is reported by the wizard validation.
+        return None
+    return template.id if equal else None
+
+
 def _parse_header(document: dict[str, Any], errors: _Errors) -> tuple[Any, int | None, Any]:
     """Validate ``scenario`` and ``market`` with the wizard rules.
 
@@ -708,6 +775,9 @@ def _parse_header(document: dict[str, Any], errors: _Errors) -> tuple[Any, int |
             payload[key] = scenario[key]
     if "demand" in scenario:
         payload[wizard.DEMAND_PROFILE_KEY] = scenario["demand"]
+    source_id = _demand_source_id(scenario, errors)
+    if source_id is not None:
+        payload[wizard.DEMAND_SOURCE_KEY] = source_id
     enum_ok = True
     for yaml_key, source, wizard_key, enum_cls in (
         ("scenario.mode", scenario, "simulationMode", SimulationMode),

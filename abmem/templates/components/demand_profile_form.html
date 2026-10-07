@@ -4,23 +4,51 @@ Demand-profile editor (PLAN 2.8). Reusable: include with
 and load static assets/js/demand-profile.js, then call DemandProfileForm.init(container) on the
 element with data-prefix. Ids are "<prefix>-<field>", feedback ids "<prefix>-<field>-feedback".
 initial_profile is a profile mapping or None (demand file).
+Optional flags (PLAN 2.9):
+    show_library=True    adds the source "From library" with a select of library profiles
+                         (ids <prefix>-source-library, <prefix>-library, <prefix>-library-select,
+                         <prefix>-library-edit, <prefix>-library-feedback)
+    generated_only=True  hides the source choice, the editor always edits a generated profile
+                         (the library editor page)
 {% endcomment %}
 {% with json_id=prefix|add:"-initial" %}{{ initial_profile|json_script:json_id }}{% endwith %}
-<div class="demand-profile" id="{{ prefix }}-component" data-prefix="{{ prefix }}">
-    <fieldset class="mb-3" id="{{ prefix }}-source">
+<div class="demand-profile" id="{{ prefix }}-component" data-prefix="{{ prefix }}"{% if generated_only %} data-generated-only="true"{% endif %}>
+    <fieldset class="mb-3" id="{{ prefix }}-source"{% if generated_only %} hidden{% endif %}>
         <legend class="form-label text-sm mb-1">Demand source
             <button type="button" class="btn btn-link p-0 ms-1 mb-0 info-tip" data-bs-toggle="tooltip"
-                title="File: the hourly DEMAND column of marketData.xlsx. Generated: synthetic hourly demand from the profile below, with its own seed, so runs with different run seeds see the same demand."
+                title="File: the hourly DEMAND column of marketData.xlsx. Generate: synthetic hourly demand from the profile below, with its own seed, so runs with different run seeds see the same demand.{% if show_library %} From library: a copy of a saved demand profile. The scenario keeps its own copy, so later changes of the library profile do not change it.{% endif %}"
                 aria-label="Help: demand source"><i class="fas fa-circle-info" aria-hidden="true"></i></button>
         </legend>
         <div class="d-flex flex-wrap gap-2" role="radiogroup" aria-label="Demand source">
-            <input type="radio" class="btn-check" name="{{ prefix }}-source" id="{{ prefix }}-source-file" value="file" autocomplete="off" checked>
+            <input type="radio" class="btn-check" name="{{ prefix }}-source" id="{{ prefix }}-source-file" value="file" autocomplete="off"{% if not generated_only %} checked{% endif %}>
             <label class="btn btn-outline-primary btn-sm mb-0" for="{{ prefix }}-source-file">File (marketData.xlsx)</label>
-            <input type="radio" class="btn-check" name="{{ prefix }}-source" id="{{ prefix }}-source-generated" value="generated" autocomplete="off">
-            <label class="btn btn-outline-primary btn-sm mb-0" for="{{ prefix }}-source-generated">Generated</label>
+            <input type="radio" class="btn-check" name="{{ prefix }}-source" id="{{ prefix }}-source-generated" value="generated" autocomplete="off"{% if generated_only %} checked{% endif %}>
+            <label class="btn btn-outline-primary btn-sm mb-0" for="{{ prefix }}-source-generated">Generate</label>
+            {% if show_library %}
+            <input type="radio" class="btn-check" name="{{ prefix }}-source" id="{{ prefix }}-source-library" value="library" autocomplete="off">
+            <label class="btn btn-outline-primary btn-sm mb-0" for="{{ prefix }}-source-library">From library</label>
+            {% endif %}
         </div>
         <div class="invalid-feedback" id="{{ prefix }}-source-feedback"></div>
     </fieldset>
+
+    {% if show_library %}
+    <div class="row mb-2" id="{{ prefix }}-library" hidden>
+        <div class="col-12 col-md-6 mb-2">
+            <label for="{{ prefix }}-library-select" class="form-label">Library profile</label>
+            <select id="{{ prefix }}-library-select" class="form-control" aria-describedby="{{ prefix }}-library-feedback {{ prefix }}-library-help">
+                <option value="">Select a demand profile</option>
+            </select>
+            <div class="invalid-feedback" id="{{ prefix }}-library-feedback"></div>
+        </div>
+        <div class="col-12 col-md-6 mb-2 d-flex align-items-end">
+            <button type="button" class="btn btn-outline-secondary btn-sm mb-0" id="{{ prefix }}-library-edit">Edit copy</button>
+        </div>
+        <div class="col-12">
+            <p class="text-xs text-secondary mb-2" id="{{ prefix }}-library-help">The settings below are read-only. "Edit copy" turns them into a generated profile of this scenario and removes the link to the library profile.</p>
+        </div>
+    </div>
+    {% endif %}
 
     <div id="{{ prefix }}-generated" hidden>
         <div class="row">

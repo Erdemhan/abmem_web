@@ -7,6 +7,7 @@ from django.db.models import CheckConstraint, F, Q
 from django_enumfield import enum
 
 from .base import Base
+from .demand import DemandProfileTemplate
 from .enums import PeriodType, SimulationMode, SimulationState
 
 DEFAULT_SEED: int = 17081999
@@ -41,6 +42,9 @@ class Simulation(Base):
     scenario (``demand_generator.DemandProfile.to_dict``); NULL means the
     demand column of ``marketData.xlsx``. The generated series is never
     stored, it is regenerated from the profile and ``periodNumber``.
+    ``demand_profile_source`` (PLAN 2.9) is the library profile the stored
+    copy came from, for information only. Runs never read it, and editing
+    the library profile does not change the scenario.
     """
 
     name = models.CharField(max_length=20, null=False)
@@ -70,6 +74,13 @@ class Simulation(Base):
     )
     freeze_policies = models.BooleanField(default=False)
     demand_profile = models.JSONField(null=True, blank=True)
+    demand_profile_source = models.ForeignKey(
+        DemandProfileTemplate,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="simulations",
+    )
 
     class Meta:
         constraints = [
