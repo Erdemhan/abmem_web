@@ -1,9 +1,13 @@
 """Market period of a run (ARCHITECTURE.md 6.2).
 
-``run_period`` creates the period, collects one offer per plant from every
-agent in ``Agent.id`` order, clears the market with the pure merit-order
-clearing, books profits in ``Decimal`` and writes everything with a constant
-number of bulk statements inside one transaction (A10).
+``run_period`` collects one offer per plant from every agent in ``Agent.id``
+order, clears the market with the pure merit-order clearing, books profits in
+``Decimal`` and writes everything with a constant number of statements inside
+one transaction (A10, PLAN 1.12): one period insert, one offer
+``bulk_create``, one agent ``bulk_update``, one step-log ``bulk_create`` and
+one market state update. The market state ``WAITINGAGENTS`` is not written,
+because inside the period transaction it is never visible to another
+connection.
 
 The module holds no mutable module-level state (B10).
 """
@@ -27,7 +31,6 @@ if TYPE_CHECKING:
 
 QUANTITY_QUANTUM: Final[Decimal] = Decimal("0.001")
 BUDGET_QUANTUM: Final[Decimal] = Decimal("0.01")
-PTF_SENTINEL: Final[int] = -1
 
 
 def _set_market_state(ctx: SimulationContext, state: MarketState) -> None:
@@ -57,19 +60,15 @@ def run_period(ctx: SimulationContext, t: int) -> Period:
             period is rolled back.
     """
     demand = ctx.demand.at(t).quantize(QUANTITY_QUANTUM, rounding=ROUND_HALF_EVEN)
+    # The period row is inserted once, after clearing, with its final values.
+    # Offers and step-log rows reference the unsaved instance and receive its
+    # primary key when they are bulk-created after the insert.
+    period = Period(market=ctx.market, periodNumber=t, demand=demand)
+    ctx.current_period = period
+    states_before = [rt.agent.state for rt in ctx.agents]
+    budgets_before = [rt.agent.budget for rt in ctx.agents]
     try:
         with transaction.atomic():
-            period = Period.objects.create(
-                market=ctx.market,
-                periodNumber=t,
-                demand=demand,
-                metDemand=PTF_SENTINEL,
-                marketVolume=PTF_SENTINEL,
-                ptf=PTF_SENTINEL,
-            )
-            ctx.current_period = period
-            _set_market_state(ctx, MarketState.WAITINGAGENTS)
-
             offers: list[Offer] = []
             owner_index: list[int] = []
             for index, rt in enumerate(ctx.agents):
@@ -111,18 +110,27 @@ def run_period(ctx: SimulationContext, t: int) -> Period:
                 )
                 agents.append(rt.agent)
 
-            Offer.objects.bulk_create(offers)
             period.ptf = result.ptf
             period.metDemand = result.met_demand
             period.marketVolume = int(result.offered_volume)
-            period.save(
-                update_fields=["ptf", "metDemand", "marketVolume", "updated_at"]
-            )
-            Agent.objects.bulk_update(agents, ["budget", "state"])
+            period.save(force_insert=True)
+            Offer.objects.bulk_create(offers)
+            agent_fields = ["budget"]
+            if any(
+                rt.agent.state != before
+                for rt, before in zip(ctx.agents, states_before)
+            ):
+                agent_fields.append("state")
+            Agent.objects.bulk_update(agents, agent_fields)
             ctx.step_logger.flush()
             _set_market_state(ctx, MarketState.PERIODEND)
     except BaseException:
         ctx.step_logger.clear()
+        # Keep the in-memory agents equal to the rolled-back rows, so the
+        # state comparison above stays valid for a later period.
+        for rt, state, budget in zip(ctx.agents, states_before, budgets_before):
+            rt.agent.state = state
+            rt.agent.budget = budget
         raise
 
     ctx.ptf_history[t] = result.ptf

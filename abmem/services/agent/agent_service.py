@@ -39,7 +39,9 @@ def step(ctx: SimulationContext, rt: AgentRuntimeState, t: int) -> list[Offer]:
     """Run the decision of one agent for period ``t`` (before clearing of ``t``).
 
     Args:
-        ctx: Run context. ``ctx.current_period`` is the saved period ``t``.
+        ctx: Run context. ``ctx.current_period`` is the period ``t``. It is
+            inserted by ``market_service.run_period`` after clearing, the
+            returned offers and the step-log row reference the instance.
         rt: Runtime state of the agent. ``rt.last_outcomes`` holds the
             cleared outcomes of ``t - 1`` when ``t > 1``.
         t: Period number, ``>= 1``.
