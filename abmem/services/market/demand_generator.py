@@ -147,7 +147,10 @@ class Segment:
             if self.mean is None or not self.mean > 0:
                 add("mean", "the mean must be greater than 0 MWh.")
             elif not self.min < self.mean < self.max:
-                add("mean", "the mean must lie strictly between the minimum and the maximum.")
+                add(
+                    "mean",
+                    "the mean must lie strictly between the minimum and the maximum.",
+                )
         return errors
 
     def quantile(self, u: float) -> float:
@@ -175,6 +178,56 @@ class Segment:
             b = (math.log(self.max) - mu) / sigma
             value = math.exp(mu + sigma * _truncated_standard_normal_quantile(a, b, u))
         return min(max(value, self.min), self.max)
+
+    def moments(self) -> tuple[float, float]:
+        """Return the mean and variance of the truncated marginal (FORMULATION EQ-02b).
+
+        UNIFORM on ``[a, b]``: ``(a + b) / 2`` and ``(b - a)^2 / 12``.
+        NORMAL with location ``m`` and scale ``s`` truncated to ``[a, b]``,
+        ``alpha = (a - m) / s``, ``beta = (b - m) / s``,
+        ``Z = Phi(beta) - Phi(alpha)``: mean
+        ``m + s (phi(alpha) - phi(beta)) / Z`` and variance
+        ``s^2 [1 + (alpha phi(alpha) - beta phi(beta)) / Z
+        - ((phi(alpha) - phi(beta)) / Z)^2]``.
+        LOGNORMAL ``X = exp(Y)``, ``Y ~ N(mu, sigma^2)`` truncated to
+        ``[a, b]``: raw moments ``E[X^k] = exp(k mu + k^2 sigma^2 / 2)
+        (Phi(beta - k sigma) - Phi(alpha - k sigma)) / Z`` with ``alpha``,
+        ``beta`` taken on ``ln a``, ``ln b``.
+
+        Returns:
+            ``(mean, variance)`` in MWh and MWh^2.
+        """
+        if self.distribution is Distribution.UNIFORM:
+            return (self.min + self.max) / 2.0, (self.max - self.min) ** 2 / 12.0
+        assert self.mean is not None and self.std is not None
+        cdf = _STANDARD_NORMAL.cdf
+        pdf = _STANDARD_NORMAL.pdf
+        if self.distribution is Distribution.NORMAL:
+            alpha = (self.min - self.mean) / self.std
+            beta = (self.max - self.mean) / self.std
+            z = cdf(beta) - cdf(alpha)
+            ratio = (pdf(alpha) - pdf(beta)) / z
+            mean = self.mean + self.std * ratio
+            variance = self.std**2 * (
+                1.0 + (alpha * pdf(alpha) - beta * pdf(beta)) / z - ratio**2
+            )
+            return mean, max(variance, 0.0)
+        sigma2 = math.log1p((self.std / self.mean) ** 2)
+        sigma = math.sqrt(sigma2)
+        mu = math.log(self.mean) - sigma2 / 2.0
+        alpha = (math.log(self.min) - mu) / sigma
+        beta = (math.log(self.max) - mu) / sigma
+        z = cdf(beta) - cdf(alpha)
+
+        def raw_moment(k: int) -> float:
+            return (
+                math.exp(k * mu + k * k * sigma2 / 2.0)
+                * (cdf(beta - k * sigma) - cdf(alpha - k * sigma))
+                / z
+            )
+
+        mean = raw_moment(1)
+        return mean, max(raw_moment(2) - mean**2, 0.0)
 
 
 def _truncated_standard_normal_quantile(a: float, b: float, u: float) -> float:
@@ -299,12 +352,16 @@ def _parse_segment(
             + ".",
         )
         return None
-    needed = ("mean", "std", "min", "max") if _uses_moments(distribution) else ("min", "max")
+    needed = (
+        ("mean", "std", "min", "max") if _uses_moments(distribution) else ("min", "max")
+    )
     values: dict[str, float] = {}
     ok = True
     for field in needed:
         if field not in raw or raw.get(field) in (None, ""):
-            add(field, f"{field} is required for the {distribution.value} distribution.")
+            add(
+                field, f"{field} is required for the {distribution.value} distribution."
+            )
             ok = False
             continue
         value = _number(raw[field])
@@ -355,6 +412,25 @@ class DemandProfile:
     def night_hours(self) -> int:
         """Number of night hours per 24 hours."""
         return HOURS_PER_DAY - self.day_hours
+
+    def scaling(self) -> tuple[float, float]:
+        """Return the observation scaling constants of the profile (FORMULATION EQ-02b).
+
+        The marginal of a generated hour is the hour-weighted mixture of the
+        two truncated segments, ``w_d = day_hours / 24`` and ``w_n = 1 - w_d``:
+        ``mean = w_d mu_d + w_n mu_n`` and
+        ``var = w_d (v_d + mu_d^2) + w_n (v_n + mu_n^2) - mean^2``.
+
+        Returns:
+            ``(mean, std)`` of the generated demand in MWh.
+        """
+        w_day = self.day_hours / HOURS_PER_DAY
+        w_night = 1.0 - w_day
+        mean_day, var_day = self.day.moments()
+        mean_night, var_night = self.night.moments()
+        mean = w_day * mean_day + w_night * mean_night
+        second = w_day * (var_day + mean_day**2) + w_night * (var_night + mean_night**2)
+        return mean, math.sqrt(max(second - mean**2, 0.0))
 
     def to_dict(self) -> dict[str, Any]:
         """Return the JSON form stored in ``Simulation.demand_profile``.
@@ -462,7 +538,12 @@ class DemandProfile:
         segments = {
             name: _parse_segment(data.get(name), name, errors) for name in SEGMENT_NAMES
         }
-        if errors or phi is None or segments["day"] is None or segments["night"] is None:
+        if (
+            errors
+            or phi is None
+            or segments["day"] is None
+            or segments["night"] is None
+        ):
             # Report the semantic errors of the parts that did parse as well.
             if segments["day"] is not None:
                 errors.update(segments["day"].errors("day"))

@@ -5,7 +5,7 @@
 > and this file disagree, the code is corrected, not this file.
 >
 > **Status (2026-10-07):** skeleton plus the entries approved by the user on
-> 2026-10-07 (EQ-02, experiment principles in section 9, EQ-11a, EQ-11b). All
+> 2026-10-07 (EQ-02, EQ-02b, EQ-02c, experiment principles in section 9, EQ-11a, EQ-11b). All
 > other sections are still to be formalised. Approved decisions that each section must formalise are
 > listed under "To formalise" with their source (PLAN.md K1-K11,
 > ARCHITECTURE.md section 11 OQ-1..OQ-19).
@@ -33,6 +33,18 @@ To formalise: `abmem/data/marketData.xlsx` source and the 8808 valid DEMAND rows
 - Source: decision OQ-2 (ARCHITECTURE.md section 11).
 - Explanation: fixed scaling constants for the demand feature of the observation, computed once from all valid rows. They only rescale the input and are not a fitted model. `tests/agent/test_observation.py::test_scaling_constants_match_market_data` recomputes them from the file.
 - Code: `abmem/services/agent/observation.py::DEMAND_SCALING_MEAN`, `DEMAND_SCALING_STD`
+
+### EQ-02c: Synthetic demand generation (approved 2026-10-07)
+- Formula: a latent stationary Gaussian AR(1) process $z_1 = \varepsilon_1$, $z_t = \phi z_{t-1} + \sqrt{1-\phi^2}\,\varepsilon_t$ with $\varepsilon_t \overset{iid}{\sim} N(0,1)$ and $\phi \in [0,1)$, so that $z_t \sim N(0,1)$ for every $t$. The uniform $u_t = \Phi(z_t)$, clipped to $[10^{-12}, 1-10^{-12}]$, is mapped through the quantile function of the segment of the hour, $d_t = F_{s(t)}^{-1}(u_t)$, rounded to 0.001 MWh. The hour of period $t$ is $h_t = (t-1) \bmod 24$, and $s(t)$ is the day segment if $h_{\text{start}} \le h_t < h_{\text{end}}$ and the night segment otherwise. Each segment $s$ has a marginal on $[a_s, b_s]$: Uniform on $[a_s, b_s]$, Normal $N(m_s, s_s^2)$ truncated to $[a_s, b_s]$, or Log-normal $\exp(Y)$ with $Y \sim N(\mu_{\ln}, \sigma_{\ln}^2)$, $\sigma_{\ln}^2 = \ln(1 + s_s^2/m_s^2)$, $\mu_{\ln} = \ln m_s - \sigma_{\ln}^2/2$, truncated to $[a_s, b_s]$. For the truncated Normal $F^{-1}(u) = m_s + s_s\,\Phi^{-1}(\Phi(\alpha) + u(\Phi(\beta)-\Phi(\alpha)))$ with $\alpha = (a_s - m_s)/s_s$, $\beta = (b_s - m_s)/s_s$, and analogously on the log scale for the Log-normal.
+- Source: Gaussian copula construction (Nelsen, 2006, An Introduction to Copulas, 2nd ed., Sec. 2.3 and 3.1), stationary AR(1) (Box, Jenkins, Reinsel and Ljung, 2015, Time Series Analysis, 5th ed., Sec. 3.2), inverse transform sampling of a truncated distribution (Devroye, 1986, Non-Uniform Random Variate Generation, Sec. II.2).
+- Explanation: $\phi$ controls the correlation of consecutive hours and the marginal of each hour is exactly the chosen truncated segment distribution. The process uses its own seed (the demand seed) and one innovation per period in period order, so the series of $m$ periods is a prefix of the series of $n \ge m$ periods. $m_s$ and $s_s$ are the mean and standard deviation entered for the segment before truncation.
+- Code: `abmem/services/market/demand_generator.py::generate_demand`, `Segment.quantile`, `night_mask`
+
+### EQ-02b: Demand scaling of a generated profile (approved 2026-10-07)
+- Formula: for a run with a stored demand profile the demand feature is $\tilde d_t = (d_t - \mu_g)/\sigma_g$, where $\mu_g$, $\sigma_g$ are the mean and standard deviation of the hour-weighted mixture of the two truncated segments of EQ-02c: $w_d = (h_{\text{end}} - h_{\text{start}})/24$, $w_n = 1 - w_d$, $\mu_g = w_d\mu_d + w_n\mu_n$, $\sigma_g^2 = w_d(v_d + \mu_d^2) + w_n(v_n + \mu_n^2) - \mu_g^2$. Segment moments: Uniform $\mu = (a+b)/2$, $v = (b-a)^2/12$. Truncated Normal with $Z = \Phi(\beta)-\Phi(\alpha)$: $\mu = m + s\,(\varphi(\alpha)-\varphi(\beta))/Z$, $v = s^2\left[1 + (\alpha\varphi(\alpha) - \beta\varphi(\beta))/Z - ((\varphi(\alpha)-\varphi(\beta))/Z)^2\right]$. Truncated Log-normal with $\alpha = (\ln a - \mu_{\ln})/\sigma_{\ln}$, $\beta = (\ln b - \mu_{\ln})/\sigma_{\ln}$: $E[X^k] = \exp(k\mu_{\ln} + k^2\sigma_{\ln}^2/2)\,[\Phi(\beta - k\sigma_{\ln}) - \Phi(\alpha - k\sigma_{\ln})]/[\Phi(\beta)-\Phi(\alpha)]$, $\mu = E[X]$, $v = E[X^2] - \mu^2$. Runs without a profile keep $\mu_d$, $\sigma_d$ of EQ-02.
+- Source: truncated Normal moments (Johnson, Kotz and Balakrishnan, 1994, Continuous Univariate Distributions, Vol. 1, 2nd ed., Sec. 13.10.1), Log-normal partial moments (same, Sec. 14.3), moments of a finite mixture (Frühwirth-Schnatter, 2006, Finite Mixture and Markov Switching Models, Sec. 1.2.4).
+- Explanation: the file constants of EQ-02 do not match a generated series with a different level, so the demand feature is centred and scaled with the exact moments of the marginal of a generated hour. They follow from the profile alone, do not depend on the horizon or the seed, and are the same in training and evaluation. With $\phi > 0$ the hour-to-hour dependence does not change these marginal moments. `tests/market/test_demand_scaling.py` checks them against numerical integration and a long generated series.
+- Code: `abmem/services/market/demand_generator.py::Segment.moments`, `DemandProfile.scaling`, `abmem/services/simulation/context.py::demand_scaling_for`, `abmem/services/agent/observation.py::ObservationNormalizer.for_market`
 
 ## 3. Market model
 To formalise: bid format (one price-quantity bid per plant and period, quantity = capacity), bid bounds, merit order, PAYASBID and PAYASPTF acceptance prices, equal-share split of equal-price groups capped at bid quantity (OQ-18), supply shortfall, rejection of zero demand (OQ-12), met demand (B11).

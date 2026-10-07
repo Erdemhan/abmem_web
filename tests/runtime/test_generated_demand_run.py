@@ -10,6 +10,10 @@ from abmem.models import Simulation
 from abmem.models.enums import AlgorithmType, SimulationState
 from abmem.models.models import Period
 from abmem.services.agent import library_service
+from abmem.services.agent.observation import (
+    DEMAND_SCALING_MEAN,
+    DEMAND_SCALING_STD,
+)
 from abmem.services.market.demand import DemandSeries
 from abmem.services.market.demand_generator import DemandProfile, generate_demand
 from abmem.services.simulation import simulation_service
@@ -130,6 +134,17 @@ def test_build_uses_from_profile(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
+def test_build_scales_demand_with_the_profile_moments(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fail_if_excel_is_read(monkeypatch)
+    run = library_service.clone_scenario_for_run(_scenario(48))
+    ctx = SimulationContext.build(run, export_json=False)
+    mean, std = DemandProfile.from_dict(PROFILE).scaling()
+    assert ctx.normalizer.mean[0] == mean
+    assert ctx.normalizer.scale[0] == std
+
+
 def test_invalid_stored_profile_fails_validation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -145,6 +160,8 @@ def test_null_profile_reads_the_file(fast_demand: DemandSeries) -> None:
     assert run.demand_profile is None
     ctx = SimulationContext.build(run, export_json=False)
     assert ctx.demand is fast_demand
+    assert ctx.normalizer.mean[0] == DEMAND_SCALING_MEAN
+    assert ctx.normalizer.scale[0] == DEMAND_SCALING_STD
 
 
 def test_duplicate_copies_the_profile() -> None:

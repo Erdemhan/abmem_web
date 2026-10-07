@@ -20,7 +20,12 @@ from typing import TYPE_CHECKING, Any, Final
 import numpy as np
 
 from abmem.services.agent.failstack import FailStackParams, FailStackState
-from abmem.services.agent.observation import ALLOWED_LAG_SETS, ObservationNormalizer
+from abmem.services.agent.observation import (
+    ALLOWED_LAG_SETS,
+    DEMAND_SCALING_MEAN,
+    DEMAND_SCALING_STD,
+    ObservationNormalizer,
+)
 from abmem.services.diagnostics.step_logger import StepLogger
 from abmem.services.market.accounting import OfferOutcome
 from abmem.services.market.demand import DemandDataError, DemandSeries
@@ -28,6 +33,7 @@ from abmem.services.market.demand import DemandDataError, DemandSeries
 from .seeding import seed_everything, spawn_agent_rngs
 
 if TYPE_CHECKING:
+    from abmem.services.market.demand_generator import DemandProfile
     from abmem.models import Agent, Market, Simulation
     from abmem.models.enums import AlgorithmType
     from abmem.models import PolicyCheckpoint
@@ -123,21 +129,52 @@ def demand_for(simulation: Simulation, periods: int) -> DemandSeries:
         DemandDataError: The demand file cannot be read or the stored
             profile is invalid.
     """
-    if simulation.demand_profile is not None:
-        from django.core.exceptions import ValidationError
-
-        from abmem.services.market.demand_generator import DemandProfile
-
-        try:
-            profile = DemandProfile.from_dict(simulation.demand_profile)
-        except ValidationError as error:
-            raise DemandDataError(
-                f"invalid demand profile: {'; '.join(error.messages)}"
-            ) from error
+    profile = _stored_profile(simulation)
+    if profile is not None:
         return DemandSeries.from_profile(profile, periods)
     from abmem.constants.paths import DATA_DIR
 
     return DemandSeries.from_excel(DATA_DIR / MARKET_DATA_FILE, column=DEMAND_COLUMN)
+
+
+def demand_scaling_for(simulation: Simulation) -> tuple[float, float]:
+    """Return the demand observation scaling of a simulation.
+
+    Args:
+        simulation: Run or scenario.
+
+    Returns:
+        ``DemandProfile.scaling()`` of the stored profile (EQ-02b), or
+        ``(DEMAND_SCALING_MEAN, DEMAND_SCALING_STD)`` of the demand file
+        (EQ-02) when the profile is NULL.
+
+    Raises:
+        DemandDataError: The stored profile is invalid.
+    """
+    profile = _stored_profile(simulation)
+    if profile is None:
+        return DEMAND_SCALING_MEAN, DEMAND_SCALING_STD
+    return profile.scaling()
+
+
+def _stored_profile(simulation: Simulation) -> DemandProfile | None:
+    """Parse ``simulation.demand_profile``, or return None when it is NULL.
+
+    Raises:
+        DemandDataError: The stored profile is invalid.
+    """
+    if simulation.demand_profile is None:
+        return None
+    from django.core.exceptions import ValidationError
+
+    from abmem.services.market.demand_generator import DemandProfile
+
+    try:
+        return DemandProfile.from_dict(simulation.demand_profile)
+    except ValidationError as error:
+        raise DemandDataError(
+            f"invalid demand profile: {'; '.join(error.messages)}"
+        ) from error
 
 
 class SimulationValidationError(ValueError):
@@ -322,6 +359,7 @@ class SimulationContext:
             if demand is None:
                 demand = demand_for(simulation, period_number)
             demand.validate_horizon(period_number)
+            demand_mean, demand_std = demand_scaling_for(simulation)
         except DemandDataError as error:
             raise SimulationValidationError(str(error)) from error
 
@@ -345,7 +383,13 @@ class SimulationContext:
             raise SimulationValidationError(str(error)) from error
 
         defaults = algorithm_defaults()
-        normalizer = ObservationNormalizer.for_market(lags, float(low), float(high))
+        normalizer = ObservationNormalizer.for_market(
+            lags,
+            float(low),
+            float(high),
+            demand_mean=demand_mean,
+            demand_std=demand_std,
+        )
         states: list[AgentRuntimeState] = []
         for agent, rng in zip(agents, rngs):
             plants = tuple(plants_by_agent.get(agent.pk, ()))

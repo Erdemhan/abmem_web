@@ -182,26 +182,42 @@ class ObservationNormalizer:
 
     @classmethod
     def for_market(
-        cls, lags: Sequence[int], price_low: float, price_high: float
+        cls,
+        lags: Sequence[int],
+        price_low: float,
+        price_high: float,
+        demand_mean: float = DEMAND_SCALING_MEAN,
+        demand_std: float = DEMAND_SCALING_STD,
     ) -> Self:
         """Create the normaliser for a market's bid bounds.
 
-        Demand uses ``(DEMAND_SCALING_MEAN, DEMAND_SCALING_STD)``. Each price
-        feature uses ``mean = (low + high) / 2`` and ``scale = (high - low) / 2``.
+        Demand uses ``(demand_mean, demand_std)``, by default the file
+        constants of EQ-02 and for generated demand the profile moments of
+        EQ-02b. Each price feature uses ``mean = (low + high) / 2`` and
+        ``scale = (high - low) / 2``.
 
         Args:
             lags: Lag set, must be in ``ALLOWED_LAG_SETS``.
             price_low: Lower bid bound of the market.
             price_high: Upper bid bound of the market.
+            demand_mean: Centre of the demand feature in MWh.
+            demand_std: Scale of the demand feature in MWh, finite and > 0.
 
         Returns:
             The normaliser for ``1 + len(lags)`` features.
 
         Raises:
             ValueError: If the lag set is not allowed, a bound is non-finite,
-                or ``price_high <= price_low``.
+                ``price_high <= price_low``, ``demand_mean`` is non-finite, or
+                ``demand_std`` is not finite and positive.
         """
         lag_tuple = _validate_lags(lags)
+        d_mean = float(demand_mean)
+        d_std = float(demand_std)
+        if not math.isfinite(d_mean):
+            raise ValueError(f"demand_mean must be finite, got {d_mean}")
+        if not (math.isfinite(d_std) and d_std > 0.0):
+            raise ValueError(f"demand_std must be finite and > 0, got {d_std}")
         low = float(price_low)
         high = float(price_high)
         if not (math.isfinite(low) and math.isfinite(high)):
@@ -210,10 +226,10 @@ class ObservationNormalizer:
             raise ValueError(f"price_high must be > price_low, got [{low}, {high}]")
         n_prices = len(lag_tuple)
         mean = np.array(
-            [DEMAND_SCALING_MEAN] + [(low + high) / 2.0] * n_prices, dtype=np.float64
+            [d_mean] + [(low + high) / 2.0] * n_prices, dtype=np.float64
         )
         scale = np.array(
-            [DEMAND_SCALING_STD] + [(high - low) / 2.0] * n_prices, dtype=np.float64
+            [d_std] + [(high - low) / 2.0] * n_prices, dtype=np.float64
         )
         return cls(mean=mean, scale=scale)
 
