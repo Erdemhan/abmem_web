@@ -901,7 +901,7 @@ Tüm düzeltmeler `refactor/plan-execution` dalındadır (HEAD `d4e675f`, 1357 t
 | A3 | Düzeltildi | `a4c0b35` | Çift tanımlar kaldırıldı. |
 | A4 | Düzeltildi | `a4c0b35`, `62a6815` | YAML başlatma yolu kaldırıldı. CCGT `FOSSIL`. |
 | A5 | Düzeltildi | `381f439` | `sys.path` ve import anındaki `django.setup()` yok. Testle korunuyor. |
-| A6 | Düzeltildi | `a427224`, `1a83f43` | Migration'lar git'te, gizli bilgiler ortam değişkeninde. Eski anahtar ve parola git geçmişinde duruyor. |
+| A6 | Düzeltildi | `a427224`, `1a83f43` | Migration'lar git'te, gizli bilgiler ortam değişkeninde. Eski `SECRET_KEY` artık kullanılmıyor (`.env`'de yeni anahtar). Eski veritabanı parolası git geçmişinde duruyor, veritabanı paylaşılmadığı için kullanıcı kararıyla (2026-10-07) değiştirilmedi. |
 | A7 | Düzeltildi | `8c4f09c` | WebSocket katmanı kaldırıldı (K10). |
 | A8 | Düzeltildi | `b1d641a` | `DemandSeries` uzunluk, NaN ve sıfır talep doğrulaması. |
 | A9 | Kısmen | birçok commit | Testler (1357) ve `requirements.txt` var. Eğitilmiş modellerin kaydedilip yüklenmesi hâlâ yok. |
