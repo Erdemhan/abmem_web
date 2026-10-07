@@ -73,6 +73,32 @@
                                 placeholder="Period Number" aria-label="Period Number"
                                 aria-describedby="password-addon" value="{{ simulation.periodNumber }}" required>
                         </div>
+                        <h6 class="pt-2">Run Settings</h6>
+                        <div class="mb-3">
+                            <label for="seed">Seed</label>
+                            <input type="number" id="seed" name="seed" class="form-control run-setting" min="0"
+                                max="4294967295" step="1" value="{{ run_seed }}" aria-describedby="seed-feedback" required>
+                            <div class="invalid-feedback" id="seed-feedback"></div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="evaluation_periods">Evaluation Periods</label>
+                            <input type="number" id="evaluation_periods" name="evaluation_periods"
+                                class="form-control run-setting" min="0" step="1" value="{{ run_evaluation_periods }}"
+                                aria-describedby="evaluation_periods-help evaluation_periods-feedback" required>
+                            <small id="evaluation_periods-help" class="form-text text-muted">Final periods without
+                                exploration and learning. 0 or less than the period number.</small>
+                            <div class="invalid-feedback" id="evaluation_periods-feedback"></div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="observation_lags">Observation Lags</label>
+                            <select class="form-control run-setting" id="observation_lags" name="observation_lags"
+                                aria-describedby="observation_lags-feedback">
+                                {% for value, label in observation_lag_choices %}
+                                <option value="{{ value }}" {% if value == run_observation_lags %}selected{% endif %}>{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                            <div class="invalid-feedback" id="observation_lags-feedback"></div>
+                        </div>
 
                 </div>
                 <div class="col-3 mx-9">
@@ -181,9 +207,11 @@
                         <button type="button" class="btn btn-primary" onclick="openLibraryModal()">Select from Library</button>
                     </div>
                 </row>
+                <div id="form-warning" class="alert alert-warning text-white d-none" role="status"></div>
                 <div id="form-errors" class="alert alert-danger text-white d-none" role="alert"></div>
+                <div id="form-success" class="alert alert-success text-white d-none" role="status"></div>
                 <row class="form-group row">
-                    <button type="button" class="btn btn-success col-3" onclick="submitForm()">Update Simulation</button>
+                    <button type="button" id="save-scenario" class="btn btn-success col-3" onclick="submitForm()">Update Simulation</button>
                 </row>
                 </form>
             </div>
@@ -276,7 +304,7 @@
                 }
             });
             if (incompatibleRows.length > 0) {
-                alert('These plants are not allowed for the selected agent type and will be removed: ' + names.join(', '));
+                showBanner('#form-warning', ['These plants are not allowed for the selected agent type and were removed: ' + names.join(', ')]);
                 incompatibleRows.forEach(function ($row) { $row.remove(); });
             }
             $agentRow.find('.plant-resource').each(function () {
@@ -287,6 +315,14 @@
         $(document).on('change', '.agent-type', function () {
             applyAgentType($(this).closest('tr.agent'));
         });
+
+        // Non-blocking in-page message banner (replaces browser alert dialogs).
+        function showBanner(selector, messages) {
+            var $box = $(selector);
+            $box.empty();
+            messages.forEach(function (message) { $box.append($('<div>').text(message)); });
+            $box.removeClass('d-none');
+        }
 
         function showFormErrors(xhr) {
             var $box = $('#form-errors');
@@ -644,10 +680,30 @@
         }
 
         function showMessages(messages) {
-            var $box = $('#form-errors');
-            $box.empty();
-            messages.forEach(function (message) { $box.append($('<div>').text(message)); });
-            $box.removeClass('d-none');
+            showBanner('#form-errors', messages);
+        }
+
+        // Inputs whose ids equal the error keys of the settings (OQ-16).
+        var RUN_SETTING_FIELDS = ['seed', 'evaluation_periods', 'observation_lags', 'periodNumber'];
+
+        function clearRunSettingErrors() {
+            RUN_SETTING_FIELDS.forEach(function (field) {
+                $('#' + field).removeClass('is-invalid');
+                $('#' + field + '-feedback').text('');
+            });
+        }
+
+        function highlightRunSettingErrors(errors) {
+            RUN_SETTING_FIELDS.forEach(function (field) {
+                if (errors[field]) {
+                    $('#' + field).addClass('is-invalid');
+                    $('#' + field + '-feedback').text(errors[field].join(' '));
+                }
+            });
+        }
+
+        function observationLagsValue() {
+            return ($('#observation_lags').val() || '').split(',').map(Number);
         }
 
         // Errors keyed agents[i].name also mark the name of row i.
@@ -670,9 +726,14 @@
                 simulationMode: $('#mode').val(),
                 periodNumber: $('#periodNumber').val(),
                 periodType: $('#periodType').val(),
+                seed: $('#seed').val(),
+                evaluation_periods: $('#evaluation_periods').val(),
+                observation_lags: observationLagsValue(),
                 agents: collectAgentsPayload(),
                 csrfmiddlewaretoken: '{{ csrf_token }}'
             };
+            clearRunSettingErrors();
+            $('#form-errors, #form-success').addClass('d-none');
             var checks = agentRows().map(function () { return checkRowName($(this)); }).get();
             Promise.all(checks).then(function (results) {
                 if (results.indexOf(false) !== -1) {
@@ -686,8 +747,11 @@
                     contentType: "application/json",
                     success: function (response) {
                         if (response.status === 'success') {
-                            alert(successMessage);
-                            window.location.href = "{% url 'simulation_list_proxy' %}";
+                            $('#save-scenario').prop('disabled', true);
+                            showBanner('#form-success', [successMessage + ' Redirecting to the templates list...']);
+                            setTimeout(function () {
+                                window.location.href = "{% url 'simulation_list_proxy' %}";
+                            }, 1200);
                         } else {
                             showMessages(['The scenario could not be saved.']);
                         }
@@ -697,6 +761,7 @@
                         showFormErrors(xhr);
                         if (xhr.responseJSON && xhr.responseJSON.errors) {
                             highlightRowErrors(xhr.responseJSON.errors);
+                            highlightRunSettingErrors(xhr.responseJSON.errors);
                         }
                     }
                 });

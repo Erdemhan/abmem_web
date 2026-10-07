@@ -23,6 +23,11 @@ from django.views.decorators.csrf import csrf_exempt
 from .forms import AgentForm, PlantForm, ResourceForm
 from .models import Agent, Simulation, enums
 from .models.market import Market
+from .models.simulation import (
+    ALLOWED_OBSERVATION_LAGS,
+    DEFAULT_SEED,
+    default_observation_lags,
+)
 from .models.models import Plant, Portfolio, Resource
 from .services.agent import library_service
 from .services.agent.library_service import (
@@ -56,6 +61,9 @@ MODE_NEW: Final[str] = "new"
 MODE_LIBRARY: Final[str] = "library"
 MODE_SCENARIO: Final[str] = "scenario"
 SCENARIO_AGENT_MODES: Final[tuple[str, ...]] = (MODE_NEW, MODE_LIBRARY, MODE_SCENARIO)
+
+# Exclusive upper bound of Simulation.seed (check constraint simulation_seed_range).
+SEED_UPPER_BOUND: Final[int] = 2**32
 
 
 def _add_errors(
@@ -858,6 +866,219 @@ def _save_scenario(
     return None
 
 
+@dataclass(frozen=True)
+class RunSettings:
+    """Validated run settings of a scenario payload (OQ-16).
+
+    Attributes:
+        seed: Seed copied to every run of the scenario.
+        evaluation_periods: Number of final periods without exploration and
+            learning (0 or less than ``periodNumber``).
+        observation_lags: One of ``ALLOWED_OBSERVATION_LAGS``.
+    """
+
+    seed: int
+    evaluation_periods: int
+    observation_lags: list[int]
+
+    def apply(self, simulation: Simulation) -> None:
+        """Set the settings on a simulation (the caller saves it).
+
+        Args:
+            simulation: The simulation to update in place.
+        """
+        simulation.seed = self.seed
+        simulation.evaluation_periods = self.evaluation_periods
+        simulation.observation_lags = list(self.observation_lags)
+
+
+def _coerce_payload_int(raw_value: Any) -> int | None:
+    """Convert a JSON integer or decimal digit string to ``int``.
+
+    Args:
+        raw_value: Payload value.
+
+    Returns:
+        The integer, or None when ``raw_value`` is not an integer (booleans,
+        floats with a fraction, empty or non-numeric strings, other types).
+    """
+    if isinstance(raw_value, bool):
+        return None
+    if isinstance(raw_value, int):
+        return raw_value
+    if isinstance(raw_value, float):
+        return int(raw_value) if raw_value.is_integer() else None
+    if isinstance(raw_value, str) and re.fullmatch(r"\s*-?\d+\s*", raw_value):
+        return int(raw_value)
+    return None
+
+
+def _coerce_observation_lags(raw_value: Any) -> list[int] | None:
+    """Convert a payload lag set (list or comma separated string) to a list.
+
+    Args:
+        raw_value: Payload value, for example ``[1, 24]`` or ``"1,24,168"``.
+
+    Returns:
+        The lag list when it equals one of ``ALLOWED_OBSERVATION_LAGS``, else None.
+    """
+    if isinstance(raw_value, str):
+        items: list[Any] = [part for part in raw_value.split(",")]
+    elif isinstance(raw_value, list):
+        items = raw_value
+    else:
+        return None
+    lags = [_coerce_payload_int(item) for item in items]
+    if any(lag is None for lag in lags):
+        return None
+    for allowed in ALLOWED_OBSERVATION_LAGS:
+        if lags == allowed:
+            return list(allowed)
+    return None
+
+
+def _parse_run_settings(
+    data: Mapping[str, Any], period_number: int, current: Simulation | None
+) -> RunSettings:
+    """Validate ``seed``, ``evaluation_periods`` and ``observation_lags`` (OQ-16).
+
+    A missing key takes the value of ``current`` (update page) or the model
+    default (create page). The rules mirror the check constraints of
+    ``Simulation``.
+
+    Args:
+        data: Decoded scenario payload.
+        period_number: Validated ``periodNumber`` of the payload.
+        current: The edited scenario, or None on create.
+
+    Returns:
+        The validated settings.
+
+    Raises:
+        ValidationError: With field keys ``seed``, ``evaluation_periods`` and
+            ``observation_lags``.
+    """
+    errors: dict[str, list[str]] = {}
+
+    if "seed" in data:
+        seed = _coerce_payload_int(data["seed"])
+        if seed is None or not 0 <= seed < SEED_UPPER_BOUND:
+            errors["seed"] = [
+                f"Seed must be an integer from 0 to {SEED_UPPER_BOUND - 1}."
+            ]
+            seed = DEFAULT_SEED
+    else:
+        seed = current.seed if current is not None else DEFAULT_SEED
+
+    if "evaluation_periods" in data:
+        evaluation_periods = _coerce_payload_int(data["evaluation_periods"])
+    else:
+        evaluation_periods = current.evaluation_periods if current is not None else 0
+    if evaluation_periods is None or evaluation_periods < 0:
+        errors["evaluation_periods"] = [
+            "Evaluation periods must be a non-negative integer."
+        ]
+        evaluation_periods = 0
+    elif evaluation_periods > 0 and evaluation_periods >= period_number:
+        errors["evaluation_periods"] = [
+            "Evaluation periods must be less than the number of periods "
+            f"({period_number})."
+        ]
+
+    if "observation_lags" in data:
+        observation_lags = _coerce_observation_lags(data["observation_lags"])
+        if observation_lags is None:
+            errors["observation_lags"] = [
+                "Observation lags must be one of: "
+                + " or ".join(
+                    ", ".join(map(str, lags)) for lags in ALLOWED_OBSERVATION_LAGS
+                )
+                + "."
+            ]
+            observation_lags = default_observation_lags()
+    elif current is not None:
+        observation_lags = list(current.observation_lags)
+    else:
+        observation_lags = default_observation_lags()
+
+    if errors:
+        raise ValidationError(errors)
+    return RunSettings(seed, evaluation_periods, observation_lags)
+
+
+def _parse_period_number(data: Mapping[str, Any]) -> int:
+    """Validate ``periodNumber`` of a scenario payload.
+
+    Args:
+        data: Decoded scenario payload.
+
+    Returns:
+        The positive number of periods.
+
+    Raises:
+        ValidationError: With field key ``periodNumber``.
+    """
+    period_number = _coerce_payload_int(data.get("periodNumber"))
+    if period_number is None or period_number < 1:
+        raise ValidationError(
+            {"periodNumber": ["The number of periods must be a positive integer."]}
+        )
+    return period_number
+
+
+def _parse_scenario_settings(
+    data: Mapping[str, Any], current: Simulation | None
+) -> tuple[int, RunSettings]:
+    """Validate ``periodNumber`` and the run settings of a scenario payload.
+
+    Args:
+        data: Decoded scenario payload.
+        current: The edited scenario, or None on create.
+
+    Returns:
+        ``(period_number, run_settings)``.
+
+    Raises:
+        ValidationError: With the field keys of ``_parse_period_number`` and
+            ``_parse_run_settings``.
+    """
+    period_number = _parse_period_number(data)
+    return period_number, _parse_run_settings(data, period_number, current)
+
+
+def _validate_scenario_payload(
+    data: Mapping[str, Any], current: Simulation | None, market: Market | None
+) -> tuple[int, RunSettings, list[ScenarioAgentEntry]] | JsonResponse:
+    """Validate the settings and the agents of a scenario payload together.
+
+    Errors of both parts are merged into one HTTP 400 response, so the page
+    can show every field error at once. Nothing is written.
+
+    Args:
+        data: Decoded scenario payload.
+        current: The edited scenario, or None on create.
+        market: Market of the edited scenario, or None on create.
+
+    Returns:
+        ``(period_number, run_settings, entries)``, or the HTTP 400
+        ``JsonResponse`` with ``{"errors": {field: [messages]}}``.
+    """
+    errors: dict[str, list[str]] = {}
+    settings: tuple[int, RunSettings] | None = None
+    entries: list[ScenarioAgentEntry] = []
+    try:
+        settings = _parse_scenario_settings(data, current)
+    except ValidationError as exc:
+        _add_errors(errors, exc, "settings", "")
+    try:
+        entries = _parse_scenario_agents(data.get("agents", []), market=market)
+    except ValidationError as exc:
+        _add_errors(errors, exc, "plants", "")
+    if errors or settings is None:
+        return JsonResponse({"errors": errors}, status=400)
+    return settings[0], settings[1], entries
+
+
 def _plant_form_errors(plant_forms: list[PlantForm]) -> dict[str, list[str]]:
     """Collect the errors of invalid plant forms under the ``plants`` key.
 
@@ -1195,18 +1416,53 @@ def simulation_list(request):
     return render(request, "pages/simulation-list.html", {"simulations": simulations})
 
 
-def _scenario_page_context(**extra: Any) -> dict[str, Any]:
+def _lags_value(lags: list[int]) -> str:
+    """Return the select option value of a lag set, for example ``"1,24"``.
+
+    Args:
+        lags: Observation lag set.
+
+    Returns:
+        The lags joined by commas.
+    """
+    return ",".join(str(lag) for lag in lags)
+
+
+def _scenario_page_context(
+    simulation: Simulation | None = None, **extra: Any
+) -> dict[str, Any]:
     """Return the template context shared by the scenario create/update pages.
 
     Args:
+        simulation: The edited scenario (update page), or None (create page,
+            the run settings take the model defaults).
         **extra: Additional context entries.
 
     Returns:
-        Context with ``resources`` and ``allowed_energy_types``.
+        Context with ``resources``, ``allowed_energy_types``, the run settings
+        ``run_seed``, ``run_evaluation_periods``, ``run_observation_lags``
+        (option value) and ``observation_lag_choices`` (value, label pairs).
+        ``simulation`` is included when given.
     """
+    if simulation is not None:
+        seed = simulation.seed
+        evaluation_periods = simulation.evaluation_periods
+        lags = list(simulation.observation_lags)
+        extra["simulation"] = simulation
+    else:
+        seed = DEFAULT_SEED
+        evaluation_periods = 0
+        lags = default_observation_lags()
     return {
         "resources": Resource.objects.all(),
         "allowed_energy_types": allowed_energy_types_by_agent_type(),
+        "run_seed": seed,
+        "run_evaluation_periods": evaluation_periods,
+        "run_observation_lags": _lags_value(lags),
+        "observation_lag_choices": [
+            (_lags_value(allowed), ", ".join(str(lag) for lag in allowed))
+            for allowed in ALLOWED_OBSERVATION_LAGS
+        ],
         **extra,
     }
 
@@ -1233,18 +1489,18 @@ def create_simulation(request: HttpRequest) -> HttpResponse:
         return JsonResponse({"errors": {"body": ["Invalid JSON."]}}, status=400)
     simulation_name = data.get("simulation_name")
     simulationMode = int(data["simulationMode"])
-    periodNumber = int(data["periodNumber"])
     periodType = int(data["periodType"])
 
     marketStrategy = int(data["strategy"])
     lowerBound = int(data["lowerBound"])
     upperBound = int(data["upperBound"])
 
-    # Validate every agent before the first write (PLAN 2.2, 2.3).
-    try:
-        entries = _parse_scenario_agents(data.get("agents", []), market=None)
-    except ValidationError as exc:
-        return _validation_error_response(exc)
+    # Validate the settings and every agent before the first write (PLAN 2.2,
+    # 2.3, OQ-16).
+    validated = _validate_scenario_payload(data, current=None, market=None)
+    if isinstance(validated, JsonResponse):
+        return validated
+    periodNumber, run_settings, entries = validated
 
     created: dict[str, Simulation] = {}
 
@@ -1256,6 +1512,8 @@ def create_simulation(request: HttpRequest) -> HttpResponse:
             periodNumber=periodNumber,
             proxy=True,
         )
+        run_settings.apply(simulation)
+        simulation.save()
         market = MarketFactory.create(
             sim=simulation,
             lowerBound=lowerBound,
@@ -1318,7 +1576,6 @@ def update_simulation(request: HttpRequest, simulation_id: int) -> HttpResponse:
 
     simulation_name = data.get("simulation_name")
     simulationMode = int(data["simulationMode"])
-    periodNumber = int(data["periodNumber"])
     periodType = int(data["periodType"])
 
     marketStrategy = int(data["strategy"])
@@ -1329,13 +1586,14 @@ def update_simulation(request: HttpRequest, simulation_id: int) -> HttpResponse:
     if not simulation.proxy:
         return HttpResponseBadRequest()
 
-    # Validate every agent before the first write (PLAN 2.2, 2.3).
-    try:
-        entries = _parse_scenario_agents(
-            data.get("agents", []), market=simulation.market
-        )
-    except ValidationError as exc:
-        return _validation_error_response(exc)
+    # Validate the settings and every agent before the first write (PLAN 2.2,
+    # 2.3, OQ-16).
+    validated = _validate_scenario_payload(
+        data, current=simulation, market=simulation.market
+    )
+    if isinstance(validated, JsonResponse):
+        return validated
+    periodNumber, run_settings, entries = validated
 
     def write() -> None:
         simulation.name = simulation_name
@@ -1345,6 +1603,7 @@ def update_simulation(request: HttpRequest, simulation_id: int) -> HttpResponse:
         simulation.state = enums.SimulationState.CREATED
         simulation.currentPeriod = -1
         simulation.proxy = True
+        run_settings.apply(simulation)
         simulation.save()
 
         market = simulation.market

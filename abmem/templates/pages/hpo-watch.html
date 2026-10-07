@@ -169,6 +169,28 @@
       </div>
 
     </div>
+
+    <!-- Confirmation dialog (non-blocking replacement of window.confirm) -->
+    <div class="modal fade" id="hpo-confirm-modal" tabindex="-1" role="dialog" aria-labelledby="hpo-confirm-title"
+      aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered" role="document">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="hpo-confirm-title">Please confirm</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close">
+              <span aria-hidden="true">&times;</span>
+            </button>
+          </div>
+          <div class="modal-body">
+            <p class="mb-0" id="hpo-confirm-message"></p>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="button" class="btn btn-primary" id="hpo-confirm-ok">Confirm</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </main>
 
   <script src="{% static 'assets/js/core/popper.min.js' %}"></script>
@@ -352,6 +374,24 @@
           });
       }
 
+      // Show the confirmation modal; onConfirm runs only after the Confirm button.
+      var pendingConfirm = null;
+
+      function confirmModal(message, onConfirm) {
+        pendingConfirm = onConfirm;
+        $('hpo-confirm-message').textContent = message;
+        bootstrap.Modal.getOrCreateInstance($('hpo-confirm-modal')).show();
+      }
+
+      $('hpo-confirm-ok').addEventListener('click', function () {
+        var action = pendingConfirm;
+        pendingConfirm = null;
+        bootstrap.Modal.getOrCreateInstance($('hpo-confirm-modal')).hide();
+        if (action) { action(); }
+      });
+
+      $('hpo-confirm-modal').addEventListener('hidden.bs.modal', function () { pendingConfirm = null; });
+
       function post(url, data) {
         return fetch(url, {
           method: 'POST',
@@ -362,15 +402,18 @@
         });
       }
 
-      $('hpo-cancel').addEventListener('click', function () {
-        if (!window.confirm('Cancel this search? Running evaluations are terminated.')) { return; }
-        var button = this;
+      function cancelSearch() {
+        var button = $('hpo-cancel');
         button.disabled = true;
         post(CANCEL_URL).then(function (result) {
           button.disabled = false;
           if (!result.ok) { showMessage(errorText(result.body, result.status)); }
           if (ACTIVE.indexOf(lastStatus) < 0) { poll(); }
         }).catch(function (error) { button.disabled = false; showMessage('Cancel failed: ' + error); });
+      }
+
+      $('hpo-cancel').addEventListener('click', function () {
+        confirmModal('Cancel this search? Running evaluations are terminated.', cancelSearch);
       });
 
       function apply(target) {
@@ -380,7 +423,10 @@
           : (switchAlgorithm
             ? 'Set every agent of the scenario to {{ algorithm }} with the best parameters?'
             : 'Write the best parameters to the scenario agents that use {{ algorithm }}?');
-        if (!window.confirm(question)) { return; }
+        confirmModal(question, function () { applyConfirmed(target, switchAlgorithm); });
+      }
+
+      function applyConfirmed(target, switchAlgorithm) {
         var result = $('hpo-apply-result');
         result.className = 'text-sm mt-2';
         result.textContent = 'Applying ...';

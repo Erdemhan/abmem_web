@@ -65,6 +65,7 @@
                             </tbody>
                         </table>
 
+                        <div id="agent-form-warning" class="alert alert-warning text-white d-none mx-3" role="status"></div>
                         <div id="agent-form-errors" class="alert alert-danger text-white d-none mx-3" role="alert"></div>
 
                         <!-- Yeni Plant ekleme butonu -->
@@ -154,8 +155,10 @@
             });
         }
         if (incompatible.length > 0) {
-            alert("These plants are not allowed for the selected agent type and will be removed: "
-                + incompatible.map(function (item) { return item.name; }).join(", "));
+            var warning = document.getElementById("agent-form-warning");
+            warning.textContent = "These plants are not allowed for the selected agent type and were removed: "
+                + incompatible.map(function (item) { return item.name; }).join(", ");
+            warning.classList.remove("d-none");
             incompatible.forEach(function (item) { item.row.remove(); });
         }
         agentFormFilterRows(false);
@@ -245,6 +248,9 @@
         var box = document.getElementById("agent-form-errors");
         box.classList.add("d-none");
         box.textContent = "";
+        var warning = document.getElementById("agent-form-warning");
+        warning.classList.add("d-none");
+        warning.textContent = "";
         agentNameCheckState = { name: null, available: null, message: "" };
         agentFormShowNameResult({ available: null, message: "" });
     }
@@ -273,20 +279,20 @@
         var energyType = document.getElementById("type").value;
 
         if (agentName === "" || budget === "" || energyType === "") {
-            alert("Please fill in all agent details.");
+            agentFormShowErrors({ __all__: ["Please fill in all agent details."] });
             return;
         }
 
         var rows = agentFormPlantRows();
         if (rows.length === 0) {
-            alert("Please add at least one resource.");
+            agentFormShowErrors({ __all__: ["Please add at least one resource."] });
             return;
         }
         for (var i = 0; i < rows.length; i++) {
             var resourceSelect = rows[i].querySelector('select[name="resources[]"]');
             var capacityInput = rows[i].querySelector('input[name="capacities[]"]');
             if (resourceSelect.value === "" || capacityInput.value === "") {
-                alert("Please fill in all resource details.");
+                agentFormShowErrors({ __all__: ["Please fill in all resource details."] });
                 return;
             }
         }
