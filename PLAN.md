@@ -225,9 +225,9 @@ Her maddede: **ne yapılacak**, **nasıl doğrulanacak**. Type B/C maddeleri ayr
 - [x] **CSV dışa aktarma:** periyotlar, teklifler, adım logu.
 
 ### 2.6 Proxy ajan yönetimi girişi ve senaryo sihirbazı (İstek 6, onay 2026-10-07)
-- [ ] **Ajan kütüphanesine giriş:** kenar çubuğuna "Agents" bağlantısı, ana sayfaya kaynak kartı gibi bir "Library Agents" kartı (sayaç sadece kütüphane ajanlarını sayar: `proxy=True, market=NULL`) ve hızlı "Yeni ajan" düğmesi.
-- [ ] **Senaryo sihirbazı (oluşturma ve düzenleme aynı bileşen):** 4 adım: Temel bilgiler (ad, süre ön ayarları 1 gün/1 hafta/2 hafta/özel, mod; Gelişmiş: seed, değerlendirme penceresi, gecikmeler) → Piyasa (fiyatlandırma stratejisi kartlarla ve açıklamayla, fiyat aralığı varsayılan 0–200 TL/MWh) → Ajanlar (aranabilir ve türe göre filtrelenebilir kütüphane kartları, tıkla-ekle, "Yeni ajan" ajan sayfasıyla aynı form bileşenini modal olarak açar, eklenen ajanlar düzenlenebilir satırlar) → Özet (tüm ayarlar, "Kaydet" ve "Kaydet ve çalıştır"). Adım geçişinde alan doğrulaması, sunucu hataları ilgili adımda gösterilir.
-- [ ] **Yardımcılar:** kapasite/talep uyarısı (seçilen süredeki talebe göre), taslağın tarayıcıda saklanması, şablon listesinde "Kopyala", alan açıklamaları (ⓘ).
+- [x] **Ajan kütüphanesine giriş:** kenar çubuğuna "Agents" bağlantısı, ana sayfaya kaynak kartı gibi bir "Library Agents" kartı (sayaç sadece kütüphane ajanlarını sayar: `proxy=True, market=NULL`) ve hızlı "Yeni ajan" düğmesi.
+- [x] **Senaryo sihirbazı (oluşturma ve düzenleme aynı bileşen):** 4 adım: Temel bilgiler (ad, süre ön ayarları 1 gün/1 hafta/2 hafta/özel, mod; Gelişmiş: seed, değerlendirme penceresi, gecikmeler) → Piyasa (fiyatlandırma stratejisi kartlarla ve açıklamayla, fiyat aralığı varsayılan 0–200 TL/MWh) → Ajanlar (aranabilir ve türe göre filtrelenebilir kütüphane kartları, tıkla-ekle, "Yeni ajan" ajan sayfasıyla aynı form bileşenini modal olarak açar, eklenen ajanlar düzenlenebilir satırlar) → Özet (tüm ayarlar, "Kaydet" ve "Kaydet ve çalıştır"). Adım geçişinde alan doğrulaması, sunucu hataları ilgili adımda gösterilir.
+- [x] **Yardımcılar:** kapasite/talep uyarısı (seçilen süredeki talebe göre), taslağın tarayıcıda saklanması, şablon listesinde "Kopyala", alan açıklamaları (ⓘ).
 
 ## 4b. Uygulama sırasında çıkan takip işleri
 
