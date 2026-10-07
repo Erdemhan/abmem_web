@@ -145,6 +145,58 @@ def normalize_name(name: str) -> str:
     return name.strip()
 
 
+def scenarios_using(library_agent: Agent) -> list[Simulation]:
+    """Return the proxy scenarios that contain a copy of a library agent.
+
+    Runs (non-proxy simulations) are not included: they are historical
+    records with their own copies.
+
+    Args:
+        library_agent: A library agent.
+
+    Returns:
+        Distinct proxy simulations ordered by name and id.
+    """
+    return list(
+        Simulation.objects.filter(proxy=True, market__agent__source=library_agent)
+        .distinct()
+        .order_by("name", "id")
+    )
+
+
+@transaction.atomic
+def delete_library_agent(library_agent: Agent) -> None:
+    """Delete a library agent unless a scenario still uses it.
+
+    Copies in runs keep their configuration and lose the ``source`` link.
+
+    Args:
+        library_agent: The library agent to delete.
+
+    Raises:
+        LibraryValidationError: ``library_agent`` is not a library agent, or
+            one or more proxy scenarios contain a copy of it (key ``agent``,
+            code ``in_use``; the message names the scenarios).
+    """
+    if not library_agent.is_library:
+        raise LibraryValidationError(
+            {"agent": ["Only library agents can be deleted here."]}, code="not_library"
+        )
+    used = scenarios_using(library_agent)
+    if used:
+        names = ", ".join(f"'{s.name}' (#{s.id})" for s in used)
+        raise LibraryValidationError(
+            {
+                "agent": [
+                    f"Library agent '{library_agent.name}' is used by the scenario(s) "
+                    f"{names}. Remove it from those scenarios or delete them first."
+                ]
+            },
+            code="in_use",
+        )
+    library_agent.delete()
+
+
 def check_name_available(
     name: str, *, market: Market | None = None, exclude_id: int | None = None
 ) -> bool:

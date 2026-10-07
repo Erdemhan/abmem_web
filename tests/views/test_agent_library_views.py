@@ -392,15 +392,55 @@ def test_update_get_is_bad_request(client: Client, fossil: Resource) -> None:
 # delete
 
 
-def test_delete_library_agent_keeps_copies(client: Client, fossil: Resource) -> None:
+def test_delete_library_agent_used_only_by_runs_keeps_run_copies(
+    client: Client, fossil: Resource
+) -> None:
     agent = _library_agent(fossil, name="Alpha")
-    copy = library_service.copy_agent(agent, _scenario_market(), proxy=True)
+    run_copy = library_service.copy_agent(agent, make_market(), proxy=False)
     response = client.post(reverse("agent_delete", args=[agent.id]))
     assert response.status_code == 302
     assert not Agent.objects.filter(id=agent.id).exists()
+    run_copy.refresh_from_db()
+    assert run_copy.source_id is None
+    assert _plants(run_copy) == [(fossil.id, 50)]
+
+
+def test_delete_library_agent_used_by_a_scenario_is_blocked(
+    client: Client, fossil: Resource
+) -> None:
+    agent = _library_agent(fossil, name="Alpha")
+    market = _scenario_market()
+    market.simulation.name = "Uses Alpha"
+    market.simulation.save()
+    copy = library_service.copy_agent(agent, market, proxy=True)
+
+    response = client.post(
+        reverse("agent_delete", args=[agent.id]), HTTP_ACCEPT="application/json"
+    )
+    assert response.status_code == 400
+    messages = response.json()["errors"]["agent"]
+    assert any("Uses Alpha" in message for message in messages)
+    assert Agent.objects.filter(id=agent.id).exists()
     copy.refresh_from_db()
-    assert copy.source_id is None
-    assert _plants(copy) == [(fossil.id, 50)]
+    assert copy.source_id == agent.id
+
+    form_response = client.post(reverse("agent_delete", args=[agent.id]))
+    assert form_response.status_code == 400
+    assert Agent.objects.filter(id=agent.id).exists()
+
+    market.simulation.delete()
+    assert client.post(reverse("agent_delete", args=[agent.id])).status_code == 302
+    assert not Agent.objects.filter(id=agent.id).exists()
+
+
+def test_scenarios_using_lists_each_scenario_once(fossil: Resource) -> None:
+    agent = _library_agent(fossil, name="Alpha")
+    first, second = _scenario_market(), _scenario_market()
+    library_service.copy_agent(agent, first, proxy=True)
+    library_service.copy_agent(agent, second, proxy=True)
+    library_service.copy_agent(agent, make_market(), proxy=False)
+    used = library_service.scenarios_using(agent)
+    assert sorted(s.id for s in used) == sorted([first.simulation_id, second.simulation_id])
 
 
 def test_delete_non_library_agent_rejected(client: Client, fossil: Resource) -> None:

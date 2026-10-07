@@ -2228,7 +2228,9 @@ def update_agent(request: HttpRequest, agent_id: int) -> HttpResponse:
 
 
 def delete_agent(request: HttpRequest, agent_id: int) -> HttpResponse:
-    """Delete a library agent (POST only). Its copies keep working with ``source`` NULL.
+    """Delete a library agent (POST only) unless a scenario still uses it.
+
+    Copies in runs keep working with ``source`` NULL.
 
     Args:
         request: The request.
@@ -2236,12 +2238,17 @@ def delete_agent(request: HttpRequest, agent_id: int) -> HttpResponse:
 
     Returns:
         Redirect to the agent list (JSON ``{"status": "success"}`` for a JSON
-        client), HTTP 400 for other methods or a non-library agent.
+        client). HTTP 400 for other methods, a non-library agent, or an agent
+        used by a scenario (JSON ``{"errors": {"agent": [...]}}`` naming the
+        scenarios).
     """
     agent = get_object_or_404(Agent, id=agent_id)
     if request.method != "POST" or not agent.is_library:
         return HttpResponseBadRequest()
-    agent.delete()
+    try:
+        library_service.delete_library_agent(agent)
+    except library_service.LibraryValidationError as exc:
+        return JsonResponse({"errors": exc.message_dict}, status=400)
     if _wants_json(request):
         return JsonResponse({"status": "success"}, status=200)
     return redirect("agent_list")

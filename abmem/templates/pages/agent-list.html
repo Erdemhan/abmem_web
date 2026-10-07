@@ -210,7 +210,10 @@
                         </div>
                         <div class="modal-body">
                             <p class="mb-0">Delete the library agent <strong id="delete-agent-name"></strong>?
-                                Scenarios and runs that use a copy of it are not changed.</p>
+                                An agent that is part of a scenario cannot be deleted; delete or edit those
+                                scenarios first. Finished runs keep their own copies.</p>
+                            <div class="alert alert-danger text-white text-sm mt-3 mb-0 d-none"
+                                id="delete-agent-error" role="alert"></div>
                         </div>
                         <div class="modal-footer">
                             <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
@@ -234,6 +237,8 @@
             event.preventDefault();
             pendingDeleteForm = this;
             $("#delete-agent-name").text(this.getAttribute("data-agent-name") || "");
+            $("#delete-agent-error").addClass("d-none").text("");
+            $("#delete-agent-confirm").prop("disabled", false);
             $("#delete-agent-modal").modal('show');
         });
 
@@ -242,10 +247,31 @@
                 return;
             }
             var form = pendingDeleteForm;
-            pendingDeleteForm = null;
-            $(this).prop("disabled", true);
-            // HTMLFormElement.submit() does not fire the submit event again.
-            form.submit();
+            var button = $(this);
+            button.prop("disabled", true);
+            // The server refuses agents that are part of a scenario; show its reason here.
+            fetch(form.action, {
+                method: "POST",
+                headers: { "Accept": "application/json" },
+                body: new FormData(form)
+            }).then(function (response) {
+                return response.json().catch(function () { return {}; }).then(function (body) {
+                    return { ok: response.ok, status: response.status, body: body };
+                });
+            }).then(function (result) {
+                if (result.ok) {
+                    window.location.reload();
+                    return;
+                }
+                var errors = (result.body && result.body.errors) || {};
+                var messages = [];
+                Object.keys(errors).forEach(function (key) { messages = messages.concat(errors[key]); });
+                $("#delete-agent-error").removeClass("d-none")
+                    .text(messages.join(" ") || ("The agent could not be deleted (HTTP " + result.status + ")."));
+            }).catch(function (error) {
+                $("#delete-agent-error").removeClass("d-none").text("Request failed: " + error);
+                button.prop("disabled", false);
+            });
         });
 
         $("#delete-agent-modal").on("hidden.bs.modal", function () {
