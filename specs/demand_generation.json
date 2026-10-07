@@ -1,0 +1,56 @@
+{
+  "spec_id": "demand_generation",
+  "title": "Synthetic demand generation per scenario and demand preview",
+  "status": "approved",
+  "approval_note": "Approved by the user on 2026-10-07 (PLAN.md 2.8): distributions Normal, Uniform, Log-normal; a separate demand seed; consecutive hours correlated.",
+  "plan_items": ["2.8"],
+  "model": {
+    "field": "Simulation.demand_profile = JSONField(null=True, blank=True). NULL means 'file' (marketData.xlsx, current behaviour). Migration 0015_simulation_demand_profile. Copied to runs by library_service.clone_scenario_for_run and by duplicate_scenario.",
+    "profile_schema_v1": {
+      "version": 1,
+      "seed": "int in [0, 2**31)",
+      "day_start_hour": "int 0..23",
+      "day_end_hour": "int 1..24, exclusive end; day hours are [day_start_hour, day_end_hour) on the 24-hour clock; day_end_hour > day_start_hour; day length 1..23 h; night = the other hours",
+      "autocorrelation": "float phi in [0, 1)",
+      "day": "segment",
+      "night": "segment",
+      "segment": {
+        "distribution": "NORMAL | UNIFORM | LOGNORMAL",
+        "mean": "MWh > 0 (NORMAL, LOGNORMAL)",
+        "std": "MWh > 0 (NORMAL, LOGNORMAL)",
+        "min": "MWh > 0",
+        "max": "MWh > min; for NORMAL and LOGNORMAL min < mean < max"
+      }
+    }
+  },
+  "generator": {
+    "module": "abmem/services/market/demand_generator.py",
+    "interfaces": [
+      "@dataclass(frozen=True) class Segment; class DemandProfile with from_dict/to_dict/validate (field-keyed ValidationError)",
+      "def generate_demand(profile: DemandProfile, periods: int) -> np.ndarray  (float64, length periods, all values in the segment [min, max], deterministic for a profile)",
+      "DemandSeries.from_profile(profile, periods) -> DemandSeries (same interface as from_excel; source='generated')"
+    ],
+    "method": "Gaussian copula with AR(1) latent process (formal, reproducible). Period t (1-based) has hour h = (t - 1) mod 24; segment = day if day_start_hour <= h < day_end_hour else night. Latent: z_1 ~ N(0,1); z_t = phi z_{t-1} + sqrt(1 - phi^2) eps_t, eps_t ~ N(0,1), drawn from numpy.random.default_rng(seed) in period order. u_t = Phi(z_t), clipped to [1e-12, 1 - 1e-12]. d_t = F^-1(u_t) where F is the truncated marginal of the segment on [min, max]: NORMAL truncated at [min, max] with location mean and scale std (inverse CDF of the truncated normal via Phi/Phi^-1, use scipy-free implementation: math.erf-based Phi and a stable Phi^-1 such as Acklam's algorithm with one Newton step, or statistics.NormalDist which is in the standard library); UNIFORM: min + u (max - min); LOGNORMAL with parameters sigma_ln^2 = ln(1 + std^2/mean^2), mu_ln = ln(mean) - sigma_ln^2 / 2, truncated at [min, max] in log space. phi = 0 gives independent draws. Demand values are rounded to 0.001 MWh (the clearing quantum) and must be > 0.",
+    "notes": "No new dependency (numpy + statistics.NormalDist). The realised mean of a truncated segment can differ from the requested mean; the preview shows realised statistics."
+  },
+  "runtime": "SimulationContext.build uses DemandSeries.from_profile when simulation.demand_profile is set, else the Excel file. Validation of the horizon as today (validate_horizon). The analysis page shows the run's demand as before.",
+  "ui": {
+    "wizard": "Basics step, Advanced section: 'Demand source' radio File / Generated. Generated shows: demand seed (with random button), day start and day end hour (night hours shown read-only, e.g. 'Night: 20:00-08:00 (12 h)'), autocorrelation phi (0-0.99, help text), and two segment panels (Day, Night) each with distribution select and the fields needed by that distribution, with help tooltips. Client-side validation mirrors the server.",
+    "preview_endpoint": "GET or POST simulation/demand-preview/ with the profile JSON (or source=file) and periods -> {values: [...], night_mask: [...], stats: {min, mean, max, std, day: {...}, night: {...}}}; 400 with field errors. Reuse the existing demand_stats endpoint logic for the file source.",
+    "review": "Review step shows a Chart.js line chart of the demand for the chosen horizon (file or generated), night hours shaded, and a small stats table (overall, day, night). The capacity-vs-demand warning uses this series for both sources.",
+    "yaml": "scenario_yaml: optional key scenario.demand (the profile without 'version' or with it; document it). Absent means file. Export writes it when set. Import validates it with DemandProfile.validate."
+  },
+  "invariants": [
+    "Same profile and periods -> identical series (bit-identical floats) across processes.",
+    "File source behaviour unchanged when demand_profile is NULL (result fingerprint test stays green).",
+    "Every generated value lies in its segment's [min, max] and is > 0.",
+    "Day hours + night hours = 24."
+  ],
+  "tests": [
+    "generator: determinism, bounds, segment assignment by hour (incl. day_end_hour = 24 and day_start_hour = 0), phi = 0 lag-1 autocorrelation near 0 and phi = 0.9 clearly positive on 5000 samples, distribution means near requested (untruncated wide bounds) for NORMAL and LOGNORMAL, UNIFORM covers range, validation errors for every bad field (std <= 0, min >= max, mean outside, day length 0 or 24, phi >= 1, unknown distribution, missing fields).",
+    "runtime: a run of a scenario with a profile uses the generated series (Period.demand equals generate_demand rounded), different run seeds keep the same demand.",
+    "views: wizard create/update round trip of demand_profile, preview endpoint for file and generated, 400 cases; clone_scenario_for_run and duplicate copy the profile.",
+    "yaml: export/import round trip with demand, absent key -> file, invalid profile -> error and nothing written.",
+    "node --check on the wizard inline scripts."
+  ]
+}

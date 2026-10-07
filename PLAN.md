@@ -237,6 +237,14 @@ Her maddede: **ne yapılacak**, **nasıl doğrulanacak**. Type B/C maddeleri ayr
   - Ajan türü/kaynak kuralı, isim uzunluğu, sınırlar sunucuda aynı kurallarla doğrulanır. Dışa aktarılan dosya tekrar içe aktarılabilir (round trip).
 - [x] **Sihirbazda kütüphane kartları:** varsayılanda tek satır kart, arama veya filtre sonuçlarının hepsi gösterilir, "Tümünü göster" düğmesi.
 
+### 2.8 Sentetik talep üretimi ve talep önizlemesi (İstek 8, onay 2026-10-07)
+- [ ] **Kaynak seçimi** (sihirbaz, Gelişmiş): dosya (`marketData.xlsx`, varsayılan) veya üretilmiş talep.
+- [ ] **Gündüz/gece:** kullanıcı gündüz başlangıç ve bitiş saatini girer, gece kalan saatlerden otomatik oluşur (toplam 24). Her ikisi en az 1 saat.
+- [ ] **Dağılım (gündüz ve gece için ayrı):** Normal (kesik), Uniform, Log-normal (kesik). Parametreler: ortalama, standart sapma, min, max (Uniform için yalnız min, max).
+- [ ] **Ardışık saatler bağlantılı:** otokorelasyon φ ∈ [0, 1). Gizli süreç `z_t = φ z_{t-1} + √(1-φ²) ε_t`, `ε_t ~ N(0, 1)`, `z_1 ~ N(0, 1)`; talep `d_t = F_s⁻¹(Φ(z_t))`, `F_s` saatin segmentinin (gündüz/gece) kesik marjinal dağılımı (Gauss kopula). φ = 0 bağımsız çekim demektir.
+- [ ] **Ayrı talep seed'i:** senaryoda saklanır, çalıştırma seed'inden bağımsız. Çalıştırmalar aynı talebi yeniden üretir.
+- [ ] **Önizleme:** Özet adımında talep grafiği (dosya ya da üretilmiş), gece saatleri gölgeli, min/ortalama/maks. Talep ayarları YAML dışa/içe aktarmaya eklenir.
+
 ## 4b. Uygulama sırasında çıkan takip işleri
 
 - [x] **B13 (sonradan bulundu, `3b653d9` ile düzeltildi): `Agent.budget` taşabilir.** `max_digits=12` (en fazla ~9.99e9). Büyük kapasiteli uzun çalıştırmalarda periyot yazımı hata verir ve çalıştırma FAILED olarak biter. Alan genişletilmeli (migration). runtime_core worker'ı bildirdi.
