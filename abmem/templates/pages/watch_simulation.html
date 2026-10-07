@@ -78,6 +78,15 @@
                             <div class="col mb-3">
                                 <p>Current Period: <span id="period"></span></p>
                             </div>
+                            <div class="col mb-3">
+                                <p>Seed: <span id="seed">{{ seed }}</span></p>
+                            </div>
+                            {% if analysis_url %}
+                            <div class="col mb-3">
+                                <a class="btn btn-sm bg-gradient-success mb-0 d-none" id="analysis-button"
+                                    href="{{ analysis_url }}">Analysis</a>
+                            </div>
+                            {% endif %}
                         </div>
                         <div class="row " id="nextRow">
                             <div class="form-group col">
@@ -170,6 +179,7 @@
                 }
                 if (data.status === 'FINISHED') {
                     flag = true
+                    $('#analysis-button').removeClass('d-none');
                     $('#status').removeClass('bg-gradient-info');
                     $('#status').addClass('bg-gradient-success');
                 }

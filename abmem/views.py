@@ -18,6 +18,7 @@ from django.http import (
     JsonResponse,
 )
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
 from django.views.decorators.csrf import csrf_exempt
 
 from .forms import AgentForm, PlantForm, ResourceForm
@@ -1196,6 +1197,42 @@ def _library_agents():
 
 
 # SYSTEM
+def _parse_run_seed(request: HttpRequest) -> int | None:
+    """Read the optional run seed of a POST to ``run_simulation`` (PLAN 2.5).
+
+    The seed is taken from a JSON body (``{"seed": ...}``) when the request
+    has a JSON content type, else from the form field ``seed``.
+
+    Args:
+        request: POST request.
+
+    Returns:
+        The seed, or None when it is missing or empty (the scenario seed is
+        used).
+
+    Raises:
+        ValidationError: With key ``seed`` for a malformed body, a
+            non-integer seed or a seed outside ``[0, SEED_UPPER_BOUND)``.
+    """
+    message = f"Seed must be an integer from 0 to {SEED_UPPER_BOUND - 1}."
+    if request.content_type == "application/json":
+        try:
+            data = json.loads(request.body or b"{}")
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise ValidationError({"seed": ["Invalid JSON body."]}) from exc
+        if not isinstance(data, dict):
+            raise ValidationError({"seed": ["Invalid JSON body."]})
+        raw = data.get("seed")
+    else:
+        raw = request.POST.get("seed")
+    if raw is None or (isinstance(raw, str) and not raw.strip()):
+        return None
+    seed = _coerce_payload_int(raw)
+    if seed is None or not 0 <= seed < SEED_UPPER_BOUND:
+        raise ValidationError({"seed": [message]})
+    return seed
+
+
 def run_simulation(request: HttpRequest, simulation_id: int) -> HttpResponse:
     """Clone a proxy scenario into a new run and start it.
 
@@ -1204,23 +1241,55 @@ def run_simulation(request: HttpRequest, simulation_id: int) -> HttpResponse:
     (non-proxy simulation) is not cloned again, the request redirects to its
     watch page.
 
+    GET runs with the scenario seed. POST accepts an optional ``seed`` (form
+    field or JSON body) that applies to this run only (PLAN 2.5). A JSON
+    client (``Accept: application/json``) receives ``{"run_id",
+    "watch_url"}`` instead of a redirect and errors as
+    ``{"errors": {field: [messages]}}``.
+
     Args:
         request: The request.
         simulation_id: Id of the simulation.
 
     Returns:
-        Redirect to the watch page of the new run, redirect to the watch page
-        of ``simulation_id`` for a run, HTTP 400 when the scenario cannot be
-        cloned, HTTP 500 when the run process cannot be started.
+        Redirect (or JSON) to the watch page of the new run, redirect to the
+        watch page of ``simulation_id`` for a run, HTTP 400 for an invalid
+        seed (no run is created) or when the scenario cannot be cloned,
+        HTTP 500 when the run process cannot be started.
     """
     simulation = get_object_or_404(Simulation, id=simulation_id)
+    wants_json = _wants_json(request)
+
+    def _done(run_id: int) -> HttpResponse:
+        if wants_json:
+            return JsonResponse(
+                {
+                    "run_id": run_id,
+                    "watch_url": reverse(
+                        "watch_simulation", kwargs={"simulation_id": run_id}
+                    ),
+                }
+            )
+        return redirect("watch_simulation", simulation_id=run_id)
+
+    def _error(field: str, message: str, status: int) -> HttpResponse:
+        if wants_json:
+            return JsonResponse({"errors": {field: [message]}}, status=status)
+        return HttpResponse(message, status=status)
+
+    seed: int | None = None
+    if request.method == "POST":
+        try:
+            seed = _parse_run_seed(request)
+        except ValidationError as exc:
+            return _validation_error_response(exc)
     if not simulation.proxy:
-        return redirect("watch_simulation", simulation_id=simulation.id)
+        return _done(simulation.id)
     try:
-        run = library_service.clone_scenario_for_run(simulation)
+        run = library_service.clone_scenario_for_run(simulation, seed=seed)
     except (ValidationError, ValueError) as exc:
         logger.warning("Scenario %s could not be cloned: %s", simulation.id, exc)
-        return HttpResponseBadRequest(f"The scenario could not be cloned: {exc}")
+        return _error("__all__", f"The scenario could not be cloned: {exc}", 400)
     try:
         run_id = StarterService.start(run)
     except Exception:
@@ -1228,8 +1297,8 @@ def run_simulation(request: HttpRequest, simulation_id: int) -> HttpResponse:
             "Run %s of scenario %s could not be started", run.id, simulation.id
         )
         run.delete()
-        return HttpResponse("The simulation run could not be started.", status=500)
-    return redirect("watch_simulation", simulation_id=run_id)
+        return _error("__all__", "The simulation run could not be started.", 500)
+    return _done(run_id)
 
 
 def _user_runs():
@@ -1265,9 +1334,28 @@ def blank(request):
     return render(request, "pages/blank.html", {"resources": resources})
 
 
-def watch_simulation(request, simulation_id):
+def watch_simulation(request: HttpRequest, simulation_id: str) -> HttpResponse:
+    """Show the watch page of a simulation with its seed and analysis link.
+
+    Args:
+        request: The request.
+        simulation_id: Id of the simulation.
+
+    Returns:
+        The watch page. ``analysis_url`` is set for runs (not for scenario
+        templates). The page shows the Analysis button when the polled status
+        is FINISHED.
+    """
     simulation = get_object_or_404(Simulation, id=simulation_id)
-    context = {"simulation_id": simulation.id}
+    context = {
+        "simulation_id": simulation.id,
+        "seed": simulation.seed,
+        "analysis_url": (
+            None
+            if simulation.proxy
+            else reverse("simulation_analysis", args=[simulation.id])
+        ),
+    }
     return render(request, "pages/watch_simulation.html", context)
 
 

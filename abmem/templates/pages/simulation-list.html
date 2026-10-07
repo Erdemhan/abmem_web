@@ -86,11 +86,13 @@
                         <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Name</th>
                         <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">Created</th>
                         <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">State</th>
+                        <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ">Seed</th>
+                        <th></th>
                       </tr>
                     </thead>
                     <tbody>
+                      {% for simulation in simulations %}
                       <tr>
-                        {% for simulation in simulations %}
                         <td>
                           <div class="d-flex px-2 py-1">
                             <div class="text-center d-flex flex-column justify-content-center ">
@@ -119,11 +121,18 @@
                                 <span class="badge badge-sm bg-gradient-warning">STOPPED</span>
                                 {% elif simulation.state.value == 9 %}
                                 <span class="badge badge-sm bg-gradient-danger">CANCELED</span>
+                                {% elif simulation.state.value == 10 %}
+                                <span class="badge badge-sm bg-gradient-danger">FAILED</span>
                                 {% else %}
                                 <span class="badge badge-sm bg-gradient-secondary">{{simulation.state}}</span>
                                 {% endif %}
                               </div>
                             </div>
+                          </div>
+                        </td>
+                        <td>
+                          <div class="d-flex px-2 py-1">
+                            <h6 class="mb-0 text-sm">{{ simulation.seed }}</h6>
                           </div>
                         </td>
                         <td>
@@ -138,6 +147,19 @@
                                 </div>
                               </a>
                             </div>
+                            {% if simulation.state.value == 7 %}
+                            <div class="col-2 mx-2">
+                              <a class="nav-link active" title="Analysis"
+                                href="{% url 'simulation_analysis' sim_id=simulation.id %}">
+                                <div class="col-4 text-end">
+                                  <div
+                                    class="icon icon-shape bg-gradient-success shadow text-center border-radius-md zoom4-1">
+                                    <i class="fas fa-chart-line"></i>
+                                  </div>
+                                </div>
+                              </a>
+                            </div>
+                            {% endif %}
                             <div class="col-2 mx-2">
                               <form action="delete/{{ simulation.id }}" method="DELETE">
                                 <button type="submit"
