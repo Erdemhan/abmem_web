@@ -8,15 +8,26 @@
 /* ------------------------------------------------------------------------
    Contrast of fields and nested cards.
    Pages put inputs, option cards and agent cards on a white card, so white
-   controls had no visible edge. Fields and inner cards get a light grey
-   fill and a visible border; the focused or selected state stays magenta.
+   controls had no visible edge. Editable fields stay white with a dark
+   border, because a grey fill reads as disabled. Inner cards get a light
+   blue tint. Only disabled and read-only fields are grey (dashed border).
+   The focused or selected state stays magenta.
    The body prefix raises specificity above page-level <style> rules.
    ------------------------------------------------------------------------ */
 body .form-control,
-body .form-select,
+body .form-select {
+  background-color: #fff;
+  border: 1px solid #8f9bb3;
+  box-shadow: inset 0 1px 2px rgba(52, 71, 103, .08);
+  color: #344767;
+}
+body .form-control:hover:not(:disabled):not([readonly]),
+body .form-select:hover:not(:disabled) {
+  border-color: #5f6b85;
+}
 body .input-group-text {
-  background-color: #eef1f6;
-  border: 1px solid #a9b2c1;
+  background-color: #e8eefb;
+  border: 1px solid #8f9bb3;
   color: #344767;
 }
 body .form-control:focus,
@@ -29,6 +40,8 @@ body .form-control:disabled,
 body .form-select:disabled,
 body .form-control[readonly] {
   background-color: #e9ecef;
+  border-style: dashed;
+  box-shadow: none;
   color: #67748e;
 }
 body .form-control.is-invalid,
@@ -43,9 +56,9 @@ body .form-check-input {
 body .card .card,
 body .wizard-option,
 body .library-card {
-  background-color: #eef1f6;
-  border: 1px solid #b4bccb;
-  box-shadow: none;
+  background-color: #f3f6fd;
+  border: 1px solid #c2cde3;
+  box-shadow: 0 1px 3px rgba(52, 71, 103, .08);
 }
 body .wizard-option:hover,
 body .library-card:hover {
