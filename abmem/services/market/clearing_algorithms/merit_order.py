@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Hashable, Mapping, Sequence
+from dataclasses import dataclass
 from decimal import Decimal
 from fractions import Fraction
 
@@ -24,8 +25,9 @@ from abmem.services.market.clearing import (
 )
 
 from .base import BaseClearingAlgorithm
+from .config import ClearingConfig
 
-__all__ = ["MeritOrderClearing"]
+__all__ = ["MeritOrderClearing", "MeritOrderConfig"]
 
 _ZERO = Decimal(0)
 
@@ -91,6 +93,11 @@ def _largest_remainder(
     return units
 
 
+@dataclass(frozen=True)
+class MeritOrderConfig(ClearingConfig):
+    """The merit order has no parameters."""
+
+
 class MeritOrderClearing(BaseClearingAlgorithm):
     """Uniform-price merit order with water-filling at the marginal price group."""
 
@@ -100,6 +107,7 @@ class MeritOrderClearing(BaseClearingAlgorithm):
         "Accepts bids in ascending price order until the demand is met. The "
         "marginal price group is split by equal shares and its price is the PTF."
     )
+    config_class = MeritOrderConfig
 
     def clear(
         self, bids: Sequence[Bid], demand: Decimal, quantum: Decimal = Decimal("0.001")

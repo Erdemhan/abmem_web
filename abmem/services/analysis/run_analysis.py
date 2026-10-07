@@ -81,6 +81,9 @@ class AgentSetting:
         plants: Plants of the agent.
         algorithm_label: Display label of the algorithm from the registry, the
             key when the algorithm is no longer registered.
+        effective_params: Parameters the policy actually used, stored when
+            the run started (PLAN 2.12), None for runs started before the
+            snapshot existed.
     """
 
     name: str
@@ -93,6 +96,7 @@ class AgentSetting:
     algorithm_params: dict[str, Any]
     plants: list[PlantSetting]
     algorithm_label: str = ""
+    effective_params: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -136,6 +140,9 @@ class RunSettings:
         checkpoints: Policies saved at the end of this run, in agent order.
         clearing_algorithm: Key of the clearing algorithm of the market.
         clearing_algorithm_label: Display label of the clearing algorithm.
+        effective_clearing_params: Parameters the clearing algorithm actually
+            used (PLAN 2.12), None for runs started before the snapshot
+            existed.
     """
 
     simulation_id: int
@@ -154,6 +161,7 @@ class RunSettings:
     checkpoints: list[CheckpointSetting] = field(default_factory=list)
     clearing_algorithm: str = ""
     clearing_algorithm_label: str = ""
+    effective_clearing_params: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -683,6 +691,11 @@ def build_run_analysis(simulation: Simulation) -> RunAnalysis:
                 failstack_min_margin=float(agent.failstack_min_margin),
                 algorithm_params=dict(agent.algorithm_params or {}),
                 plants=plants.get(agent.id, []),
+                effective_params=(
+                    dict(agent.effective_params)
+                    if agent.effective_params is not None
+                    else None
+                ),
             )
         )
         rows = offers_by_agent.get(agent.id, [])
@@ -718,6 +731,11 @@ def build_run_analysis(simulation: Simulation) -> RunAnalysis:
         strategy=_enum_name(MarketStrategy, market.strategy),
         clearing_algorithm=str(market.clearing_algorithm),
         clearing_algorithm_label=clearing_label_for(market.clearing_algorithm),
+        effective_clearing_params=(
+            dict(market.effective_clearing_params)
+            if market.effective_clearing_params is not None
+            else None
+        ),
         lower_bound=int(market.lowerBidBound),
         upper_bound=int(market.upperBidBound),
         agents=agent_settings,

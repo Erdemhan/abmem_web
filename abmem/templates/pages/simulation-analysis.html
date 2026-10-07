@@ -56,6 +56,7 @@
                   <a class="btn btn-sm btn-outline-secondary mb-0 me-1" href="{{ csv_urls.periods }}">Periods CSV</a>
                   <a class="btn btn-sm btn-outline-secondary mb-0 me-1" href="{{ csv_urls.offers }}">Offers CSV</a>
                   <a class="btn btn-sm btn-outline-secondary mb-0" href="{{ csv_urls.steps }}">Step logs CSV</a>
+                  <a class="btn btn-sm btn-outline-secondary mb-0 ms-1" href="{{ parameters_url }}" id="an-parameters-json">Parameters JSON</a>
                   {% endif %}
                 </div>
               </div>
@@ -115,6 +116,25 @@
                 <tbody id="an-legacy-agents"></tbody>
               </table>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- PARAMETERS USED (PLAN 2.12) -->
+      <div class="row">
+        <div class="col-12 mb-4">
+          <div class="card">
+            <details class="card-body p-3" id="an-params-used">
+              <summary class="h6 mb-0" style="cursor: pointer;">Parameters used</summary>
+              <p class="text-xs text-secondary mt-2 mb-2">Parameters stored when the run started: class defaults, overridden by the global defaults of the Algorithms page, overridden by the scenario's own values. Later changes of a default do not change this run.</p>
+              <div class="text-sm" id="an-params-status" role="status" aria-live="polite">Loading ...</div>
+              <div class="table-responsive">
+                <table class="table table-sm an-table mb-0">
+                  <thead><tr><th>Component</th><th>Algorithm</th><th>Parameters</th></tr></thead>
+                  <tbody id="an-params-body"></tbody>
+                </table>
+              </div>
+            </details>
           </div>
         </div>
       </div>
@@ -962,6 +982,64 @@
           render();
         })
         .catch(function (error) { showMessage('Loading the analysis failed: ' + error.message, true); });
+    })();
+  </script>
+  <script>
+    // Parameters used (PLAN 2.12): loaded from the parameters JSON export when the card is opened.
+    (function () {
+      'use strict';
+      var details = document.getElementById('an-params-used');
+      var loaded = false;
+      var NOT_RECORDED = 'Not recorded (the run started before parameter snapshots were stored).';
+
+      function td(text, className) {
+        var cell = document.createElement('td');
+        cell.textContent = text;
+        if (className) { cell.className = className; }
+        cell.style.whiteSpace = 'normal';
+        return cell;
+      }
+
+      function paramsText(params) {
+        if (params === null || params === undefined) { return NOT_RECORDED; }
+        var keys = Object.keys(params);
+        if (!keys.length) { return 'No parameters'; }
+        return keys.map(function (k) { return k + ' = ' + JSON.stringify(params[k]); }).join(', ');
+      }
+
+      function addRow(body, component, algorithm, params) {
+        var tr = document.createElement('tr');
+        tr.appendChild(td(component, 'font-weight-bold'));
+        tr.appendChild(td(algorithm));
+        tr.appendChild(td(paramsText(params), 'text-xs'));
+        body.appendChild(tr);
+      }
+
+      function load() {
+        var status = document.getElementById('an-params-status');
+        fetch('{{ parameters_url|escapejs }}', { headers: { 'Accept': 'application/json' }, cache: 'no-store' })
+          .then(function (response) {
+            if (!response.ok) { throw new Error('HTTP ' + response.status); }
+            return response.json();
+          })
+          .then(function (doc) {
+            var body = document.getElementById('an-params-body');
+            body.innerHTML = '';
+            addRow(body, 'Market clearing', doc.clearing_algorithm, doc.clearing_params);
+            doc.agents.forEach(function (a) { addRow(body, a.name, a.algorithm, a.params); });
+            status.textContent = '';
+          })
+          .catch(function (error) {
+            loaded = false;
+            status.textContent = 'Loading the parameters failed: ' + error.message;
+          });
+      }
+
+      if (details) {
+        details.addEventListener('toggle', function () {
+          if (details.open && !loaded) { loaded = true; load(); }
+        });
+      }
     })();
   </script>
   {% endif %}

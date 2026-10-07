@@ -16,6 +16,12 @@ class Market(Base):
     # (services/market/clearing_algorithms/registry.py). The settlement rule
     # stays in ``strategy``.
     clearing_algorithm = models.CharField(max_length=64, default="MERIT_ORDER")
+    # Per-scenario overrides of the clearing algorithm parameters, applied
+    # over ClearingDefault.params (PLAN 2.12).
+    clearing_params = models.JSONField(default=dict, blank=True)
+    # Parameters the clearing algorithm of a run actually used, written once
+    # when the run starts. NULL on scenarios and on older runs.
+    effective_clearing_params = models.JSONField(null=True, blank=True, default=None)
     simulation = models.OneToOneField(Simulation,on_delete=models.CASCADE,null=False)
     
 

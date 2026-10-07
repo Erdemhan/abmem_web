@@ -59,6 +59,66 @@ def algorithm_defaults() -> dict[str, dict[str, Any]]:
     }
 
 
+def clearing_defaults() -> dict[str, dict[str, Any]]:
+    """Return ``ClearingDefault.params`` by clearing algorithm key (PLAN 2.12).
+
+    Returns:
+        Mapping of clearing algorithm key to a copy of its default parameters.
+    """
+    from abmem.models import ClearingDefault
+
+    return {
+        str(row.algorithm_key): dict(row.params or {})
+        for row in ClearingDefault.objects.all()
+    }
+
+
+def market_clearing_params(
+    market: Market, defaults: Mapping[str, Mapping[str, Any]]
+) -> dict[str, Any]:
+    """Return the effective parameter overrides of a market's clearing algorithm.
+
+    Args:
+        market: Scenario or run market.
+        defaults: Output of :func:`clearing_defaults`.
+
+    Returns:
+        ``defaults[market.clearing_algorithm]``, overridden by
+        ``Market.clearing_params``. The class defaults of the config class
+        apply to every missing field.
+    """
+    params: dict[str, Any] = dict(defaults.get(str(market.clearing_algorithm), {}))
+    params.update(market.clearing_params or {})
+    return params
+
+
+def write_parameter_snapshot(
+    market: Market,
+    clearing: BaseClearingAlgorithm,
+    states: list[AgentRuntimeState],
+) -> None:
+    """Store the parameters a run actually uses on its market and agents (PLAN 2.12).
+
+    ``Agent.effective_params`` receives ``policy.config.to_dict()`` and
+    ``Market.effective_clearing_params`` receives ``clearing.config.to_dict()``.
+    Two UPDATE statements in total.
+
+    Args:
+        market: Market of the run.
+        clearing: The clearing algorithm built for the run.
+        states: Runtime states of the run agents.
+    """
+    from abmem.models import Agent
+
+    for state in states:
+        state.agent.effective_params = state.policy.config.to_dict()
+    Agent.objects.bulk_update([state.agent for state in states], ["effective_params"])
+    market.effective_clearing_params = clearing.config.to_dict()
+    type(market).objects.filter(pk=market.pk).update(
+        effective_clearing_params=market.effective_clearing_params
+    )
+
+
 def agent_params(
     agent: Agent,
     algorithm_type: str,
@@ -319,7 +379,12 @@ class SimulationContext:
         Parameters per agent (OQ-9): ``AlgorithmDefault.params`` of the
         effective algorithm, overridden by ``Agent.algorithm_params`` (only
         when the effective algorithm is the agent's own), overridden by
-        ``algorithm_overrides``.
+        ``algorithm_overrides``. Parameters of the clearing algorithm:
+        ``ClearingDefault.params``, overridden by ``Market.clearing_params``
+        (PLAN 2.12). The resolved parameters are written once to
+        ``Agent.effective_params`` and ``Market.effective_clearing_params``
+        (:func:`write_parameter_snapshot`). Defaults are never read again
+        during the run.
 
         Args:
             simulation: Saved run with a market, agents, portfolios and plants.
@@ -337,7 +402,7 @@ class SimulationContext:
         Raises:
             SimulationValidationError: If any precondition of the run fails,
                 including an agent or clearing algorithm key that is not
-                registered.
+                registered or invalid parameters.
         """
         from abmem.models.models import Plant
         from abmem.services.algorithms import registry
@@ -364,7 +429,15 @@ class SimulationContext:
                 f"available, known keys: "
                 f"{[info.key for info in clearing_registry.available_clearing_algorithms()]}"
             )
-        clearing = clearing_registry.get_clearing_algorithm(clearing_key)
+        try:
+            clearing = clearing_registry.get_clearing_algorithm(
+                clearing_key, market_clearing_params(market, clearing_defaults())
+            )
+        except (TypeError, ValueError) as error:
+            raise SimulationValidationError(
+                f"market {market.pk}: parameters of the clearing algorithm "
+                f"{clearing_key}: {error}"
+            ) from error
         lags = tuple(int(k) for k in (simulation.observation_lags or ()))
         if lags not in ALLOWED_LAG_SETS:
             raise SimulationValidationError(
@@ -464,6 +537,7 @@ class SimulationContext:
                 )
             )
 
+        write_parameter_snapshot(market, clearing, states)
         return cls(
             simulation=simulation,
             market=market,

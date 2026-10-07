@@ -36,9 +36,11 @@ __all__ = [
     "default_config",
     "get_algorithm_class",
     "get_config_class",
+    "info_for_class",
     "is_baseline",
     "is_known",
     "label_for",
+    "sorted_infos",
 ]
 
 DEFAULT_ALGORITHM: Final[str] = "DDPG"
@@ -81,16 +83,34 @@ def available_algorithms() -> tuple[AlgorithmInfo, ...]:
         Learning algorithms first, then baselines, each group ordered by
         label (then key).
     """
-    infos = [
-        AlgorithmInfo(
-            key=key,
-            label=str(getattr(cls, "label", "") or key),
-            description=str(getattr(cls, "description", "") or ""),
-            is_learning=bool(cls.is_learning),
-            is_on_policy=bool(getattr(cls, "is_on_policy", False)),
-        )
-        for key, cls in AGENT_ALGORITHMS.classes().items()
-    ]
+    return sorted_infos(AGENT_ALGORITHMS.classes())
+
+
+def info_for_class(key: str, cls: type[BaseAgentAlgorithm]) -> AlgorithmInfo:
+    """Return the :class:`AlgorithmInfo` of a registered class.
+
+    Args:
+        key: Registry key.
+        cls: The registered class.
+    """
+    return AlgorithmInfo(
+        key=key,
+        label=str(getattr(cls, "label", "") or key),
+        description=str(getattr(cls, "description", "") or ""),
+        is_learning=bool(cls.is_learning),
+        is_on_policy=bool(getattr(cls, "is_on_policy", False)),
+    )
+
+
+def sorted_infos(
+    classes: Mapping[str, type[BaseAgentAlgorithm]],
+) -> tuple[AlgorithmInfo, ...]:
+    """Return the infos of ``classes``, learning algorithms first, then by label.
+
+    Args:
+        classes: Registered classes by key.
+    """
+    infos = [info_for_class(key, cls) for key, cls in classes.items()]
     infos.sort(key=lambda info: (not info.is_learning, info.label, info.key))
     return tuple(infos)
 

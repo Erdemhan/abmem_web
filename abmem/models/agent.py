@@ -38,6 +38,10 @@ class Agent(Base):
     # Key of a registered agent algorithm (services/algorithms/registry.py).
     algorithm_type = models.CharField(max_length=64, default="DDPG")
     algorithm_params = models.JSONField(default=dict, blank=True)
+    # Parameters the policy of a run agent actually used, written once when
+    # the run starts (PLAN 2.12). NULL on library and scenario agents and on
+    # runs started before the snapshot existed.
+    effective_params = models.JSONField(null=True, blank=True, default=None)
     failstack_enabled = models.BooleanField(default=False)
     failstack_limit = models.PositiveIntegerField(default=6)
     failstack_delta = models.DecimalField(

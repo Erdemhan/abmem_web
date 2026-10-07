@@ -277,6 +277,11 @@
                             {% endwith %}
                             <div class="form-text text-xs" id="clearing_algorithm-help"></div>
                             <div class="invalid-feedback" id="clearing_algorithm-feedback"></div>
+                            <div class="mt-2" id="clearing_params" hidden>
+                                <p class="text-xs text-secondary mb-1">Parameters of the clearing algorithm for this scenario. Leave a field empty to use the default from the Algorithms page (shown as placeholder).</p>
+                                <div class="row g-2" id="clearing-params-fields"></div>
+                            </div>
+                            <div class="invalid-feedback" id="clearing_params-feedback"></div>
                         </div>
 
                         <fieldset class="mb-3">
@@ -464,11 +469,11 @@
             var FIELD_STEP = {
                 simulation_name: 0, periodNumber: 0, periodType: 0, simulationMode: 0,
                 seed: 0, evaluation_periods: 0, observation_lags: 0,
-                strategy: 1, clearing_algorithm: 1, lowerBound: 1, upperBound: 1
+                strategy: 1, clearing_algorithm: 1, clearing_params: 1, lowerBound: 1, upperBound: 1
             };
             var STEP_FIELDS = [
                 ['simulation_name', 'periodNumber', 'simulationMode', 'seed', 'evaluation_periods', 'observation_lags'],
-                ['strategy', 'clearing_algorithm', 'lowerBound', 'upperBound'],
+                ['strategy', 'clearing_algorithm', 'clearing_params', 'lowerBound', 'upperBound'],
                 ['agents'],
                 []
             ];
@@ -558,6 +563,7 @@
                     periodNumber: byId('periodNumber').value.trim(),
                     strategy: radioValue('strategy'),
                     clearing_algorithm: byId('clearing_algorithm').value,
+                    clearing_params: readClearingParams(),
                     lowerBound: byId('lowerBound').value.trim(),
                     upperBound: byId('upperBound').value.trim(),
                     seed: byId('seed').value.trim(),
@@ -575,6 +581,7 @@
                 byId('periodNumber').value = values.periodNumber;
                 setRadio('strategy', values.strategy);
                 setClearingAlgorithm(values.clearing_algorithm);
+                renderClearingParams(values.clearing_params || {});
                 byId('lowerBound').value = values.lowerBound;
                 byId('upperBound').value = values.upperBound;
                 byId('seed').value = values.seed;
@@ -677,6 +684,81 @@
                     select.value = String(key);
                 }
                 updateClearingHelp();
+            }
+
+            // Clearing parameters (PLAN 2.12): one field per parameter of the selected algorithm's config
+            // class. An empty field inherits the global default, the server validates the values.
+            function clearingParamFields() {
+                var key = byId('clearing_algorithm').value;
+                var match = (CONFIG.clearing_algorithms || []).filter(function (c) { return c.key === key; })[0];
+                return match && match.params ? match.params : [];
+            }
+
+            function paramText(field, value) {
+                if (value === null || value === undefined) { return field.kind === 'optional_float' ? 'none' : ''; }
+                if (field.kind === 'int_list') { return [].concat(value).join(', '); }
+                return String(value);
+            }
+
+            function renderClearingParams(values) {
+                var fields = clearingParamFields();
+                var box = byId('clearing-params-fields');
+                box.textContent = '';
+                byId('clearing_params').hidden = fields.length === 0;
+                fields.forEach(function (field) {
+                    var col = document.createElement('div');
+                    col.className = 'col-sm-6';
+                    var label = document.createElement('label');
+                    label.className = 'form-label text-xs mb-0';
+                    label.htmlFor = 'clearing-param-' + field.name;
+                    label.textContent = field.name;
+                    var input;
+                    if (field.kind === 'bool') {
+                        input = document.createElement('select');
+                        input.className = 'form-select form-select-sm';
+                        [['', 'Default (' + paramText(field, field.value) + ')'], ['true', 'true'], ['false', 'false']]
+                            .forEach(function (pair) {
+                                var option = document.createElement('option');
+                                option.value = pair[0];
+                                option.textContent = pair[1];
+                                input.appendChild(option);
+                            });
+                    } else {
+                        input = document.createElement('input');
+                        input.type = 'text';
+                        input.className = 'form-control form-control-sm';
+                        input.placeholder = 'Default: ' + paramText(field, field.value);
+                    }
+                    input.id = 'clearing-param-' + field.name;
+                    input.setAttribute('data-param', field.name);
+                    if (Object.prototype.hasOwnProperty.call(values, field.name)) {
+                        input.value = paramText(field, values[field.name]);
+                    }
+                    input.addEventListener('input', function () { setFieldError('clearing_params', ''); });
+                    col.appendChild(label);
+                    col.appendChild(input);
+                    if (field.description) {
+                        var help = document.createElement('div');
+                        help.className = 'form-text text-xs';
+                        help.textContent = field.description;
+                        col.appendChild(help);
+                    }
+                    box.appendChild(col);
+                });
+            }
+
+            function readClearingParams() {
+                var params = {};
+                Array.prototype.forEach.call(document.querySelectorAll('#clearing-params-fields [data-param]'), function (input) {
+                    var text = input.value.trim();
+                    if (text !== '') { params[input.getAttribute('data-param')] = text; }
+                });
+                return params;
+            }
+
+            function clearingParamsText(params) {
+                var keys = Object.keys(params || {});
+                return keys.length ? keys.map(function (k) { return k + ' = ' + params[k]; }).join(', ') : 'Defaults';
             }
 
             function clearingAlgorithmLabel(key) {
@@ -1339,6 +1421,9 @@
                 market.textContent = '';
                 addReviewItem(market, 'Pricing strategy', STRATEGY_LABELS[values.strategy] || '-');
                 addReviewItem(market, 'Clearing algorithm', clearingAlgorithmLabel(values.clearing_algorithm));
+                if (clearingParamFields().length > 0) {
+                    addReviewItem(market, 'Clearing parameters', clearingParamsText(values.clearing_params));
+                }
                 addReviewItem(market, 'Bid bounds', values.lowerBound + ' to ' + values.upperBound + ' USD/MWh');
 
                 var body = byId('review-agents');
@@ -1681,7 +1766,9 @@
             });
             byId('clearing_algorithm').addEventListener('change', function () {
                 updateClearingHelp();
+                renderClearingParams({});
                 setFieldError('clearing_algorithm', '');
+                setFieldError('clearing_params', '');
             });
             updateClearingHelp();
             byId('seed-random').addEventListener('click', function () {

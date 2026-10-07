@@ -5,7 +5,7 @@ File format, version 1 (exact keys)::
     format_version: 1
     scenario: {name, mode, period_type, periods, seed, evaluation_periods,
                observation_lags, demand}
-    market: {strategy, clearing_algorithm, bid_bounds: [low, high]}
+    market: {strategy, clearing_algorithm, clearing_params: {}, bid_bounds: [low, high]}
     resources: [{name, energy_type, fuel_cost, om_cost, investment_cost,
                  co2_cost, emission}]
     agents: [{name, type, budget, algorithm, algorithm_params: {},
@@ -16,7 +16,10 @@ File format, version 1 (exact keys)::
 SAC, PPO, RDPG, RANDOM, MARGINAL_COST, FIXED_MARKUP or any algorithm class
 discovered from the code, PLAN 2.10). ``market.clearing_algorithm`` is
 optional and is the key of a registered clearing algorithm, ``MERIT_ORDER``
-when missing. Export always writes it.
+when missing. Export always writes it. ``market.clearing_params`` is optional
+(PLAN 2.12): the per-scenario overrides of the clearing algorithm parameters,
+validated with its config class. Export writes it when the scenario has
+overrides.
 
 ``scenario.demand`` is optional (PLAN 2.8). Absent or null means the demand
 file ``marketData.xlsx``; otherwise it is the synthetic demand profile as
@@ -124,7 +127,12 @@ SCENARIO_KEYS: Final[tuple[str, ...]] = (
     "demand_profile",
 )
 SCENARIO_REQUIRED_KEYS: Final[tuple[str, ...]] = ("name", "mode", "period_type", "periods")
-MARKET_KEYS: Final[tuple[str, ...]] = ("strategy", "clearing_algorithm", "bid_bounds")
+MARKET_KEYS: Final[tuple[str, ...]] = (
+    "strategy",
+    "clearing_algorithm",
+    "clearing_params",
+    "bid_bounds",
+)
 MARKET_REQUIRED_KEYS: Final[tuple[str, ...]] = ("strategy", "bid_bounds")
 RESOURCE_COST_FIELDS: Final[tuple[tuple[str, str], ...]] = (
     ("fuel_cost", "fuelCost"),
@@ -163,6 +171,7 @@ _WIZARD_KEYS: Final[Mapping[str, str]] = {
     "observation_lags": "scenario.observation_lags",
     "strategy": "market.strategy",
     "clearing_algorithm": "market.clearing_algorithm",
+    "clearing_params": "market.clearing_params",
     "lowerBound": "market.bid_bounds",
     "upperBound": "market.bid_bounds",
 }
@@ -338,6 +347,11 @@ def scenario_document(simulation: Simulation) -> dict[str, Any]:
         "market": {
             "strategy": MarketStrategy(market.strategy).name,
             "clearing_algorithm": str(market.clearing_algorithm),
+            **(
+                {"clearing_params": copy.deepcopy(dict(market.clearing_params))}
+                if market.clearing_params
+                else {}
+            ),
             "bid_bounds": [int(market.lowerBidBound), int(market.upperBidBound)],
         },
         "resources": resource_docs,
@@ -831,6 +845,8 @@ def _parse_header(document: dict[str, Any], errors: _Errors) -> tuple[Any, int |
         )
         enum_ok = enum_ok and clearing is not None
         payload["clearing_algorithm"] = clearing
+    if market.get("clearing_params") is not None:
+        payload["clearing_params"] = market.get("clearing_params")
     bounds = market.get("bid_bounds")
     if isinstance(bounds, list) and len(bounds) == 2:
         payload["lowerBound"], payload["upperBound"] = bounds
@@ -1286,6 +1302,7 @@ def apply_import_plan(plan: ImportPlan) -> Simulation:
         lowerBound=header.lower_bound,
         upperBound=header.upper_bound,
         clearing_algorithm=header.clearing_algorithm,
+        clearing_params=header.clearing_params,
     )
     for spec in plan.agents:
         library_service.copy_agent(spec.library, market, proxy=True, name=spec.name)

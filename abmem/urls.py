@@ -1,5 +1,5 @@
 from django.urls import include, path
-from . import views, views_analysis, views_demand, views_scenario
+from . import views, views_algorithms, views_analysis, views_demand, views_scenario
 
 
 urlpatterns = [
@@ -46,6 +46,10 @@ urlpatterns = [
     path('demand-profiles/<int:profile_id>/delete/', views_demand.demand_profile_delete, name='demand_profile_delete'),
     path('demand-profiles/<int:profile_id>/export.yaml', views_demand.demand_profile_export, name='demand_profile_export'),
     path('demand-profiles/<int:profile_id>/json/', views_demand.demand_profile_detail_json, name='demand_profile_detail_json'),
+    path('algorithms/', views_algorithms.algorithm_list, name='algorithm_list'),
+    path('algorithms/<str:kind>/<str:key>/', views_algorithms.algorithm_params, name='algorithm_params'),
+    path('algorithms/<str:kind>/<str:key>/reset/', views_algorithms.algorithm_params_reset, name='algorithm_params_reset'),
+    path('simulation/<int:sim_id>/export/parameters.json', views_analysis.simulation_export_parameters, name='simulation_export_parameters'),
     path('hpo/', include('abmem.hpo_urls')),
 ]
 

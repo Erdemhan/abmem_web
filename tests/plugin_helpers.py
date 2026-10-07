@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -16,7 +17,69 @@ from abmem.services.algorithms import registry as algorithm_registry
 from abmem.services.algorithms.algorithm_config import RandomConfig
 from abmem.services.algorithms.base import ActionResult, BaseAgentAlgorithm
 from abmem.services.market.clearing_algorithms import registry as clearing_registry
+from abmem.services.market.clearing_algorithms.config import ClearingConfig
 from abmem.services.market.clearing_algorithms.merit_order import MeritOrderClearing
+
+
+@dataclass(frozen=True)
+class ParamClearingConfig(ClearingConfig):
+    """Parameters of the test clearing algorithm (none changes the clearing).
+
+    Attributes:
+        markup: Test value, >= 0.
+        rounds: Test count, >= 1 and at most 10 times markup + 5.
+        strict: Test switch.
+        weights: Test integers.
+        cap: Optional test bound.
+    """
+
+    markup: float = 0.5
+    rounds: int = 3
+    strict: bool = False
+    weights: tuple[int, ...] = (1, 2)
+    cap: float | None = None
+
+    def _validate(self) -> None:
+        """Validate the test ranges."""
+        super()._validate()
+        if self.markup < 0:
+            raise ValueError(f"markup must be >= 0, got {self.markup}")
+        if self.rounds < 1:
+            raise ValueError(f"rounds must be >= 1, got {self.rounds}")
+        if self.rounds > 10 * self.markup + 5:
+            raise ValueError(
+                f"rounds ({self.rounds}) must be <= 10 * markup + 5 ({self.markup})"
+            )
+
+
+@contextmanager
+def temporary_param_clearing_algorithm(
+    key: str = "TEST_PARAM_CLEARING", label: str = "Test clearing with parameters"
+) -> Iterator[type]:
+    """Register a merit order copy with :class:`ParamClearingConfig` under ``key``.
+
+    Args:
+        key: Registry key.
+        label: Display label.
+
+    Yields:
+        The registered class.
+    """
+    cls = type(
+        "TemporaryParamClearing",
+        (MeritOrderClearing,),
+        {
+            "key": key,
+            "label": label,
+            "description": "Merit order with test parameters.",
+            "config_class": ParamClearingConfig,
+            "__module__": __name__,
+        },
+    )
+    try:
+        yield cls
+    finally:
+        clearing_registry.CLEARING_ALGORITHMS.unregister(key)
 
 
 @contextmanager

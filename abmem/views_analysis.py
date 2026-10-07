@@ -7,7 +7,9 @@ Routes (prefix ``/dev/``):
 * ``simulation/<id>/analysis/offers/`` JSON page of the filtered offers
   (PLAN 2.11),
 * ``simulation/<id>/export/<kind>.csv`` CSV export, ``kind`` in
-  ``{periods, offers, steps}``.
+  ``{periods, offers, steps}``,
+* ``simulation/<id>/export/parameters.json`` the parameters the run used
+  (PLAN 2.12).
 
 All views are read-only GET views. An unknown simulation or a scenario
 template (proxy simulation) returns 404. A run that is not FINISHED or has no
@@ -110,6 +112,7 @@ def simulation_analysis(request: HttpRequest, sim_id: int) -> HttpResponse:
             kind: reverse("simulation_export_csv", args=[simulation.pk, kind])
             for kind in CSV_EXPORTS
         },
+        "parameters_url": reverse("simulation_export_parameters", args=[simulation.pk]),
     }
     return render(
         request,
@@ -196,3 +199,29 @@ def simulation_analysis_offers(request: HttpRequest, sim_id: int) -> JsonRespons
         return JsonResponse(offer_page(simulation, parse_offer_filter(request.GET)))
     except OfferFilterError as exc:
         return JsonResponse({"errors": exc.errors}, status=400)
+
+
+@require_GET
+def simulation_export_parameters(request: HttpRequest, sim_id: int) -> HttpResponse:
+    """Download the parameters a run used as JSON (PLAN 2.12).
+
+    Args:
+        request: GET request.
+        sim_id: Primary key of the run.
+
+    Returns:
+        ``exports.parameters_json`` as an attachment
+        ``simulation_<id>_parameters.json``.
+
+    Raises:
+        Http404: Unknown simulation or a scenario template.
+    """
+    simulation = _get_run(sim_id)
+    response = HttpResponse(
+        exports.parameters_json(simulation),
+        content_type="application/json; charset=utf-8",
+    )
+    response["Content-Disposition"] = (
+        f'attachment; filename="simulation_{simulation.pk}_parameters.json"'
+    )
+    return response

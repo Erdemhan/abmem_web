@@ -10,6 +10,7 @@ def create(
     lowerBound: int,
     upperBound: int,
     clearing_algorithm: str = "MERIT_ORDER",
+    clearing_params: dict | None = None,
 ) -> Market:
     # Retrieve the proxy from the simulation object
     proxy = sim.proxy
@@ -21,6 +22,7 @@ def create(
         lowerBidBound= lowerBound, 
         upperBidBound= upperBound, 
         clearing_algorithm=clearing_algorithm,
+        clearing_params=dict(clearing_params or {}),
         simulation= sim,
         proxy = proxy
     )

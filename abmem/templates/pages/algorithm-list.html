@@ -1,0 +1,419 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>ABMEM SIMULATION - Algorithms</title>
+    <!-- Fonts and icons -->
+    <link href="https://fonts.googleapis.com/css?family=Open+Sans:300,400,600,700" rel="stylesheet" />
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
+    <!-- MDB -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/7.2.0/mdb.min.css" rel="stylesheet" />
+    <link href="{% static 'assets/css/nucleo-icons.css' %}" rel="stylesheet" />
+    <link href="{% static 'assets/css/nucleo-svg.css' %}" rel="stylesheet" />
+    <!-- CSS Files -->
+    <link id="pagestyle" href="{% static 'assets/css/soft-ui-dashboard.css' %}" rel="stylesheet" />
+    <link href="{% static 'assets/css/abmem.css' %}?v=3" rel="stylesheet" />
+    <style>
+        .algorithm-card { cursor: pointer; }
+        .algorithm-card:focus-visible { outline: 2px solid #cb0c9f; outline-offset: 2px; }
+        .algorithm-card.is-disabled { cursor: default; }
+        .algorithm-card .badge { font-weight: 600; }
+        .param-row { border-bottom: 1px solid #dfe3ea; padding: .6rem 0; }
+        .param-row:last-child { border-bottom: 0; }
+        .param-meta { font-size: .75rem; color: #67748e; }
+        .param-changed { display: none; }
+        .param-row.is-changed .param-changed { display: inline-block; }
+        .module-traceback { white-space: pre-wrap; font-size: .7rem; max-height: 16rem; overflow: auto; }
+    </style>
+</head>
+
+<body class="g-sidenav-show bg-gray-100">
+
+    <!-- SIDEBAR -->
+    <aside class="sidenav navbar navbar-vertical navbar-expand-xs border-0 border-radius-xl my-3 fixed-start ms-3"
+        id="sidenav-main">
+        {% include '../static/assets/components/sidebar.html' %}
+    </aside>
+    <!-- END SIDEBAR -->
+
+    <main class="main-content position-relative max-height-vh-100 h-100 border-radius-lg">
+
+        {% include '../static/assets/components/navbar.html' with contextName="Algorithms" pageName="Algorithms" topPageName="ABMEM" %}
+
+        <div class="container-fluid py-4">
+            {% csrf_token %}
+            <div class="row">
+                <div class="col-12 mb-3">
+                    <p class="text-sm mb-0">Every algorithm found in the code is listed here. Click a card to edit its
+                        default parameters. A saved default applies to every agent or scenario that does not set its own
+                        value, and only to runs started afterwards. Each run stores the parameters it used (see "Parameters
+                        used" on the analysis page of a run).</p>
+                </div>
+            </div>
+            <div class="row">
+                {% for column in columns %}
+                <div class="col-lg-6 mb-4">
+                    <div class="card h-100">
+                        <div class="card-header pb-0">
+                            <h6 class="mb-0">{{ column.title }}</h6>
+                            <p class="text-xs text-secondary mb-0">{{ column.help }}</p>
+                        </div>
+                        <div class="card-body pt-3" id="{{ column.kind }}-algorithms">
+                            {% for error in column.errors %}
+                            <div class="alert alert-danger text-white text-sm module-error" role="alert">
+                                <strong>Module {{ error.module }} failed to import.</strong>
+                                Its algorithms are not available until the error is fixed: {{ error.summary }}
+                                <details class="mt-1"><summary>Traceback</summary>
+                                    <pre class="module-traceback text-white mb-0">{{ error.traceback }}</pre>
+                                </details>
+                            </div>
+                            {% endfor %}
+                            {% for card in column.cards %}
+                            <div class="card library-card algorithm-card mb-3{% if card.config_error %} is-disabled{% endif %}"
+                                {% if not card.config_error %}role="button" tabindex="0" aria-haspopup="dialog"
+                                aria-label="Edit the parameters of {{ card.label }}"{% endif %}
+                                data-kind="{{ card.kind }}" data-key="{{ card.key }}" data-label="{{ card.label }}">
+                                <div class="card-body p-3">
+                                    <div class="d-flex flex-wrap align-items-start gap-1">
+                                        <h6 class="mb-0 me-2">{{ card.label }}</h6>
+                                        <code class="text-xs me-auto">{{ card.key }}</code>
+                                        {% if card.kind == "agent" %}
+                                        {% if card.is_learning %}<span class="badge badge-sm bg-gradient-info">Learning</span>{% else %}<span class="badge badge-sm bg-gradient-secondary">Baseline</span>{% endif %}
+                                        {% if card.is_learning %}{% if card.is_on_policy %}<span class="badge badge-sm bg-gradient-dark">On-policy</span>{% else %}<span class="badge badge-sm bg-gradient-dark">Off-policy</span>{% endif %}{% endif %}
+                                        {% endif %}
+                                        {% if card.has_custom_defaults %}<span class="badge badge-sm bg-gradient-warning js-custom-badge">Custom defaults</span>{% else %}<span class="badge badge-sm bg-gradient-warning js-custom-badge d-none">Custom defaults</span>{% endif %}
+                                    </div>
+                                    {% if card.description %}<p class="text-sm mb-1 mt-1">{{ card.description }}</p>{% endif %}
+                                    <p class="text-xs text-secondary mb-0">
+                                        {% if card.kind == "agent" %}{{ card.library_agents }} library agent{{ card.library_agents|pluralize }}, {% endif %}{{ card.scenarios }} scenario{{ card.scenarios|pluralize }}
+                                        &middot; {% if card.param_count %}{{ card.param_count }} parameter{{ card.param_count|pluralize }}{% else %}no parameters{% endif %}
+                                    </p>
+                                    {% if card.config_error %}<p class="text-xs text-danger mb-0 mt-1">The parameters cannot be edited: {{ card.config_error }}</p>{% endif %}
+                                </div>
+                            </div>
+                            {% empty %}
+                            <p class="text-sm text-secondary mb-0">No algorithm of this kind is available.</p>
+                            {% endfor %}
+                        </div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <!-- Parameter editor -->
+            <div class="modal fade" id="params-modal" tabindex="-1" role="dialog" aria-labelledby="params-modal-label"
+                aria-hidden="true">
+                <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable" role="document">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title" id="params-modal-label">Parameters</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body">
+                            <p class="text-xs text-secondary mb-2">The values below are the global defaults. Fields marked
+                                "changed" differ from the published default of the algorithm class.</p>
+                            <div class="alert alert-warning text-white text-sm d-none" id="params-stored-error" role="alert"></div>
+                            <div class="alert alert-danger text-white text-sm d-none" id="params-error" role="alert"></div>
+                            <div class="alert alert-success text-white text-sm d-none" id="params-saved" role="status"></div>
+                            <p class="text-sm d-none" id="params-empty">This algorithm has no parameters.</p>
+                            <form id="params-form" novalidate></form>
+                            <div class="alert alert-light border text-sm mt-3 mb-0 d-none" id="reset-confirm" role="alert">
+                                <p class="mb-2">Delete the saved default of this algorithm? Runs started afterwards use the
+                                    published defaults, except where an agent or scenario sets its own value.</p>
+                                <button type="button" class="btn btn-sm btn-danger mb-0" id="reset-confirm-yes">Reset to published defaults</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary mb-0 ms-1" id="reset-confirm-no">Cancel</button>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-outline-danger me-auto" id="params-reset">Reset to published defaults</button>
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                            <button type="button" class="btn btn-primary" id="params-save">Save defaults</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    {{ page_config|json_script:"algorithms-config" }}
+    <script src="{% static 'assets/js/core/popper.min.js' %}"></script>
+    <script src="{% static 'assets/js/core/bootstrap.min.js' %}"></script>
+    <script src="{% static 'assets/js/plugins/perfect-scrollbar.min.js' %}"></script>
+    <script src="{% static 'assets/js/plugins/smooth-scrollbar.min.js' %}"></script>
+    <script>
+        // Algorithms page (PLAN 2.12). The server validates every value and replies with
+        // HTTP 400 {"errors": {field: [messages]}}. This script only renders the form and the messages.
+        (function () {
+            'use strict';
+
+            var CONFIG = JSON.parse(document.getElementById('algorithms-config').textContent);
+            var current = null;   // {kind, key, card, form}
+
+            function byId(id) { return document.getElementById(id); }
+
+            function csrfToken() {
+                var input = document.querySelector('input[name="csrfmiddlewaretoken"]');
+                return input ? input.value : '';
+            }
+
+            function url(template, kind, key) {
+                return template.replace('KIND', encodeURIComponent(kind)).replace('KEY', encodeURIComponent(key));
+            }
+
+            function readJsonReply(response) {
+                return response.json().catch(function () { return {}; }).then(function (body) {
+                    return { ok: response.ok, status: response.status, body: body };
+                });
+            }
+
+            function showBox(id, message) {
+                var box = byId(id);
+                box.textContent = message || '';
+                box.classList.toggle('d-none', !message);
+            }
+
+            function modal() { return bootstrap.Modal.getOrCreateInstance(byId('params-modal')); }
+
+            function displayValue(field, value) {
+                if (field.kind === 'int_list') { return (value || []).join(', '); }
+                if (value === null || value === undefined) { return ''; }
+                return String(value);
+            }
+
+            // Client-side comparison only marks changed fields. The server decides validity.
+            function differsFromDefault(field, input) {
+                if (field.kind === 'bool') { return input.checked !== field.default; }
+                var text = input.value.trim();
+                if (field.kind === 'optional_float' && text === '') { return field.default !== null; }
+                if (field.kind === 'int_list') {
+                    var parts = text.split(',').map(function (p) { return p.trim(); }).filter(Boolean).map(Number);
+                    return parts.join(',') !== (field.default || []).join(',');
+                }
+                return Number(text) !== field.default;
+            }
+
+            function fieldInput(field) {
+                if (field.kind === 'bool') {
+                    var wrap = document.createElement('div');
+                    wrap.className = 'form-check form-switch mb-0';
+                    var box = document.createElement('input');
+                    box.type = 'checkbox';
+                    box.className = 'form-check-input';
+                    box.id = 'param-' + field.name;
+                    box.checked = !!field.value;
+                    wrap.appendChild(box);
+                    return { element: wrap, input: box };
+                }
+                var input = document.createElement('input');
+                input.type = 'text';
+                input.className = 'form-control form-control-sm';
+                input.id = 'param-' + field.name;
+                input.name = field.name;
+                input.inputMode = field.kind === 'int' || field.kind === 'int_list' ? 'numeric' : 'decimal';
+                input.value = displayValue(field, field.value);
+                if (field.kind === 'optional_float') { input.placeholder = 'empty = none'; }
+                if (field.kind === 'int_list') { input.placeholder = 'comma-separated integers'; }
+                return { element: input, input: input };
+            }
+
+            function renderForm(form) {
+                var container = byId('params-form');
+                container.innerHTML = '';
+                byId('params-modal-label').textContent = form.label + ' (' + form.key + ')';
+                byId('params-empty').classList.toggle('d-none', form.fields.length > 0);
+                byId('params-save').disabled = form.fields.length === 0;
+                byId('params-reset').disabled = !form.has_custom_defaults;
+                showBox('params-stored-error', form.stored_error
+                    ? 'The saved default is no longer valid and is shown with the published defaults: ' + form.stored_error
+                    : '');
+                form.fields.forEach(function (field) {
+                    var row = document.createElement('div');
+                    row.className = 'param-row row g-2 align-items-start';
+                    row.setAttribute('data-field', field.name);
+                    var labelCol = document.createElement('div');
+                    labelCol.className = 'col-md-5';
+                    var label = document.createElement('label');
+                    label.className = 'form-label text-sm mb-0';
+                    label.htmlFor = 'param-' + field.name;
+                    label.textContent = field.name;
+                    var changed = document.createElement('span');
+                    changed.className = 'badge badge-sm bg-gradient-warning ms-2 param-changed';
+                    changed.textContent = 'changed';
+                    label.appendChild(changed);
+                    labelCol.appendChild(label);
+                    if (field.description) {
+                        var help = document.createElement('div');
+                        help.className = 'param-meta';
+                        help.textContent = field.description;
+                        labelCol.appendChild(help);
+                    }
+                    var inputCol = document.createElement('div');
+                    inputCol.className = 'col-md-7';
+                    var built = fieldInput(field);
+                    inputCol.appendChild(built.element);
+                    var meta = document.createElement('div');
+                    meta.className = 'param-meta mt-1';
+                    var text = 'Published default: ' + (displayValue(field, field.default) || 'none');
+                    if (field.search_bounds) {
+                        text += ' · search range ' + field.search_bounds[0] + ' to ' + field.search_bounds[1]
+                            + ' (' + field.search_bounds[2] + ')';
+                    }
+                    meta.textContent = text;
+                    inputCol.appendChild(meta);
+                    var feedback = document.createElement('div');
+                    feedback.className = 'invalid-feedback';
+                    feedback.id = 'param-' + field.name + '-feedback';
+                    inputCol.appendChild(feedback);
+                    built.input.setAttribute('aria-describedby', feedback.id);
+                    row.appendChild(labelCol);
+                    row.appendChild(inputCol);
+                    container.appendChild(row);
+                    function mark() {
+                        row.classList.toggle('is-changed', differsFromDefault(field, built.input));
+                        built.input.classList.remove('is-invalid');
+                        feedback.textContent = '';
+                    }
+                    built.input.addEventListener('input', mark);
+                    built.input.addEventListener('change', mark);
+                    row.classList.toggle('is-changed', !!field.differs);
+                });
+            }
+
+            function collectValues() {
+                var values = {};
+                current.form.fields.forEach(function (field) {
+                    var input = byId('param-' + field.name);
+                    values[field.name] = field.kind === 'bool' ? input.checked : input.value;
+                });
+                return values;
+            }
+
+            function showErrors(errors) {
+                var general = [];
+                Object.keys(errors || {}).forEach(function (name) {
+                    var messages = [].concat(errors[name]).join(' ');
+                    var input = byId('param-' + name);
+                    var feedback = byId('param-' + name + '-feedback');
+                    if (input && feedback) {
+                        input.classList.add('is-invalid');
+                        feedback.textContent = messages;
+                        feedback.style.display = 'block';
+                    } else {
+                        general.push(messages);
+                    }
+                });
+                showBox('params-error', general.join(' ') || (Object.keys(errors || {}).length
+                    ? 'Some values are invalid, see the marked fields.' : ''));
+            }
+
+            function updateCard(form) {
+                var badge = current.card.querySelector('.js-custom-badge');
+                if (badge) { badge.classList.toggle('d-none', !form.has_custom_defaults); }
+            }
+
+            function resetMessages() {
+                showBox('params-error', '');
+                showBox('params-saved', '');
+                byId('reset-confirm').classList.add('d-none');
+            }
+
+            function openEditor(card) {
+                var kind = card.getAttribute('data-kind');
+                var key = card.getAttribute('data-key');
+                current = { kind: kind, key: key, card: card, form: null };
+                resetMessages();
+                byId('params-form').innerHTML = '';
+                byId('params-modal-label').textContent = card.getAttribute('data-label') + ' (' + key + ')';
+                byId('params-save').disabled = true;
+                byId('params-reset').disabled = true;
+                modal().show();
+                fetch(url(CONFIG.params_url, kind, key), { headers: { 'Accept': 'application/json' }, cache: 'no-store' })
+                    .then(readJsonReply)
+                    .then(function (result) {
+                        if (!result.ok) {
+                            showErrors(result.body.errors || { __all__: ['Loading failed (HTTP ' + result.status + ').'] });
+                            return;
+                        }
+                        current.form = result.body;
+                        renderForm(result.body);
+                    })
+                    .catch(function (error) { showBox('params-error', 'Request failed: ' + error); });
+            }
+
+            function post(target, body) {
+                return fetch(target, {
+                    method: 'POST',
+                    headers: { 'Accept': 'application/json', 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() },
+                    body: JSON.stringify(body || {})
+                }).then(readJsonReply);
+            }
+
+            Array.prototype.forEach.call(document.querySelectorAll('.algorithm-card:not(.is-disabled)'), function (card) {
+                card.addEventListener('click', function () { openEditor(card); });
+                card.addEventListener('keydown', function (event) {
+                    if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); openEditor(card); }
+                });
+            });
+
+            byId('params-save').addEventListener('click', function () {
+                if (!current || !current.form) { return; }
+                var button = this;
+                button.disabled = true;
+                resetMessages();
+                post(url(CONFIG.params_url, current.kind, current.key), { params: collectValues() })
+                    .then(function (result) {
+                        button.disabled = false;
+                        if (!result.ok) { showErrors(result.body.errors); return; }
+                        current.form = result.body;
+                        renderForm(result.body);
+                        updateCard(result.body);
+                        showBox('params-saved', result.body.has_custom_defaults
+                            ? 'Saved. Runs started from now on use these defaults.'
+                            : 'Saved. All values equal the published defaults, so no custom default is stored.');
+                    })
+                    .catch(function (error) {
+                        button.disabled = false;
+                        showBox('params-error', 'Request failed: ' + error);
+                    });
+            });
+
+            byId('params-reset').addEventListener('click', function () {
+                byId('reset-confirm').classList.remove('d-none');
+                byId('reset-confirm-yes').focus();
+            });
+            byId('reset-confirm-no').addEventListener('click', function () {
+                byId('reset-confirm').classList.add('d-none');
+                byId('params-reset').focus();
+            });
+            byId('reset-confirm-yes').addEventListener('click', function () {
+                if (!current) { return; }
+                var button = this;
+                button.disabled = true;
+                post(url(CONFIG.reset_url, current.kind, current.key), {})
+                    .then(function (result) {
+                        button.disabled = false;
+                        byId('reset-confirm').classList.add('d-none');
+                        if (!result.ok) { showErrors(result.body.errors); return; }
+                        current.form = result.body;
+                        renderForm(result.body);
+                        updateCard(result.body);
+                        showBox('params-saved', 'The published defaults apply again.');
+                    })
+                    .catch(function (error) {
+                        button.disabled = false;
+                        showBox('params-error', 'Request failed: ' + error);
+                    });
+            });
+
+            byId('params-modal').addEventListener('hidden.bs.modal', function () {
+                if (current && current.card) { current.card.focus(); }
+                current = null;
+            });
+        })();
+    </script>
+</body>
+
+</html>

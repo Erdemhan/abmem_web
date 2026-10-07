@@ -118,7 +118,9 @@ class PluginRegistry(Generic[T]):
         with self._lock:
             self._classes.pop(key, None)
 
-    def discover_package(self, package: str) -> None:
+    def discover_package(
+        self, package: str, errors: dict[str, str] | None = None
+    ) -> None:
         """Import every public module of ``package`` and of its subpackages.
 
         Modules whose last name part starts with ``_`` and the names in
@@ -126,10 +128,14 @@ class PluginRegistry(Generic[T]):
 
         Args:
             package: Dotted package name.
+            errors: When given, a module that fails to import is recorded here
+                (module name to traceback text) and the other modules are
+                still imported, instead of raising.
 
         Raises:
-            PluginDiscoveryError: If a module fails to import. The message
-                contains the module name and the traceback.
+            PluginDiscoveryError: If a module fails to import and ``errors``
+                is None. The message contains the module name and the
+                traceback.
         """
         root = importlib.import_module(package)
         for info in pkgutil.iter_modules(getattr(root, "__path__", []), package + "."):
@@ -139,12 +145,37 @@ class PluginRegistry(Generic[T]):
             try:
                 importlib.import_module(info.name)
             except Exception as error:
+                if errors is not None:
+                    errors[info.name] = traceback.format_exc()
+                    continue
                 raise PluginDiscoveryError(
                     f"{self.kind} discovery: module {info.name} failed to import.\n"
                     f"{traceback.format_exc()}"
                 ) from error
             if info.ispkg:
-                self.discover_package(info.name)
+                self.discover_package(info.name, errors)
+
+    def scan(self) -> tuple[dict[str, T], dict[str, str]]:
+        """Import every module and report import failures instead of raising.
+
+        Used by the Algorithms page (PLAN 2.12), which lists the registered
+        classes next to the modules that failed. Discovery is marked complete
+        only when no module failed, so other queries still raise.
+
+        Returns:
+            The registered classes by key and the import errors by module name
+            (traceback text).
+        """
+        errors: dict[str, str] = {}
+        with self._lock:
+            for package in self._packages:
+                try:
+                    self.discover_package(package, errors)
+                except Exception:
+                    errors[package] = traceback.format_exc()
+            if not errors:
+                self._discovered = True
+            return dict(self._classes), errors
 
     def discover(self) -> None:
         """Import the modules of the configured packages once (cached).

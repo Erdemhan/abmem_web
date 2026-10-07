@@ -153,3 +153,46 @@ def test_failed_discovery_is_not_cached(package: Path) -> None:
     broken.write_text("VALUE = 1\n", "utf-8")
     sys.modules.pop(f"{name}.broken", None)
     assert plugins.classes() == {}
+
+
+def test_scan_reports_failed_modules_and_keeps_the_others(package: Path) -> None:
+    name = package.name
+    plugins: PluginRegistry = PluginRegistry("thing", packages=(name,))
+    base = _plugin_base(plugins)
+    import builtins
+
+    builtins.SCAN_BASE = base  # type: ignore[attr-defined]
+    try:
+        (package / "good.py").write_text(
+            "import builtins\n"
+            "class Good(builtins.SCAN_BASE):\n"
+            "    key = 'GOOD'\n"
+            "    def run(self):\n"
+            "        return 'g'\n",
+            "utf-8",
+        )
+        broken = package / "sub" / "broken.py"
+        broken.write_text("raise RuntimeError('scan failure')\n", "utf-8")
+        classes, errors = plugins.scan()
+        assert list(classes) == ["GOOD"]
+        assert list(errors) == [f"{name}.sub.broken"]
+        assert "RuntimeError: scan failure" in errors[f"{name}.sub.broken"]
+        # Discovery is not marked complete, so a normal query still raises.
+        with pytest.raises(PluginDiscoveryError):
+            plugins.classes()
+        broken.write_text("VALUE = 1\n", "utf-8")
+        sys.modules.pop(f"{name}.sub.broken", None)
+        classes, errors = plugins.scan()
+        assert errors == {} and list(classes) == ["GOOD"]
+        assert list(plugins.classes()) == ["GOOD"]
+    finally:
+        del builtins.SCAN_BASE  # type: ignore[attr-defined]
+
+
+def test_scan_reports_a_missing_package() -> None:
+    plugins: PluginRegistry = PluginRegistry(
+        "thing", packages=("abmem_no_such_package_for_scan",)
+    )
+    classes, errors = plugins.scan()
+    assert classes == {}
+    assert "ModuleNotFoundError" in errors["abmem_no_such_package_for_scan"]

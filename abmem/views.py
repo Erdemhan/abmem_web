@@ -3,7 +3,7 @@ import logging
 import math
 import re
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import Any, Final
 
@@ -32,6 +32,7 @@ from .models.simulation import (
     default_observation_lags,
 )
 from .models.models import Plant, Portfolio, Resource
+from .services import algorithm_catalog
 from .services.agent import library_service
 from .services.agent.library_service import (
     NAME_MAX_LENGTH,
@@ -1158,6 +1159,8 @@ class ScenarioHeader:
         lower_bound: Lower bid bound in USD/MWh.
         upper_bound: Upper bid bound in USD/MWh, greater than ``lower_bound``.
         clearing_algorithm: Key of a registered clearing algorithm (PLAN 2.10).
+        clearing_params: Per-scenario overrides of the clearing algorithm
+            parameters, typed values by field name (PLAN 2.12).
     """
 
     name: str
@@ -1167,6 +1170,7 @@ class ScenarioHeader:
     lower_bound: int
     upper_bound: int
     clearing_algorithm: str = DEFAULT_CLEARING_ALGORITHM
+    clearing_params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -1221,8 +1225,11 @@ def _parse_scenario_header(data: Mapping[str, Any]) -> ScenarioHeader:
     Raises:
         ValidationError: With field keys ``simulation_name``,
             ``simulationMode``, ``periodType``, ``strategy``, ``lowerBound``,
-            ``upperBound`` and ``clearing_algorithm`` (optional, MERIT_ORDER
-            when missing, must be a registered clearing algorithm key).
+            ``upperBound``, ``clearing_algorithm`` (optional, MERIT_ORDER
+            when missing, must be a registered clearing algorithm key) and
+            ``clearing_params`` (optional overrides of the clearing
+            algorithm parameters, validated with its config class together
+            with ``ClearingDefault``, messages prefixed by the field name).
     """
     errors: dict[str, list[str]] = {}
     values: dict[str, Any] = {}
@@ -1254,6 +1261,15 @@ def _parse_scenario_header(data: Mapping[str, Any]) -> ScenarioHeader:
             f"Clearing algorithm {clearing!r} is not available. Known clearing "
             f"algorithms: {known}."
         ]
+    clearing_params: dict[str, Any] = {}
+    if "clearing_algorithm" not in errors:
+        clearing_params, clearing_errors = (
+            algorithm_catalog.validate_scenario_clearing_params(
+                str(clearing), data.get("clearing_params")
+            )
+        )
+        if clearing_errors:
+            errors["clearing_params"] = clearing_errors
     lower = _coerce_payload_int(data.get("lowerBound"))
     upper = _coerce_payload_int(data.get("upperBound"))
     if lower is None:
@@ -1274,6 +1290,7 @@ def _parse_scenario_header(data: Mapping[str, Any]) -> ScenarioHeader:
         lower_bound=lower,
         upper_bound=upper,
         clearing_algorithm=str(clearing),
+        clearing_params=clearing_params,
     )
 
 
@@ -1975,6 +1992,7 @@ def _wizard_context(simulation: Simulation | None = None) -> dict[str, Any]:
             "periodNumber": simulation.periodNumber,
             "strategy": _enum_int(market.strategy),
             "clearing_algorithm": market.clearing_algorithm,
+            "clearing_params": dict(market.clearing_params or {}),
             "lowerBound": market.lowerBidBound,
             "upperBound": market.upperBidBound,
             "seed": simulation.seed,
@@ -1994,6 +2012,7 @@ def _wizard_context(simulation: Simulation | None = None) -> dict[str, Any]:
             "periodNumber": WIZARD_DEFAULT_PERIODS,
             "strategy": enums.MarketStrategy.PAYASPTF.value,
             "clearing_algorithm": DEFAULT_CLEARING_ALGORITHM,
+            "clearing_params": {},
             "lowerBound": WIZARD_DEFAULT_LOWER_BOUND,
             "upperBound": WIZARD_DEFAULT_UPPER_BOUND,
             "seed": DEFAULT_SEED,
@@ -2040,7 +2059,12 @@ def _wizard_context(simulation: Simulation | None = None) -> dict[str, Any]:
             for info in algorithm_registry.available_algorithms()
         },
         "clearing_algorithms": [
-            {"key": info.key, "label": info.label, "description": info.description}
+            {
+                "key": info.key,
+                "label": info.label,
+                "description": info.description,
+                "params": algorithm_catalog.clearing_param_fields(info.key),
+            }
             for info in available_clearing_algorithms()
         ],
     }
@@ -2131,6 +2155,7 @@ def create_simulation(request: HttpRequest) -> HttpResponse:
             upperBound=header.upper_bound,
             strategy=header.strategy,
             clearing_algorithm=header.clearing_algorithm,
+            clearing_params=header.clearing_params,
         )
         _write_scenario_agents(market, validated.entries)
         created["simulation"] = simulation
@@ -2208,6 +2233,7 @@ def update_simulation(request: HttpRequest, simulation_id: int) -> HttpResponse:
         market.upperBidBound = header.upper_bound
         market.strategy = header.strategy
         market.clearing_algorithm = header.clearing_algorithm
+        market.clearing_params = dict(header.clearing_params)
         market.save()
 
         _write_scenario_agents(market, validated.entries)

@@ -16,6 +16,9 @@ Column order:
   evaluation_phase``, one row per ``AgentStepLog`` row, by agent id and
   period number. ``intervened_plants`` is the JSON list of per-plant flags,
   the booleans are ``1``/``0``.
+
+:func:`parameters_json` is the JSON export of the parameters the run used
+(PLAN 2.12).
 """
 
 from __future__ import annotations
@@ -179,3 +182,36 @@ def step_logs_csv(sim: Simulation) -> str:
             for row in rows
         ),
     )
+
+
+def parameters_json(sim: Simulation) -> str:
+    """Return the parameter snapshot of a run as JSON text (PLAN 2.12).
+
+    Args:
+        sim: A run.
+
+    Returns:
+        Indented JSON ``{"simulation_id", "clearing_algorithm",
+        "clearing_params", "agents": [{"name", "algorithm", "params"}]}``.
+        ``clearing_params`` and ``params`` are the stored snapshots, null
+        for runs started before snapshots were stored. Agents are in id
+        order. Two queries, nothing is written.
+    """
+    from abmem.models import Agent, Market
+
+    market = Market.objects.get(simulation=sim)
+    agents = Agent.objects.filter(market=market).order_by("id")
+    document = {
+        "simulation_id": int(sim.pk),
+        "clearing_algorithm": str(market.clearing_algorithm),
+        "clearing_params": market.effective_clearing_params,
+        "agents": [
+            {
+                "name": agent.name,
+                "algorithm": str(agent.algorithm_type),
+                "params": agent.effective_params,
+            }
+            for agent in agents
+        ],
+    }
+    return json.dumps(document, indent=2, sort_keys=False) + "\n"

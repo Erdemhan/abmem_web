@@ -72,12 +72,28 @@ listed here (enforced by a test), so a new field cannot be silently dropped.
 """
 
 NOT_COPIED_AGENT_FIELDS: Final[frozenset[str]] = frozenset(
-    {"id", "market", "proxy", "state", "source", "created_at", "updated_at"}
+    {
+        "id",
+        "market",
+        "proxy",
+        "state",
+        "source",
+        "created_at",
+        "updated_at",
+        "effective_params",
+    }
 )
 
 _NOT_COPIED_ROW_FIELDS: Final[frozenset[str]] = frozenset(
     {"id", "created_at", "updated_at"}
 )
+
+# Market fields a scenario or run copy never takes over. The parameter
+# snapshot belongs to the run that wrote it (PLAN 2.12).
+_NOT_COPIED_MARKET_FIELDS: Final[frozenset[str]] = _NOT_COPIED_ROW_FIELDS | {
+    "simulation",
+    "effective_clearing_params",
+}
 
 
 class LibraryValidationError(ValidationError):
@@ -733,9 +749,7 @@ def duplicate_scenario(proxy_sim: Simulation, *, name: str | None = None) -> Sim
     new_sim = Simulation.objects.create(**sim_values)
 
     proxy_market = proxy_sim.market
-    market_values = _copy_row_values(
-        proxy_market, _NOT_COPIED_ROW_FIELDS | {"simulation"}
-    )
+    market_values = _copy_row_values(proxy_market, _NOT_COPIED_MARKET_FIELDS)
     market_values.update(proxy=True, state=MarketState.CREATED, simulation=new_sim)
     new_market = Market.objects.create(**market_values)
 
@@ -825,9 +839,7 @@ def clone_scenario_for_run(
     new_sim = Simulation.objects.create(**sim_values)
 
     proxy_market = proxy_sim.market
-    market_values = _copy_row_values(
-        proxy_market, _NOT_COPIED_ROW_FIELDS | {"simulation"}
-    )
+    market_values = _copy_row_values(proxy_market, _NOT_COPIED_MARKET_FIELDS)
     market_values.update(proxy=False, state=MarketState.CREATED, simulation=new_sim)
     new_market = Market.objects.create(**market_values)
 

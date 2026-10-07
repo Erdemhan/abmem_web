@@ -9,13 +9,15 @@ module dropped into that package becomes selectable without editing this file
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Any, Final
 
 from abmem.services.plugin_registry import PluginRegistry
 
 if TYPE_CHECKING:
     from .base import BaseClearingAlgorithm
+    from .config import ClearingConfig
 
 __all__ = [
     "CLEARING_ALGORITHMS",
@@ -24,7 +26,9 @@ __all__ = [
     "available_clearing_algorithms",
     "clearing_label_for",
     "get_clearing_algorithm",
+    "get_clearing_config_class",
     "is_known_clearing",
+    "sorted_clearing_infos",
 ]
 
 DEFAULT_CLEARING_ALGORITHM: Final[str] = "MERIT_ORDER"
@@ -59,13 +63,24 @@ def available_clearing_algorithms() -> tuple[ClearingAlgorithmInfo, ...]:
         The default algorithm first, then the others ordered by label (then
         key).
     """
+    return sorted_clearing_infos(CLEARING_ALGORITHMS.classes())
+
+
+def sorted_clearing_infos(
+    classes: Mapping[str, type[BaseClearingAlgorithm]],
+) -> tuple[ClearingAlgorithmInfo, ...]:
+    """Return the infos of ``classes``, the default first, then by label.
+
+    Args:
+        classes: Registered classes by key.
+    """
     infos = [
         ClearingAlgorithmInfo(
             key=key,
             label=str(cls.label or key),
             description=str(cls.description or ""),
         )
-        for key, cls in CLEARING_ALGORITHMS.classes().items()
+        for key, cls in classes.items()
     ]
     infos.sort(
         key=lambda info: (info.key != DEFAULT_CLEARING_ALGORITHM, info.label, info.key)
@@ -73,19 +88,34 @@ def available_clearing_algorithms() -> tuple[ClearingAlgorithmInfo, ...]:
     return tuple(infos)
 
 
-def get_clearing_algorithm(key: str) -> BaseClearingAlgorithm:
-    """Return a new instance of the clearing algorithm ``key``.
-
-    Args:
-        key: Clearing algorithm key.
-
-    Returns:
-        An instance of the registered class.
+def get_clearing_config_class(key: str) -> type[ClearingConfig]:
+    """Return the parameter class of the clearing algorithm ``key`` (PLAN 2.12).
 
     Raises:
         KeyError: If ``key`` is unknown. The message lists the known keys.
     """
-    return CLEARING_ALGORITHMS.get(key)()
+    return CLEARING_ALGORITHMS.get(key).config_class
+
+
+def get_clearing_algorithm(
+    key: str, params: Mapping[str, Any] | None = None
+) -> BaseClearingAlgorithm:
+    """Return a new instance of the clearing algorithm ``key``.
+
+    Args:
+        key: Clearing algorithm key.
+        params: Effective parameters, None for the class defaults.
+
+    Returns:
+        ``cls(cls.config_class.from_dict(params))``.
+
+    Raises:
+        KeyError: If ``key`` is unknown. The message lists the known keys.
+        TypeError: If ``params`` is not a mapping.
+        ValueError: If ``params`` has unknown keys or invalid values.
+    """
+    cls = CLEARING_ALGORITHMS.get(key)
+    return cls(cls.config_class.from_dict(params))
 
 
 def is_known_clearing(key: object) -> bool:
