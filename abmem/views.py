@@ -1009,14 +1009,24 @@ def run_simulation(request: HttpRequest, simulation_id: int) -> HttpResponse:
     return redirect("watch_simulation", simulation_id=run_id)
 
 
+def _user_runs():
+    """Return the user's simulation runs without HPO evaluation runs.
+
+    HPO evaluation simulations are linked to an ``HPOTrial`` and are listed on
+    the watch page of their study instead (ARCHITECTURE.md 7.2).
+
+    Returns:
+        Queryset of ``Simulation`` with ``proxy=False`` and no HPO trial.
+    """
+    return Simulation.objects.filter(proxy=False, hpo_trial__isnull=True)
+
+
 def dashboard(request):
     num_resources = Resource.objects.count()
     num_agents = Agent.objects.count()
-    num_simulations = Simulation.objects.filter(proxy=False).count()
+    num_simulations = _user_runs().count()
     num_proxy_simulations = Simulation.objects.filter(proxy=True).count()
-    latest_simulations = Simulation.objects.filter(proxy=False).order_by("-created_at")[
-        :5
-    ]
+    latest_simulations = _user_runs().order_by("-created_at")[:5]
     context = {
         "num_resources": num_resources,
         "num_agents": num_agents,
@@ -1181,7 +1191,7 @@ def simulation_list_proxy(request):
 
 
 def simulation_list(request):
-    simulations = Simulation.objects.filter(proxy=False).order_by("-updated_at")
+    simulations = _user_runs().order_by("-updated_at")
     return render(request, "pages/simulation-list.html", {"simulations": simulations})
 
 

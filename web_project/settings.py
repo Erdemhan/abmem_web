@@ -171,3 +171,12 @@ STATICFILES_DIRS = [
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+
+# Hyperparameter search (OQ-17): a RUNNING study whose heartbeat is older than
+# this number of seconds is set to FAILED when the HPO list, watch or status
+# view is loaded. The study process refreshes the heartbeat between batches and
+# while it polls a running batch.
+ABMEM_HPO_HEARTBEAT_TIMEOUT = float(
+    os.environ.get("ABMEM_HPO_HEARTBEAT_TIMEOUT", str(30 * 60))
+)
