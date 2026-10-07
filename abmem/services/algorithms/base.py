@@ -9,6 +9,7 @@ computation live outside the algorithms.
 from __future__ import annotations
 
 import abc
+import copy
 import functools
 import math
 import numbers
@@ -47,6 +48,125 @@ def _finite_vector(name: str, value: Any) -> np.ndarray:
     if not np.all(np.isfinite(array)):
         raise ValueError(f"{name} must contain only finite values, got {array}")
     return array
+
+
+def to_plain(value: Any) -> Any:
+    """Return ``value`` with numpy scalars and tuples turned into plain Python types.
+
+    Args:
+        value: Nested dicts, lists, tuples and scalars (for example a numpy
+            ``bit_generator.state``).
+
+    Returns:
+        The same structure built from dict, list, int, float, bool, str and
+        None only.
+    """
+    if isinstance(value, Mapping):
+        return {str(k): to_plain(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [to_plain(v) for v in value]
+    if isinstance(value, (bool, np.bool_)):
+        return bool(value)
+    if isinstance(value, (numbers.Integral, np.integer)):
+        return int(value)
+    if isinstance(value, (numbers.Real, np.floating)):
+        return float(value)
+    return value
+
+
+def _check_state_dict_shapes(
+    name: str, current: Mapping[str, torch.Tensor], saved: Any
+) -> None:
+    """Check that ``saved`` has the keys and tensor shapes of ``current``.
+
+    Args:
+        name: Network name for the error message.
+        current: state_dict of the live network.
+        saved: Saved state_dict.
+
+    Raises:
+        ValueError: On a missing or extra key or a different shape.
+    """
+    if not isinstance(saved, Mapping):
+        raise ValueError(f"network {name!r}: saved state is not a mapping")
+    if set(saved) != set(current):
+        raise ValueError(
+            f"network {name!r}: parameters differ "
+            f"(missing {sorted(set(current) - set(saved))}, "
+            f"unexpected {sorted(set(saved) - set(current))})"
+        )
+    for key, tensor in current.items():
+        other = saved[key]
+        if not isinstance(other, torch.Tensor) or other.shape != tensor.shape:
+            shape = tuple(other.shape) if isinstance(other, torch.Tensor) else None
+            raise ValueError(
+                f"network {name!r}: {key} has shape {shape}, "
+                f"expected {tuple(tensor.shape)}"
+            )
+
+
+def _check_optimizer_layout(
+    name: str, optimizer: torch.optim.Optimizer, saved: Any
+) -> None:
+    """Check that a saved optimiser state_dict fits ``optimizer``.
+
+    Args:
+        name: Optimiser name for the error message.
+        optimizer: Live optimiser.
+        saved: Saved state_dict.
+
+    Raises:
+        ValueError: If the number of parameter groups or of parameters per
+            group differs, or a saved moment has the wrong shape.
+    """
+    try:
+        groups = saved["param_groups"]
+        state = saved["state"]
+    except (KeyError, TypeError) as error:
+        raise ValueError(f"optimiser {name!r}: saved state is invalid") from error
+    if len(groups) != len(optimizer.param_groups):
+        raise ValueError(f"optimiser {name!r}: number of parameter groups differs")
+    shapes: dict[int, torch.Size] = {}
+    for saved_group, group in zip(groups, optimizer.param_groups):
+        if len(saved_group["params"]) != len(group["params"]):
+            raise ValueError(
+                f"optimiser {name!r}: number of parameters in a group differs"
+            )
+        for index, param in zip(saved_group["params"], group["params"]):
+            shapes[int(index)] = param.shape
+    for index, entry in state.items():
+        expected = shapes.get(int(index))
+        if expected is None:
+            raise ValueError(f"optimiser {name!r}: unknown parameter index {index}")
+        for key in ("exp_avg", "exp_avg_sq"):
+            value = entry.get(key)
+            if isinstance(value, torch.Tensor) and value.shape != expected:
+                raise ValueError(
+                    f"optimiser {name!r}: {key} has shape {tuple(value.shape)}, "
+                    f"expected {tuple(expected)}"
+                )
+
+
+def _load_optimizer_keep_hyperparameters(
+    optimizer: torch.optim.Optimizer, saved: Mapping[str, Any]
+) -> None:
+    """Load the moments of ``saved`` but keep the live hyperparameters.
+
+    ``Optimizer.load_state_dict`` also restores learning rates and betas. The
+    hyperparameters of the live optimiser come from the config of the current
+    run and are put back after loading.
+
+    Args:
+        optimizer: Live optimiser.
+        saved: Saved state_dict (layout already checked).
+    """
+    hyperparameters = [
+        {key: value for key, value in group.items() if key != "params"}
+        for group in optimizer.param_groups
+    ]
+    optimizer.load_state_dict(copy.deepcopy(dict(saved)))
+    for group, values in zip(optimizer.param_groups, hyperparameters):
+        group.update(values)
 
 
 @dataclass(frozen=True)
@@ -446,6 +566,130 @@ class BaseAgentAlgorithm(abc.ABC):
     def frozen(self) -> bool:
         """True while the policy is frozen."""
         return self._frozen
+
+    # Persistence (finding A9) -----------------------------------------------
+
+    def get_state(self) -> dict[str, Any]:
+        """Return the learned and runtime state as tensors and plain Python types.
+
+        The result is detached from the live policy (tensors are cloned), so
+        later training does not change it. Replay and rollout buffers are not
+        part of the state.
+
+        Returns:
+            Mapping with ``modules`` (state_dict per network), ``optimizers``
+            (state_dict per optimiser), ``common`` (exploration sigma, frozen
+            flag, numpy generator state) and ``extra`` (algorithm-specific
+            entries of :meth:`_extra_state`).
+        """
+        return {
+            "modules": {
+                name: {
+                    key: value.detach().clone()
+                    for key, value in module.state_dict().items()
+                }
+                for name, module in self._state_modules().items()
+            },
+            "optimizers": {
+                name: copy.deepcopy(optimizer.state_dict())
+                for name, optimizer in self._state_optimizers().items()
+            },
+            "common": {
+                "exploration_sigma": float(self._exploration_sigma),
+                "frozen": bool(self._frozen),
+                "rng_state": to_plain(self.rng.bit_generator.state),
+            },
+            "extra": self._extra_state(),
+        }
+
+    def set_state(self, state: Mapping[str, Any], *, restore_runtime: bool) -> None:
+        """Load a state produced by :meth:`get_state` of a compatible policy.
+
+        Every network shape and optimiser layout is checked before anything is
+        changed, so a rejected state leaves the policy untouched.
+
+        Args:
+            state: Output of :meth:`get_state` (possibly after a save/load).
+            restore_runtime: Also restore the random generators, the frozen
+                flag and acting history (exact round trip). With False only
+                the learned state (networks, optimisers, temperature,
+                exploration sigma, counters) is loaded and the generators of
+                this policy are kept (warm start of a new run).
+
+        Raises:
+            ValueError: If the state does not match this policy (missing
+                entries, different network shapes or optimiser layouts).
+        """
+        modules = self._state_modules()
+        optimizers = self._state_optimizers()
+        try:
+            saved_modules = state["modules"]
+            saved_optimizers = state["optimizers"]
+            common = state["common"]
+            extra = state["extra"]
+        except (KeyError, TypeError) as error:
+            raise ValueError(f"policy state is incomplete: {error}") from error
+        if set(saved_modules) != set(modules):
+            raise ValueError(
+                f"networks differ: saved {sorted(saved_modules)}, "
+                f"expected {sorted(modules)}"
+            )
+        if set(saved_optimizers) != set(optimizers):
+            raise ValueError(
+                f"optimisers differ: saved {sorted(saved_optimizers)}, "
+                f"expected {sorted(optimizers)}"
+            )
+        for name, module in modules.items():
+            _check_state_dict_shapes(name, module.state_dict(), saved_modules[name])
+        for name, optimizer in optimizers.items():
+            _check_optimizer_layout(name, optimizer, saved_optimizers[name])
+        self._check_extra_state(extra)
+
+        for name, module in modules.items():
+            module.load_state_dict(saved_modules[name], strict=True)
+        for name, optimizer in optimizers.items():
+            _load_optimizer_keep_hyperparameters(optimizer, saved_optimizers[name])
+        self._exploration_sigma = float(common["exploration_sigma"])
+        if restore_runtime:
+            self._frozen = bool(common["frozen"])
+            self.rng.bit_generator.state = dict(common["rng_state"])
+        self._load_extra_state(extra, restore_runtime=restore_runtime)
+
+    def _state_modules(self) -> dict[str, nn.Module]:
+        """Return the networks of the policy by name (empty for baselines)."""
+        return {}
+
+    def _state_optimizers(self) -> dict[str, torch.optim.Optimizer]:
+        """Return the optimisers of the policy by name (empty for baselines)."""
+        return {}
+
+    def _extra_state(self) -> dict[str, Any]:
+        """Return algorithm-specific state (counters, temperature, generators).
+
+        Returns:
+            Mapping of tensors and plain Python values.
+        """
+        return {}
+
+    def _check_extra_state(self, extra: Mapping[str, Any]) -> None:
+        """Validate ``extra`` before anything is loaded.
+
+        Args:
+            extra: Output of :meth:`_extra_state` of the saved policy.
+
+        Raises:
+            ValueError: If an entry is missing or has the wrong shape.
+        """
+
+    def _load_extra_state(
+        self, extra: Mapping[str, Any], *, restore_runtime: bool
+    ) -> None:
+        """Load the output of :meth:`_extra_state` (already validated).
+
+        Args:
+            extra: Algorithm-specific state.
+            restore_runtime: See :meth:`set_state`.
+        """
 
     # Helpers for subclasses -------------------------------------------------
 

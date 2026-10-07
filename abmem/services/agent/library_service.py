@@ -609,8 +609,13 @@ def clone_scenario_for_run(
     forced_algorithm: AlgorithmType | None = None,
     algorithm_overrides: Mapping[str, Any] | None = None,
     fixed_agent_fields: Mapping[str, Any] | None = None,
+    warm_start_from: Simulation | None = None,
+    freeze_policies: bool = False,
 ) -> Simulation:
     """Copy a proxy scenario into a new run (simulation, market, agents).
+
+    The run records the scenario it was cloned from (``Simulation.scenario``)
+    and its warm-start origin (finding A9).
 
     Args:
         proxy_sim: Proxy simulation (scenario template).
@@ -623,6 +628,12 @@ def clone_scenario_for_run(
         fixed_agent_fields: Values set on every copied agent (HPO fixed
             fail-stack settings). Keys must be in ``COPIED_AGENT_FIELDS``
             and must not be ``name``.
+        warm_start_from: Finished run of this scenario whose saved policies
+            initialise the run. Only matched against the scenario here; the
+            files are checked by ``checkpoints.check_warm_start`` and loaded
+            when the run starts.
+        freeze_policies: Run the loaded policies without learning. Requires
+            ``warm_start_from``.
 
     Returns:
         The new run simulation (``proxy=False``, state ``CREATED``,
@@ -630,8 +641,11 @@ def clone_scenario_for_run(
         ``proxy=False`` copy of every scenario agent.
 
     Raises:
-        ValueError: ``proxy_sim`` is not a proxy simulation, or
-            ``fixed_agent_fields`` contains a key that cannot be set.
+        ValueError: ``proxy_sim`` is not a proxy simulation,
+            ``fixed_agent_fields`` contains a key that cannot be set, or
+            ``freeze_policies`` is set without ``warm_start_from``.
+        WarmStartError: ``warm_start_from`` is not a finished run of this
+            scenario with saved policies (a ``ValueError``).
         LibraryValidationError: A forced algorithm or fixed fail-stack value
             is invalid.
     """
@@ -647,6 +661,12 @@ def clone_scenario_for_run(
         forced_algorithm = _validate_enum(
             forced_algorithm, AlgorithmType, "algorithm_type"
         )
+    if freeze_policies and warm_start_from is None:
+        raise ValueError("freeze_policies requires warm_start_from.")
+    if warm_start_from is not None:
+        from ..simulation.checkpoints import resolve_warm_start
+
+        resolve_warm_start(proxy_sim, warm_start_from)
 
     sim_values = _copy_row_values(proxy_sim, _NOT_COPIED_ROW_FIELDS)
     sim_values.update(
@@ -655,6 +675,11 @@ def clone_scenario_for_run(
         currentPeriod=-1,
         seed=proxy_sim.seed if seed is None else seed,
         error="",
+        scenario_id=proxy_sim.pk,
+        warm_start_from_id=(
+            warm_start_from.pk if warm_start_from is not None else None
+        ),
+        freeze_policies=bool(freeze_policies),
     )
     new_sim = Simulation.objects.create(**sim_values)
 

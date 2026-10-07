@@ -38,6 +38,9 @@ if TYPE_CHECKING:
 def step(ctx: SimulationContext, rt: AgentRuntimeState, t: int) -> list[Offer]:
     """Run the decision of one agent for period ``t`` (before clearing of ``t``).
 
+    An agent with ``rt.evaluate_only`` (frozen warm-started policy) is in the
+    evaluation phase in every period: no exploration, no stored transitions.
+
     Args:
         ctx: Run context. ``ctx.current_period`` is the period ``t``. It is
             inserted by ``market_service.run_period`` after clearing, the
@@ -54,7 +57,7 @@ def step(ctx: SimulationContext, rt: AgentRuntimeState, t: int) -> list[Offer]:
         ValueError: If ``t > 1`` and ``rt.last_outcomes`` is empty, or any
             component rejects its input.
     """
-    phase = ctx.phase_for(t)
+    phase = RunPhase.EVALUATE if rt.evaluate_only else ctx.phase_for(t)
     policy = rt.policy
     n_plants = len(rt.plants)
     obs = build_observation(t, ctx.demand, ctx.ptf_history, ctx.lags)

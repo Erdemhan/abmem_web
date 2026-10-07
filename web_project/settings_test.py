@@ -12,6 +12,8 @@ other's ``test_abmem`` database.
 
 import hashlib
 import os
+import tempfile
+from pathlib import Path
 
 os.environ.setdefault("DJANGO_DEBUG", "true")
 
@@ -28,3 +30,8 @@ DATABASES["default"]["TEST"]["NAME"] = os.environ.get(
 # such as U+0130. Create it from template0 with UTF8 to match production data.
 DATABASES["default"]["TEST"]["CHARSET"] = "UTF8"
 DATABASES["default"]["TEST"]["TEMPLATE"] = "template0"
+
+# Checkpoints of runs started by tests never go into the repository. Tests
+# override this per test with pytest's tmp_path (tests/conftest.py); this
+# default covers code paths that do not see the override.
+ABMEM_CHECKPOINT_DIR = Path(tempfile.gettempdir()) / f"abmem_test_checkpoints_{_checkout_id}"

@@ -16,10 +16,12 @@ References:
 from __future__ import annotations
 
 import math
-from typing import ClassVar
+from collections.abc import Mapping
+from typing import Any, ClassVar
 
 import numpy as np
 import torch
+from torch import nn
 from torch.nn import functional as F
 
 from abmem.models.enums import AlgorithmType
@@ -97,6 +99,53 @@ class SACAlgorithm(BaseAgentAlgorithm):
 
         self._torch_gen = torch.Generator(device=self.device)
         self._torch_gen.manual_seed(int(rng.integers(0, 2**63 - 1)))
+
+    def _state_modules(self) -> dict[str, nn.Module]:
+        """Return the actor, both soft Q-functions and their targets by name."""
+        return {
+            "actor": self.actor,
+            "q1": self.q1,
+            "q2": self.q2,
+            "q1_target": self.q1_target,
+            "q2_target": self.q2_target,
+        }
+
+    def _state_optimizers(self) -> dict[str, torch.optim.Optimizer]:
+        """Return the actor, critic and temperature optimisers by name."""
+        return {
+            "actor": self.actor_opt,
+            "critic": self.critic_opt,
+            "alpha": self.alpha_opt,
+        }
+
+    def _extra_state(self) -> dict[str, Any]:
+        """Return the temperature and the sampling generator state."""
+        return {
+            "log_alpha": self.log_alpha.detach().clone(),
+            "torch_generator": self._torch_gen.get_state(),
+        }
+
+    def _check_extra_state(self, extra: Mapping[str, Any]) -> None:
+        """Require a scalar ``log_alpha`` and the generator state.
+
+        Raises:
+            ValueError: If an entry is missing or ``log_alpha`` is not scalar.
+        """
+        missing = {"log_alpha", "torch_generator"} - set(extra)
+        if missing:
+            raise ValueError(f"SAC state lacks {sorted(missing)}")
+        log_alpha = extra["log_alpha"]
+        if not isinstance(log_alpha, torch.Tensor) or log_alpha.shape != ():
+            raise ValueError("SAC state: log_alpha must be a scalar tensor")
+
+    def _load_extra_state(
+        self, extra: Mapping[str, Any], *, restore_runtime: bool
+    ) -> None:
+        """Restore ``log_alpha`` in place (the optimiser keeps its reference)."""
+        with torch.no_grad():
+            self.log_alpha.copy_(extra["log_alpha"].to(self.device))
+        if restore_runtime:
+            self._torch_gen.set_state(extra["torch_generator"].cpu())
 
     @property
     def alpha(self) -> float:

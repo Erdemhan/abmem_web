@@ -83,6 +83,14 @@
                   <tbody id="an-agent-settings"></tbody>
                 </table>
               </div>
+              <div class="table-responsive mt-3">
+                <table class="table table-sm an-table mb-0">
+                  <thead>
+                    <tr><th>Saved policy</th><th>Algorithm</th><th class="an-num">File size</th><th class="an-num">Periods trained</th><th>Loaded from</th></tr>
+                  </thead>
+                  <tbody id="an-checkpoints"></tbody>
+                </table>
+              </div>
             </div>
           </div>
         </div>
@@ -583,8 +591,23 @@
           ['Periods', String(s.period_number)], ['Mode', s.mode], ['Market strategy', s.strategy],
           ['Bid bounds (TL/MWh)', s.lower_bound + ' - ' + s.upper_bound],
           ['Observation lags', s.observation_lags.join(', ')],
-          ['Evaluation periods', s.evaluation_periods ? String(s.evaluation_periods) : '0 (no evaluation window)']
+          ['Evaluation periods', s.evaluation_periods ? String(s.evaluation_periods) : '0 (no evaluation window)'],
+          ['Initial policies', s.warm_start_from
+            ? 'Run #' + s.warm_start_from + (s.freeze_policies ? ' (evaluate only, no learning)' : '')
+            : 'Fresh (untrained)']
         ].forEach(function (pair) { body.appendChild(row([cell(pair[0], 'font-weight-bold'), cell(pair[1])])); });
+        var saved = $('an-checkpoints');
+        saved.innerHTML = '';
+        if (!s.checkpoints.length) {
+          var empty = cell('No saved policies (baselines only, hyperparameter search run, or run before A9).');
+          empty.colSpan = 5;
+          saved.appendChild(row([empty]));
+        }
+        s.checkpoints.forEach(function (c) {
+          saved.appendChild(row([cell(c.agent || '-', 'font-weight-bold'), cell(c.algorithm),
+            cell(fmt(c.file_size / 1048576, 2) + ' MiB', 'an-num'), cell(String(c.periods_trained), 'an-num'),
+            cell(c.parent_run ? 'Run #' + c.parent_run : 'fresh')]));
+        });
         var agents = $('an-agent-settings');
         agents.innerHTML = '';
         s.agents.forEach(function (a) {

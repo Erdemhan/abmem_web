@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from decimal import ROUND_CEILING, ROUND_FLOOR, ROUND_HALF_EVEN, Decimal
 from typing import TYPE_CHECKING, Any, Final
 
@@ -94,6 +94,25 @@ class AgentSetting:
 
 
 @dataclass(frozen=True)
+class CheckpointSetting:
+    """Saved policy of one agent of the run (finding A9).
+
+    Attributes:
+        agent: Agent name (empty if the agent row is gone).
+        algorithm: Algorithm name.
+        file_size: Size of the checkpoint file in bytes.
+        periods_trained: Learning periods including warm-start ancestors.
+        parent_run: Run of the checkpoint the policy was loaded from, if any.
+    """
+
+    agent: str
+    algorithm: str
+    file_size: int
+    periods_trained: int
+    parent_run: int | None
+
+
+@dataclass(frozen=True)
 class RunSettings:
     """Settings of the run.
 
@@ -109,6 +128,10 @@ class RunSettings:
         lower_bound: Lower bid bound (TL/MWh).
         upper_bound: Upper bid bound (TL/MWh).
         agents: Agent settings in id order.
+        warm_start_from: Run whose saved policies initialised this run, None
+            for fresh policies.
+        freeze_policies: The loaded policies ran without learning.
+        checkpoints: Policies saved at the end of this run, in agent order.
     """
 
     simulation_id: int
@@ -122,6 +145,9 @@ class RunSettings:
     lower_bound: int
     upper_bound: int
     agents: list[AgentSetting]
+    warm_start_from: int | None = None
+    freeze_policies: bool = False
+    checkpoints: list[CheckpointSetting] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -499,7 +525,7 @@ def build_run_analysis(simulation: Simulation) -> RunAnalysis:
             FINISHED, or has no periods or offers (for example a purged HPO
             evaluation run).
     """
-    from abmem.models import AgentStepLog
+    from abmem.models import AgentStepLog, PolicyCheckpoint
     from abmem.models.models import Offer, Period, Plant
     from abmem.services.algorithms.registry import BASELINE_TYPES
     from abmem.services.hpo.objective import scored_periods
@@ -690,6 +716,24 @@ def build_run_analysis(simulation: Simulation) -> RunAnalysis:
         lower_bound=int(market.lowerBidBound),
         upper_bound=int(market.upperBidBound),
         agents=agent_settings,
+        warm_start_from=simulation.warm_start_from_id,
+        freeze_policies=bool(simulation.freeze_policies),
+        checkpoints=[
+            CheckpointSetting(
+                agent=checkpoint.agent.name if checkpoint.agent is not None else "",
+                algorithm=_enum_name(AlgorithmType, checkpoint.algorithm_type),
+                file_size=int(checkpoint.file_size),
+                periods_trained=int(checkpoint.periods_trained),
+                parent_run=(
+                    checkpoint.parent.simulation_id
+                    if checkpoint.parent is not None
+                    else None
+                ),
+            )
+            for checkpoint in PolicyCheckpoint.objects.filter(simulation=simulation)
+            .select_related("agent", "parent")
+            .order_by("agent_id", "id")
+        ],
     )
 
     total = int(simulation.periodNumber)

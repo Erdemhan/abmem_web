@@ -180,3 +180,8 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 ABMEM_HPO_HEARTBEAT_TIMEOUT = float(
     os.environ.get("ABMEM_HPO_HEARTBEAT_TIMEOUT", str(30 * 60))
 )
+
+# Saved policies of finished runs (finding A9): one file per learning run
+# agent, referenced by PolicyCheckpoint rows. A relative value is resolved
+# against BASE_DIR.
+ABMEM_CHECKPOINT_DIR = BASE_DIR / os.environ.get("ABMEM_CHECKPOINT_DIR", "checkpoints")

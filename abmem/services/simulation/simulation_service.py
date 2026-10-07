@@ -4,6 +4,10 @@
 through ``market_service.run_period`` and records the final state. Any
 exception sets ``SimulationState.FAILED`` and ``Simulation.error`` before it
 is re-raised (OQ-8). The module holds no mutable module-level state (B10).
+
+Policy persistence (finding A9): a run with ``warm_start_from`` loads the saved
+policies right after the context is built, and the policies of every learning
+agent are saved once the run is FINISHED (``checkpoints``).
 """
 
 from __future__ import annotations
@@ -27,7 +31,11 @@ from abmem.models.enums import (
 )
 from abmem.models.models import Offer
 from abmem.services.market import market_service
-from abmem.services.simulation.context import SimulationContext
+from abmem.services.simulation import checkpoints
+from abmem.services.simulation.context import (
+    SimulationContext,
+    SimulationValidationError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -126,6 +134,28 @@ def _mark_failed(simulation: Simulation, error: BaseException) -> None:
     simulation.save(update_fields=["state", "error", "updated_at"])
 
 
+def _save_checkpoints(ctx: SimulationContext) -> None:
+    """Save the policies of a FINISHED run (finding A9).
+
+    The market results of the run are complete at this point, so a failure
+    to write a checkpoint does not fail the run. It is logged and recorded in
+    ``Simulation.error`` while the state stays FINISHED.
+
+    Args:
+        ctx: Context of the finished run.
+    """
+    try:
+        checkpoints.save_run_checkpoints(ctx)
+    except Exception as error:
+        logger.exception(
+            "Policies of simulation %s could not be saved", ctx.simulation.pk
+        )
+        ctx.simulation.error = (
+            f"Policies could not be saved: {type(error).__name__}: {error}"
+        )
+        ctx.simulation.save(update_fields=["error", "updated_at"])
+
+
 def run(
     simulation: Simulation | int,
     *,
@@ -169,6 +199,10 @@ def run(
             forced_algorithm=forced_algorithm,
             export_json=export_json,
         )
+        try:
+            checkpoints.apply_warm_start(ctx)
+        except checkpoints.WarmStartError as error:
+            raise SimulationValidationError(str(error)) from error
         simulation.state = SimulationState.INITIALIZED
         simulation.currentPeriod = 0
         simulation.save(update_fields=["state", "currentPeriod", "updated_at"])
@@ -204,4 +238,5 @@ def run(
         logger.exception("Simulation %s failed", simulation.pk)
         _mark_failed(simulation, error)
         raise
+    _save_checkpoints(ctx)
     return simulation

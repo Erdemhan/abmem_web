@@ -30,11 +30,81 @@ from .seeding import seed_everything, spawn_agent_rngs
 if TYPE_CHECKING:
     from abmem.models import Agent, Market, Simulation
     from abmem.models.enums import AlgorithmType
+    from abmem.models import PolicyCheckpoint
     from abmem.models.models import Period, Plant
+    from abmem.services.algorithms.base import PolicySpec
     from abmem.services.algorithms.base import ActionResult, BaseAgentAlgorithm
 
 MARKET_DATA_FILE: Final[str] = "marketData.xlsx"
 DEMAND_COLUMN: Final[str] = "DEMAND"
+
+
+def algorithm_defaults() -> dict[AlgorithmType, dict[str, Any]]:
+    """Return ``AlgorithmDefault.params`` by algorithm type (OQ-9).
+
+    Returns:
+        Mapping of algorithm type to a copy of its default parameters.
+    """
+    from abmem.models import AlgorithmDefault
+    from abmem.models.enums import AlgorithmType as AlgorithmTypeEnum
+
+    return {
+        AlgorithmTypeEnum(int(row.algorithm_type)): dict(row.params or {})
+        for row in AlgorithmDefault.objects.all()
+    }
+
+
+def agent_params(
+    agent: Agent,
+    algorithm_type: AlgorithmType,
+    defaults: Mapping[AlgorithmType, Mapping[str, Any]],
+    algorithm_overrides: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return the effective parameters of an agent's policy (OQ-9).
+
+    Args:
+        agent: The agent.
+        algorithm_type: Effective algorithm of the agent in this run.
+        defaults: Output of :func:`algorithm_defaults`.
+        algorithm_overrides: HPO overrides applied last.
+
+    Returns:
+        ``defaults[algorithm_type]``, overridden by ``Agent.algorithm_params``
+        (only when ``algorithm_type`` is the agent's own), overridden by
+        ``algorithm_overrides``.
+    """
+    params: dict[str, Any] = dict(defaults.get(algorithm_type, {}))
+    if int(algorithm_type) == int(agent.algorithm_type):
+        params.update(agent.algorithm_params or {})
+    if algorithm_overrides is not None:
+        params.update(algorithm_overrides)
+    return params
+
+
+def policy_spec_for(
+    plants: tuple[Plant, ...], lags: tuple[int, ...], low: Decimal, high: Decimal
+) -> PolicySpec:
+    """Return the policy spec of an agent with ``plants`` (ordered by id).
+
+    Args:
+        plants: Plants of the agent in action order, resources loaded.
+        lags: Observation lag set.
+        low: Lower bid bound.
+        high: Upper bid bound.
+
+    Returns:
+        The spec with ``obs_dim = 1 + len(lags)`` and one action per plant.
+    """
+    from abmem.services.algorithms.base import PolicySpec
+
+    return PolicySpec(
+        obs_dim=1 + len(lags),
+        action_dim=len(plants),
+        price_low=float(low),
+        price_high=float(high),
+        plant_variable_costs=tuple(float(p.resource.variableCost()) for p in plants),
+        plant_static_costs=tuple(float(p.resource.staticCost()) for p in plants),
+    )
 
 
 class SimulationValidationError(ValueError):
@@ -81,6 +151,8 @@ class AgentRuntimeState:
             baseline.
         prev: Pending decision of t-1, None if it must not be stored.
         last_outcomes: Cleared outcomes of the agent's offers of t-1.
+        evaluate_only: The agent runs every period in the evaluation phase
+            (a warm-started policy with ``Simulation.freeze_policies``).
     """
 
     agent: Agent
@@ -92,6 +164,7 @@ class AgentRuntimeState:
     failstack_params: FailStackParams | None
     prev: PendingDecision | None = None
     last_outcomes: tuple[OfferOutcome, ...] = ()
+    evaluate_only: bool = False
 
 
 @dataclass
@@ -114,6 +187,9 @@ class SimulationContext:
         step_logger: Buffer of ``AgentStepLog`` rows.
         export_json: Write the JSON offer export at the end of the run.
         current_period: Period being run, set by ``market_service.run_period``.
+        warm_start_parents: Checkpoint each warm-started agent was loaded
+            from, by ``Agent.id`` (set by ``checkpoints.apply_warm_start``).
+        warm_start_warnings: Agents that start fresh in a warm-started run.
     """
 
     simulation: Simulation
@@ -130,6 +206,8 @@ class SimulationContext:
     step_logger: StepLogger
     export_json: bool = True
     current_period: Period | None = field(default=None)
+    warm_start_parents: dict[int, PolicyCheckpoint] = field(default_factory=dict)
+    warm_start_warnings: list[str] = field(default_factory=list)
 
     def phase_for(self, t: int) -> RunPhase:
         """Return the phase of period ``t``.
@@ -175,11 +253,9 @@ class SimulationContext:
         Raises:
             SimulationValidationError: If any precondition of the run fails.
         """
-        from abmem.models import AlgorithmDefault
         from abmem.models.enums import AlgorithmType as AlgorithmTypeEnum
         from abmem.models.models import Plant
         from abmem.services.algorithms import registry
-        from abmem.services.algorithms.base import PolicySpec
 
         market = simulation.market
         period_number = int(simulation.periodNumber)
@@ -238,10 +314,7 @@ class SimulationContext:
         except ValueError as error:
             raise SimulationValidationError(str(error)) from error
 
-        defaults = {
-            AlgorithmTypeEnum(int(row.algorithm_type)): dict(row.params or {})
-            for row in AlgorithmDefault.objects.all()
-        }
+        defaults = algorithm_defaults()
         normalizer = ObservationNormalizer.for_market(lags, float(low), float(high))
         states: list[AgentRuntimeState] = []
         for agent, rng in zip(agents, rngs):
@@ -257,29 +330,13 @@ class SimulationContext:
                 raise SimulationValidationError(
                     f"agent {agent.name!r} has no plant with positive capacity"
                 )
-            own_type = AlgorithmTypeEnum(int(agent.algorithm_type))
             algorithm_type = (
                 AlgorithmTypeEnum(int(forced_algorithm))
                 if forced_algorithm is not None
-                else own_type
+                else AlgorithmTypeEnum(int(agent.algorithm_type))
             )
-            params: dict[str, Any] = dict(defaults.get(algorithm_type, {}))
-            if algorithm_type == own_type:
-                params.update(agent.algorithm_params or {})
-            if algorithm_overrides is not None:
-                params.update(algorithm_overrides)
-            spec = PolicySpec(
-                obs_dim=1 + len(lags),
-                action_dim=len(plants),
-                price_low=float(low),
-                price_high=float(high),
-                plant_variable_costs=tuple(
-                    float(p.resource.variableCost()) for p in plants
-                ),
-                plant_static_costs=tuple(
-                    float(p.resource.staticCost()) for p in plants
-                ),
-            )
+            params = agent_params(agent, algorithm_type, defaults, algorithm_overrides)
+            spec = policy_spec_for(plants, lags, low, high)
             try:
                 policy = registry.build_policy(algorithm_type, spec, params, rng)
                 failstack_params = (

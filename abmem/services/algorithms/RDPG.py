@@ -24,6 +24,8 @@ Update per sampled window ``k = 1..L`` (Algorithm 1):
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Mapping
+from typing import Any
 
 import numpy as np
 import torch
@@ -169,6 +171,61 @@ class RDPGAlgorithm(BaseAgentAlgorithm):
         )
         self._history: deque[np.ndarray] = deque(maxlen=config.seq_len)
         self._period_open = False
+
+    def _state_modules(self) -> dict[str, nn.Module]:
+        """Return the online and target networks by name."""
+        return {
+            "actor": self.actor,
+            "actor_target": self.actor_target,
+            "critic": self.critic,
+            "critic_target": self.critic_target,
+        }
+
+    def _state_optimizers(self) -> dict[str, torch.optim.Optimizer]:
+        """Return the actor and critic optimisers by name."""
+        return {"actor": self.actor_optimizer, "critic": self.critic_optimizer}
+
+    def _extra_state(self) -> dict[str, Any]:
+        """Return the acting history window and the period flag."""
+        return {
+            "history": torch.from_numpy(self.history),
+            "period_open": bool(self._period_open),
+        }
+
+    def _check_extra_state(self, extra: Mapping[str, Any]) -> None:
+        """Require a history of shape ``(n, obs_dim)``.
+
+        Raises:
+            ValueError: If an entry is missing or the history has the wrong
+                shape.
+        """
+        missing = {"history", "period_open"} - set(extra)
+        if missing:
+            raise ValueError(f"RDPG state lacks {sorted(missing)}")
+        history = extra["history"]
+        if (
+            not isinstance(history, torch.Tensor)
+            or history.dim() != 2
+            or history.shape[1] != self.spec.obs_dim
+        ):
+            raise ValueError(
+                f"RDPG state: history must have shape (n, {self.spec.obs_dim})"
+            )
+
+    def _load_extra_state(
+        self, extra: Mapping[str, Any], *, restore_runtime: bool
+    ) -> None:
+        """Restore the acting history with ``restore_runtime``.
+
+        A warm start keeps an empty history: the new run is a new trajectory
+        and its windows must not contain observations of the source run.
+        """
+        self._history.clear()
+        self._period_open = False
+        if restore_runtime:
+            for row in extra["history"].cpu().numpy().astype(np.float32):
+                self._history.append(row.copy())
+            self._period_open = bool(extra["period_open"]) and bool(self._history)
 
     # Acting -----------------------------------------------------------------
 

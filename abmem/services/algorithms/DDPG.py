@@ -89,6 +89,19 @@ class DDPGAlgorithm(BaseAgentAlgorithm):
             self.critic.parameters(), lr=config.lr_critic
         )
 
+    def _state_modules(self) -> dict[str, nn.Module]:
+        """Return the online and target networks by name."""
+        return {
+            "actor": self.actor,
+            "actor_target": self.actor_target,
+            "critic": self.critic,
+            "critic_target": self.critic_target,
+        }
+
+    def _state_optimizers(self) -> dict[str, torch.optim.Optimizer]:
+        """Return the actor and critic optimisers by name."""
+        return {"actor": self.actor_optimizer, "critic": self.critic_optimizer}
+
     def select_action(self, obs: np.ndarray, explore: bool) -> ActionResult:
         """Return ``mu(o)`` or, when exploring, ``clip(mu(o) + N(0, sigma^2 I), -1, 1)``.
 

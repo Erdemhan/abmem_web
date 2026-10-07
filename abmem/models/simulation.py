@@ -31,6 +31,11 @@ class Simulation(Base):
     the lag set of the observation (OQ-1). The last ``evaluation_periods``
     periods run without exploration and learning (OQ-5). ``error`` holds the
     failure message of a FAILED run (OQ-8).
+
+    Policy persistence (finding A9): ``scenario`` is the proxy scenario a run
+    was cloned from (NULL for scenarios and older runs). ``warm_start_from``
+    is the finished run whose saved policies initialised this run, and
+    ``freeze_policies`` runs those loaded policies without learning.
     """
 
     name = models.CharField(max_length=20, null=False)
@@ -44,6 +49,21 @@ class Simulation(Base):
     observation_lags = models.JSONField(default=default_observation_lags)
     evaluation_periods = models.PositiveIntegerField(default=0)
     error = models.TextField(blank=True, default="")
+    scenario = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="runs",
+    )
+    warm_start_from = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="warm_started_runs",
+    )
+    freeze_policies = models.BooleanField(default=False)
 
     class Meta:
         constraints = [

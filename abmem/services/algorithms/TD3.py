@@ -23,10 +23,12 @@ algorithm (ADR-004, C7). Exploration noise is added only in
 from __future__ import annotations
 
 import copy
+from collections.abc import Mapping
+from typing import Any
 
 import numpy as np
 import torch
-from torch import Tensor
+from torch import Tensor, nn
 from torch.nn import functional as F
 
 from abmem.models.enums import AlgorithmType
@@ -106,6 +108,52 @@ class TD3Algorithm(BaseAgentAlgorithm):
 
         self.critic_updates = 0
         self.actor_updates = 0
+
+    def _state_modules(self) -> dict[str, nn.Module]:
+        """Return the online and target networks by name."""
+        return {
+            "actor": self.actor,
+            "actor_target": self.actor_target,
+            "critic1": self.critic1,
+            "critic2": self.critic2,
+            "critic1_target": self.critic1_target,
+            "critic2_target": self.critic2_target,
+        }
+
+    def _state_optimizers(self) -> dict[str, torch.optim.Optimizer]:
+        """Return the actor and critic optimisers by name."""
+        return {"actor": self.actor_optimizer, "critic": self.critic_optimizer}
+
+    def _extra_state(self) -> dict[str, Any]:
+        """Return the update counters and the smoothing-noise generator state."""
+        return {
+            "critic_updates": int(self.critic_updates),
+            "actor_updates": int(self.actor_updates),
+            "noise_generator": self._noise_generator.get_state(),
+        }
+
+    def _check_extra_state(self, extra: Mapping[str, Any]) -> None:
+        """Require the counters and the generator state.
+
+        Raises:
+            ValueError: If an entry is missing.
+        """
+        missing = {"critic_updates", "actor_updates", "noise_generator"} - set(extra)
+        if missing:
+            raise ValueError(f"TD3 state lacks {sorted(missing)}")
+
+    def _load_extra_state(
+        self, extra: Mapping[str, Any], *, restore_runtime: bool
+    ) -> None:
+        """Restore the counters and, with ``restore_runtime``, the generator.
+
+        The counters keep the delayed policy update in phase (every
+        ``policy_delay``-th critic update over the lifetime of the policy).
+        """
+        self.critic_updates = int(extra["critic_updates"])
+        self.actor_updates = int(extra["actor_updates"])
+        if restore_runtime:
+            self._noise_generator.set_state(extra["noise_generator"].cpu())
 
     def select_action(self, obs: np.ndarray, explore: bool) -> ActionResult:
         """Return ``mu(s)``, perturbed by clipped Gaussian noise if exploring.

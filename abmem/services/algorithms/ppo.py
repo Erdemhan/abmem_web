@@ -18,7 +18,8 @@ kept in the value loss and in GAE.
 from __future__ import annotations
 
 import math
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
+from typing import Any
 
 import numpy as np
 import torch
@@ -164,6 +165,20 @@ class PPOAlgorithm(BaseAgentAlgorithm):
             self.value_net.parameters(), lr=config.lr_critic
         )
         self._last_next_obs: np.ndarray | None = None
+
+    def _state_modules(self) -> dict[str, nn.Module]:
+        """Return the policy and the value network by name."""
+        return {"policy": self.policy, "value_net": self.value_net}
+
+    def _state_optimizers(self) -> dict[str, torch.optim.Optimizer]:
+        """Return the policy and value optimisers by name."""
+        return {"policy": self.policy_opt, "value": self.value_opt}
+
+    def _load_extra_state(
+        self, extra: Mapping[str, Any], *, restore_runtime: bool
+    ) -> None:
+        """Forget the bootstrap observation, it belongs to the unsaved rollout."""
+        self._last_next_obs = None
 
     # Acting -----------------------------------------------------------------
 

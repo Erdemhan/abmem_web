@@ -9,6 +9,7 @@ from typing import Any, Final
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
+from django.db.models import Count
 from django.db.models.functions import Lower
 from django.http import (
     HttpRequest,
@@ -43,6 +44,7 @@ from .services.agent.resource_rules import (
 )
 from .services.algorithms.registry import BASELINE_TYPES
 from .services.market import market_factory as MarketFactory
+from .services.simulation import checkpoints
 from .services.simulation import simulation_factory as SimulationFactory
 from .services.starter import starter_service as StarterService
 
@@ -1197,40 +1199,120 @@ def _library_agents():
 
 
 # SYSTEM
-def _parse_run_seed(request: HttpRequest) -> int | None:
-    """Read the optional run seed of a POST to ``run_simulation`` (PLAN 2.5).
+@dataclass(frozen=True)
+class RunOptions:
+    """Options of a POST to ``run_simulation``.
 
-    The seed is taken from a JSON body (``{"seed": ...}``) when the request
-    has a JSON content type, else from the form field ``seed``.
+    Attributes:
+        seed: Seed of this run, None for the scenario seed (PLAN 2.5).
+        warm_start_from: Id of the finished run whose saved policies
+            initialise the run, None for fresh policies (finding A9).
+        freeze_policies: Evaluate the loaded policies without learning.
+        dry_run: Only validate the options and return the warnings, create
+            no run.
+    """
+
+    seed: int | None = None
+    warm_start_from: int | None = None
+    freeze_policies: bool = False
+    dry_run: bool = False
+
+
+def _run_request_data(request: HttpRequest) -> Mapping[str, Any]:
+    """Return the JSON body or the form fields of a POST to ``run_simulation``.
 
     Args:
         request: POST request.
 
     Returns:
-        The seed, or None when it is missing or empty (the scenario seed is
-        used).
+        The decoded JSON object, or ``request.POST``.
 
     Raises:
-        ValidationError: With key ``seed`` for a malformed body, a
-            non-integer seed or a seed outside ``[0, SEED_UPPER_BOUND)``.
+        ValidationError: With key ``seed`` for a malformed JSON body.
     """
-    message = f"Seed must be an integer from 0 to {SEED_UPPER_BOUND - 1}."
-    if request.content_type == "application/json":
-        try:
-            data = json.loads(request.body or b"{}")
-        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-            raise ValidationError({"seed": ["Invalid JSON body."]}) from exc
-        if not isinstance(data, dict):
-            raise ValidationError({"seed": ["Invalid JSON body."]})
-        raw = data.get("seed")
-    else:
-        raw = request.POST.get("seed")
-    if raw is None or (isinstance(raw, str) and not raw.strip()):
-        return None
-    seed = _coerce_payload_int(raw)
-    if seed is None or not 0 <= seed < SEED_UPPER_BOUND:
-        raise ValidationError({"seed": [message]})
-    return seed
+    if request.content_type != "application/json":
+        return request.POST
+    try:
+        data = json.loads(request.body or b"{}")
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+        raise ValidationError({"seed": ["Invalid JSON body."]}) from exc
+    if not isinstance(data, dict):
+        raise ValidationError({"seed": ["Invalid JSON body."]})
+    return data
+
+
+def _coerce_payload_flag(raw: Any, field: str) -> bool:
+    """Convert a JSON boolean or a form checkbox value to ``bool``.
+
+    Args:
+        raw: Payload value (None when missing).
+        field: Field name for the error.
+
+    Returns:
+        The flag. Missing or empty values are False.
+
+    Raises:
+        ValidationError: With key ``field`` for any other value.
+    """
+    if raw is None or isinstance(raw, bool):
+        return bool(raw)
+    if isinstance(raw, str) and raw.strip().lower() in {"", "0", "false", "off"}:
+        return False
+    if isinstance(raw, str) and raw.strip().lower() in {"1", "true", "on"}:
+        return True
+    raise ValidationError({field: [f"{field} must be true or false."]})
+
+
+def _parse_run_options(request: HttpRequest) -> RunOptions:
+    """Read the options of a POST to ``run_simulation``.
+
+    Args:
+        request: POST request with a JSON body or form fields ``seed``,
+            ``warm_start_from``, ``freeze_policies`` and ``dry_run``.
+
+    Returns:
+        The options.
+
+    Raises:
+        ValidationError: Keyed by field for a malformed body, a seed outside
+            ``[0, SEED_UPPER_BOUND)``, a non-integer ``warm_start_from``, a
+            non-boolean flag, or ``freeze_policies`` without
+            ``warm_start_from``.
+    """
+    data = _run_request_data(request)
+    raw = data.get("seed")
+    seed: int | None = None
+    if not (raw is None or (isinstance(raw, str) and not raw.strip())):
+        seed = _coerce_payload_int(raw)
+        if seed is None or not 0 <= seed < SEED_UPPER_BOUND:
+            raise ValidationError(
+                {"seed": [f"Seed must be an integer from 0 to {SEED_UPPER_BOUND - 1}."]}
+            )
+    raw_source = data.get("warm_start_from")
+    source: int | None = None
+    if not (
+        raw_source is None or (isinstance(raw_source, str) and not raw_source.strip())
+    ):
+        source = _coerce_payload_int(raw_source)
+        if source is None or source < 1:
+            raise ValidationError(
+                {"warm_start_from": ["Initial policies must name a run id."]}
+            )
+    freeze = _coerce_payload_flag(data.get("freeze_policies"), "freeze_policies")
+    if freeze and source is None:
+        raise ValidationError(
+            {
+                "freeze_policies": [
+                    "Evaluate only requires initial policies from a run."
+                ]
+            }
+        )
+    return RunOptions(
+        seed=seed,
+        warm_start_from=source,
+        freeze_policies=freeze,
+        dry_run=_coerce_payload_flag(data.get("dry_run"), "dry_run"),
+    )
 
 
 def run_simulation(request: HttpRequest, simulation_id: int) -> HttpResponse:
@@ -1242,10 +1324,13 @@ def run_simulation(request: HttpRequest, simulation_id: int) -> HttpResponse:
     watch page.
 
     GET runs with the scenario seed. POST accepts an optional ``seed`` (form
-    field or JSON body) that applies to this run only (PLAN 2.5). A JSON
-    client (``Accept: application/json``) receives ``{"run_id",
-    "watch_url"}`` instead of a redirect and errors as
-    ``{"errors": {field: [messages]}}``.
+    field or JSON body) that applies to this run only (PLAN 2.5), and
+    optionally ``warm_start_from`` (a finished run of this scenario with saved
+    policies) and ``freeze_policies`` (finding A9). The warm start is checked
+    completely (files, shapes) before the run is created. ``dry_run`` only
+    performs that check and returns ``{"warnings": [...]}``. A JSON client
+    (``Accept: application/json``) receives ``{"run_id", "watch_url"}``
+    instead of a redirect and errors as ``{"errors": {field: [messages]}}``.
 
     Args:
         request: The request.
@@ -1254,8 +1339,8 @@ def run_simulation(request: HttpRequest, simulation_id: int) -> HttpResponse:
     Returns:
         Redirect (or JSON) to the watch page of the new run, redirect to the
         watch page of ``simulation_id`` for a run, HTTP 400 for an invalid
-        seed (no run is created) or when the scenario cannot be cloned,
-        HTTP 500 when the run process cannot be started.
+        seed or warm start (no run is created) or when the scenario cannot be
+        cloned, HTTP 500 when the run process cannot be started.
     """
     simulation = get_object_or_404(Simulation, id=simulation_id)
     wants_json = _wants_json(request)
@@ -1277,16 +1362,39 @@ def run_simulation(request: HttpRequest, simulation_id: int) -> HttpResponse:
             return JsonResponse({"errors": {field: [message]}}, status=status)
         return HttpResponse(message, status=status)
 
-    seed: int | None = None
+    options = RunOptions()
     if request.method == "POST":
         try:
-            seed = _parse_run_seed(request)
+            options = _parse_run_options(request)
         except ValidationError as exc:
             return _validation_error_response(exc)
     if not simulation.proxy:
         return _done(simulation.id)
+    source: Simulation | None = None
+    warnings: list[str] = []
+    if options.warm_start_from is not None:
+        source = Simulation.objects.filter(pk=options.warm_start_from).first()
+        if source is None:
+            return _error(
+                "warm_start_from", f"Run {options.warm_start_from} does not exist.", 400
+            )
+        try:
+            warnings = checkpoints.check_warm_start(
+                simulation, source, freeze=options.freeze_policies
+            )
+        except checkpoints.WarmStartError as exc:
+            return _error("warm_start_from", str(exc), 400)
+    if options.dry_run:
+        if wants_json:
+            return JsonResponse({"warnings": warnings})
+        return HttpResponse("\n".join(warnings) or "OK")
     try:
-        run = library_service.clone_scenario_for_run(simulation, seed=seed)
+        run = library_service.clone_scenario_for_run(
+            simulation,
+            seed=options.seed,
+            warm_start_from=source,
+            freeze_policies=options.freeze_policies,
+        )
     except (ValidationError, ValueError) as exc:
         logger.warning("Scenario %s could not be cloned: %s", simulation.id, exc)
         return _error("__all__", f"The scenario could not be cloned: {exc}", 400)
@@ -1494,10 +1602,51 @@ def resource_update(request, resource_id):
 
 
 # SIMULATION
+def _warm_start_sources(scenario_ids: list[int]) -> dict[str, list[dict[str, Any]]]:
+    """Return the runs that can initialise new runs of each scenario (A9).
+
+    Args:
+        scenario_ids: Primary keys of proxy scenarios.
+
+    Returns:
+        Mapping of scenario id (as a string, for JSON) to the FINISHED runs of
+        that scenario with saved policies, newest first, each as ``{"id",
+        "name", "seed", "created", "checkpoints", "warm_start_from"}``.
+    """
+    runs = (
+        Simulation.objects.filter(
+            proxy=False,
+            state=enums.SimulationState.FINISHED,
+            scenario_id__in=scenario_ids,
+            checkpoints__isnull=False,
+        )
+        .annotate(n_checkpoints=Count("checkpoints"))
+        .order_by("-created_at", "-id")
+    )
+    sources: dict[str, list[dict[str, Any]]] = {}
+    for run in runs:
+        sources.setdefault(str(run.scenario_id), []).append(
+            {
+                "id": run.id,
+                "name": run.name,
+                "seed": run.seed,
+                "created": run.created_at.strftime("%Y-%m-%d %H:%M"),
+                "checkpoints": run.n_checkpoints,
+                "warm_start_from": run.warm_start_from_id,
+            }
+        )
+    return sources
+
+
 def simulation_list_proxy(request):
-    simulations = Simulation.objects.filter(proxy=True).order_by("-updated_at")
+    simulations = list(Simulation.objects.filter(proxy=True).order_by("-updated_at"))
     return render(
-        request, "pages/simulation-list-proxy.html", {"simulations": simulations}
+        request,
+        "pages/simulation-list-proxy.html",
+        {
+            "simulations": simulations,
+            "warm_start_sources": _warm_start_sources([s.id for s in simulations]),
+        },
     )
 
 

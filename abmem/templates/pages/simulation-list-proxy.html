@@ -136,7 +136,8 @@
                                 class="center icon icon-shape bg-gradient-info shadow text-center border-radius-md zoom4-1 js-run-button"
                                 style="border:none" title="Run"
                                 data-run-url="{% url 'run_simulation' simulation_id=simulation.id %}"
-                                data-seed="{{ simulation.seed }}" data-name="{{ simulation.name }}">
+                                data-seed="{{ simulation.seed }}" data-name="{{ simulation.name }}"
+                                data-scenario-id="{{ simulation.id }}">
                                 <i class="fas fa-play"></i>
                               </button>
                             </div>
@@ -169,8 +170,9 @@
       <!-- END CONTAINER -->
 
 
-    <!-- Run dialog: seed of this run only (PLAN 2.5), no blocking browser dialogs -->
+    <!-- Run dialog: seed of this run only (PLAN 2.5) and initial policies (A9), no blocking browser dialogs -->
     {% csrf_token %}
+    {{ warm_start_sources|json_script:"run-sources" }}
     <div class="modal fade" id="run-modal" tabindex="-1" role="dialog" aria-labelledby="run-modal-title" aria-hidden="true">
       <div class="modal-dialog modal-dialog-centered" role="document">
         <div class="modal-content">
@@ -189,6 +191,19 @@
             </div>
             <p class="text-xs text-secondary mt-1 mb-0">Integer from 0 to 2147483647. The seed applies to this run
               only. The scenario seed is not changed.</p>
+            <label class="form-label text-sm mt-3" for="run-warm-start">Initial policies</label>
+            <select class="form-select" id="run-warm-start">
+              <option value="">Fresh (untrained)</option>
+            </select>
+            <p class="text-xs text-secondary mt-1 mb-0">Saved policies of a finished run of this scenario. Agents are
+              matched by library agent, or by name when an agent has no library source. Unmatched agents start
+              fresh.</p>
+            <div class="form-check mt-2">
+              <input class="form-check-input" type="checkbox" id="run-freeze" disabled>
+              <label class="form-check-label text-sm" for="run-freeze">Evaluate only: loaded policies do not
+                learn and do not explore in any period</label>
+            </div>
+            <div class="text-sm text-warning mt-2 d-none" id="run-warnings"></div>
             <div class="text-sm text-danger mt-2 d-none" id="run-error"></div>
           </div>
           <div class="modal-footer">
@@ -238,18 +253,90 @@
         return buffer[0] % SEED_UPPER_BOUND;
       }
 
+      function showWarnings(list) {
+        var box = $('run-warnings');
+        box.textContent = '';
+        (list || []).forEach(function (text) {
+          var line = document.createElement('div');
+          line.textContent = text;
+          box.appendChild(line);
+        });
+        box.classList.toggle('d-none', !(list && list.length));
+      }
+
+      function readSources() {
+        var node = $('run-sources');
+        try { return node ? JSON.parse(node.textContent) : {}; } catch (e) { return {}; }
+      }
+      var SOURCES = readSources();
+
+      function fillSources(scenarioId) {
+        var select = $('run-warm-start');
+        while (select.options.length > 1) { select.remove(1); }
+        (SOURCES[String(scenarioId)] || []).forEach(function (run) {
+          var option = document.createElement('option');
+          option.value = String(run.id);
+          option.textContent = 'Run #' + run.id + ' (' + run.created + ', seed ' + run.seed + ', ' +
+            run.checkpoints + ' saved ' + (run.checkpoints === 1 ? 'policy' : 'policies') +
+            (run.warm_start_from ? ', warm-started from #' + run.warm_start_from : '') + ')';
+          select.appendChild(option);
+        });
+        select.value = '';
+        select.disabled = select.options.length < 2;
+        $('run-freeze').checked = false;
+        $('run-freeze').disabled = true;
+      }
+
       function openDialog(button) {
         runUrl = button.getAttribute('data-run-url');
         $('run-modal-name').textContent = button.getAttribute('data-name');
         $('run-seed').value = button.getAttribute('data-seed');
+        fillSources(button.getAttribute('data-scenario-id'));
         $('run-start').disabled = false;
         showError('');
+        showWarnings([]);
         bootstrap.Modal.getOrCreateInstance($('run-modal')).show();
       }
 
       function errorText(body, status) {
         var errors = (body && body.errors) || { __all__: ['HTTP ' + status] };
         return Object.keys(errors).map(function (k) { return errors[k].join(' '); }).join(' ');
+      }
+
+      function postRun(payload) {
+        return fetch(runUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRFToken': csrfToken() },
+          body: JSON.stringify(payload)
+        }).then(function (response) {
+          return response.json().then(function (body) { return { ok: response.ok, status: response.status, body: body }; });
+        });
+      }
+
+      function warmStartPayload() {
+        var source = $('run-warm-start').value;
+        if (!source) { return {}; }
+        return { warm_start_from: Number(source), freeze_policies: $('run-freeze').checked };
+      }
+
+      var checkCounter = 0;
+      function checkWarmStart() {
+        var source = $('run-warm-start').value;
+        $('run-freeze').disabled = !source;
+        if (!source) { $('run-freeze').checked = false; }
+        showError('');
+        showWarnings([]);
+        if (!source) { return; }
+        var payload = warmStartPayload();
+        payload.dry_run = true;
+        var ticket = ++checkCounter;
+        postRun(payload).then(function (result) {
+          if (ticket !== checkCounter) { return; }
+          if (!result.ok) { showError(errorText(result.body, result.status)); return; }
+          showWarnings(result.body.warnings);
+        }).catch(function (error) {
+          if (ticket === checkCounter) { showError('Request failed: ' + error); }
+        });
       }
 
       function startRun() {
@@ -260,13 +347,9 @@
         }
         $('run-start').disabled = true;
         showError('');
-        fetch(runUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-CSRFToken': csrfToken() },
-          body: JSON.stringify({ seed: Number(raw) })
-        }).then(function (response) {
-          return response.json().then(function (body) { return { ok: response.ok, status: response.status, body: body }; });
-        }).then(function (result) {
+        var payload = warmStartPayload();
+        payload.seed = Number(raw);
+        postRun(payload).then(function (result) {
           if (!result.ok) {
             $('run-start').disabled = false;
             showError(errorText(result.body, result.status));
@@ -286,6 +369,8 @@
         $('run-seed').value = String(randomSeed());
         showError('');
       });
+      $('run-warm-start').addEventListener('change', checkWarmStart);
+      $('run-freeze').addEventListener('change', checkWarmStart);
       $('run-start').addEventListener('click', startRun);
     })();
   </script>
