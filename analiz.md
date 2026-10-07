@@ -822,7 +822,7 @@ Critic'in mevcut Q tahmini buffer'daki gerçek fiyatlarla (0–200, veritabanın
 
 ### 11.5 "Fail-stack'teki boyutsal hata nedir?"
 
-Boyutsal tutarlılık, bir eşitsizliğin iki tarafının aynı fiziksel birimde olmasıdır. Aksi halde karşılaştırmanın sonucu seçilen birime (TL veya kuruş, MWh veya kWh) bağlı olur ve anlamını kaybeder.
+Boyutsal tutarlılık, bir eşitsizliğin iki tarafının aynı fiziksel birimde olmasıdır. Aksi halde karşılaştırmanın sonucu seçilen birime (USD veya sent, MWh veya kWh) bağlı olur ve anlamını kaybeder.
 
 Koşul (`market_service.py:231`):
 
@@ -830,16 +830,16 @@ Koşul (`market_service.py:231`):
 
 | Terim | Birim |
 |---|---|
-| `budget_growth` (kâr) | TL |
-| `acceptancePrice` | TL/MWh |
+| `budget_growth` (kâr) | USD |
+| `acceptancePrice` | USD/MWh |
 | `acceptanceAmount` | MWh |
-| `ptf` | TL/MWh |
-| Sağ taraf: (TL/MWh) × MWh × (TL/MWh) | TL²/MWh |
+| `ptf` | USD/MWh |
+| Sağ taraf: (USD/MWh) × MWh × (USD/MWh) | USD²/MWh |
 
-Sol taraf TL, sağ taraf TL²/MWh. **Birim değişikliği testi:** para birimi TL yerine kuruş alınırsa sol taraf 100 ile, sağ taraf 10 000 ile çarpılır. Aynı teklif bir birimde başarılı, diğerinde başarısız sayılabilir. Bu, formülün fiziksel bir anlam taşımadığını gösterir.
+Sol taraf USD, sağ taraf USD²/MWh. **Birim değişikliği testi:** para birimi USD yerine sent alınırsa sol taraf 100 ile, sağ taraf 10 000 ile çarpılır. Aynı teklif bir birimde başarılı, diğerinde başarısız sayılabilir. Bu, formülün fiziksel bir anlam taşımadığını gösterir.
 
-**Sayısal örnek (gerçek PTF ile):** fiyat = PTF = 100 TL/MWh, kabul = 9375 MWh, maliyet 10 TL/MWh.
-- Gelir = 937 500 TL, kâr = 843 750 TL.
+**Sayısal örnek (gerçek PTF ile):** fiyat = PTF = 100 USD/MWh, kabul = 9375 MWh, maliyet 10 USD/MWh.
+- Gelir = 937 500 USD, kâr = 843 750 USD.
 - Sağ taraf = 100 × 9375 × 100 / 2 = 46 875 000.
 - Kâr gelirin %90'ı olmasına rağmen teklif "başarısız" sayılır. Kayıtlı verilerde gerçek PTF ile 2688 tekliften 2686'sı başarısız çıkar.
 

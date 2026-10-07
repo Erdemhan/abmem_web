@@ -25,7 +25,7 @@ def compute_reward(
     Args:
         outcomes: Outcomes of every offer the agent submitted in the period.
         total_capacity: Sum of the agent's plant capacities (MWh).
-        price_cap: Upper bid bound ``P_max`` of the market (TL/MWh).
+        price_cap: Upper bid bound ``P_max`` of the market (USD/MWh).
 
     Returns:
         The reward as a finite Python float.

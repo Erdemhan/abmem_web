@@ -179,7 +179,7 @@ erDiagram
         json algorithm_params "NEW nullable overrides"
         bool failstack_enabled "NEW default False"
         int failstack_limit "NEW L default 6"
-        decimal failstack_delta "NEW delta TL/MWh default 15"
+        decimal failstack_delta "NEW delta USD/MWh default 15"
         decimal failstack_min_margin "NEW m_min default 0"
         fk source "NEW self FK SET_NULL"
     }
@@ -325,8 +325,8 @@ class PolicySpec:
     action_dim: int                   # number of plants, >= 1
     price_low: float                  # Market.lowerBidBound
     price_high: float                 # Market.upperBidBound, > price_low
-    plant_variable_costs: tuple[float, ...]   # fuelCost per plant (TL/MWh)
-    plant_static_costs: tuple[float, ...]     # omCost + investmentCost + co2Cost per plant (TL/MWh)
+    plant_variable_costs: tuple[float, ...]   # fuelCost per plant (USD/MWh)
+    plant_static_costs: tuple[float, ...]     # omCost + investmentCost + co2Cost per plant (USD/MWh)
 
 @dataclass(frozen=True)
 class ActionResult:
@@ -458,7 +458,7 @@ class SimulationContext:
 @dataclass(frozen=True)
 class FailStackParams:
     limit: int                 # L >= 1
-    delta: Decimal             # TL/MWh, >= 0
+    delta: Decimal             # USD/MWh, >= 0
     min_margin: Decimal        # unitless, m_min
 
 @dataclass
@@ -711,7 +711,7 @@ New POST endpoints use Django CSRF protection. The existing `@csrf_exempt` decor
 
 Location: `FORMULATION.md` at the repository root (OQ-10). Agents create only the section skeleton below. Every equation and value is written or approved by the user.
 
-1. Notation and units (TL, MWh, TL/MWh, period = 1 h)
+1. Notation and units (USD, MWh, USD/MWh, period = 1 h)
 2. Data: `marketData.xlsx`, the 8808 valid DEMAND rows, demand scaling constants (mean and standard deviation of all valid rows)
 3. Market model: bid format, bounds, merit order, PAYASBID / PAYASPTF, equal-share capped split of equal-price groups, supply shortfall, rejection of zero demand
 4. Cost and budget equations: static cost, variable cost, profit `g`

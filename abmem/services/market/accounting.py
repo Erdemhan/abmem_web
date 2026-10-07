@@ -5,7 +5,7 @@ both always agree (spec ``observation_reward``, K1).
 
 Profit of one offer with offered quantity ``q``, accepted quantity ``q_acc``,
 acceptance price ``p_acc``, static cost rate ``c_s`` and variable cost rate
-``c_v`` (all rates in TL/MWh):
+``c_v`` (all rates in USD/MWh):
 
     g = q_acc * p_acc - (c_s * q + c_v * q_acc)
 
@@ -45,13 +45,13 @@ class OfferOutcome:
 
     Attributes:
         quantity: Offered quantity q (MWh).
-        offer_price: Offered price (TL/MWh).
+        offer_price: Offered price (USD/MWh).
         accepted_quantity: Accepted quantity q_acc (MWh), 0 for a rejected offer.
-        acceptance_price: Price paid for the accepted quantity (TL/MWh). May be
+        acceptance_price: Price paid for the accepted quantity (USD/MWh). May be
             None only when ``accepted_quantity`` is 0.
         static_cost_rate: ``Resource.staticCost()`` (omCost + investmentCost +
-            co2Cost), TL/MWh, charged on the offered quantity.
-        variable_cost_rate: ``Resource.variableCost()`` (fuelCost), TL/MWh,
+            co2Cost), USD/MWh, charged on the offered quantity.
+        variable_cost_rate: ``Resource.variableCost()`` (fuelCost), USD/MWh,
             charged on the accepted quantity.
     """
 
@@ -110,7 +110,7 @@ def offer_profit(o: OfferOutcome) -> Decimal:
         o: Validated offer outcome.
 
     Returns:
-        Profit in TL as a ``Decimal``.
+        Profit in USD as a ``Decimal``.
     """
     static_cost = o.static_cost_rate * o.quantity
     if not o.accepted:

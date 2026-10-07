@@ -76,7 +76,7 @@ class AgentSetting:
         baseline: True for a non-learning baseline.
         failstack_enabled: Fail-stack switch (always False for baselines).
         failstack_limit: Fail-stack limit L.
-        failstack_delta: Fail-stack price step delta (TL/MWh).
+        failstack_delta: Fail-stack price step delta (USD/MWh).
         failstack_min_margin: Fail-stack minimum margin.
         algorithm_params: Per-agent algorithm parameter overrides.
         plants: Plants of the agent.
@@ -125,8 +125,8 @@ class RunSettings:
         period_number: Number of periods N.
         mode: Simulation mode name.
         strategy: Market strategy name.
-        lower_bound: Lower bid bound (TL/MWh).
-        upper_bound: Upper bid bound (TL/MWh).
+        lower_bound: Lower bid bound (USD/MWh).
+        upper_bound: Upper bid bound (USD/MWh).
         agents: Agent settings in id order.
         warm_start_from: Run whose saved policies initialised this run, None
             for fresh policies.
@@ -158,7 +158,7 @@ class PeriodRow:
         period: Period number.
         demand: Demand (MWh).
         met_demand: Met demand (MWh).
-        ptf: Market clearing price (TL/MWh), None if missing.
+        ptf: Market clearing price (USD/MWh), None if missing.
         market_volume: Offered volume (MWh).
     """
 
@@ -178,11 +178,11 @@ class OfferRow:
         agent: Agent name.
         resource: Resource (plant) name.
         amount: Offered quantity (MWh).
-        offer_price: Offered price (TL/MWh).
+        offer_price: Offered price (USD/MWh).
         accepted: Whether any quantity was accepted.
         acceptance_amount: Accepted quantity (MWh).
-        acceptance_price: Acceptance price (TL/MWh), None if not set.
-        profit: Offer profit ``g`` (TL).
+        acceptance_price: Acceptance price (USD/MWh), None if not set.
+        profit: Offer profit ``g`` (USD).
     """
 
     period: int
@@ -235,8 +235,8 @@ class OfferStats:
         mean_accepted_offer_price: Mean offered price of accepted offers,
             None without accepted offers.
         accepted_energy: Sum of accepted quantities (MWh).
-        revenue: Sum of ``acceptance_amount * acceptance_price`` (TL).
-        profit: Sum of offer profits (TL).
+        revenue: Sum of ``acceptance_amount * acceptance_price`` (USD).
+        profit: Sum of offer profits (USD).
     """
 
     offers: int

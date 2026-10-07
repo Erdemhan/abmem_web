@@ -44,7 +44,7 @@ def price_to_action(
     ``abmem.services.agent.action_space.to_price``.
 
     Args:
-        prices: Prices per plant (TL/MWh), finite.
+        prices: Prices per plant (USD/MWh), finite.
         price_low: Lower bid bound.
         price_high: Upper bid bound, strictly greater than ``price_low``.
 
@@ -127,7 +127,7 @@ class _CostBasedPolicy(BaseAgentAlgorithm):
         self._action = price_to_action(prices, spec.price_low, spec.price_high)
 
     def target_prices(self) -> np.ndarray:
-        """Return the unclipped bid price of every plant (TL/MWh).
+        """Return the unclipped bid price of every plant (USD/MWh).
 
         Returns:
             float64 array of shape ``(action_dim,)``.
@@ -150,7 +150,7 @@ class _CostBasedPolicy(BaseAgentAlgorithm):
 class MarginalCostPolicy(_CostBasedPolicy):
     """Bid the variable cost of every plant.
 
-    ``price_i = plant_variable_costs[i]`` (fuelCost, TL/MWh), clipped to
+    ``price_i = plant_variable_costs[i]`` (fuelCost, USD/MWh), clipped to
     ``[price_low, price_high]`` and mapped to ``u``.
     """
 

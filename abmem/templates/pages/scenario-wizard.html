@@ -237,26 +237,20 @@
                         <fieldset class="mb-3">
                             <legend class="form-label text-sm mb-1">Bid bounds
                                 <button type="button" class="btn btn-link p-0 ms-1 mb-0 info-tip" data-bs-toggle="tooltip"
-                                    title="Lowest and highest price an offer may have. Agents choose their bid prices inside this range, so it also scales their actions. Default 0 to 200 TL/MWh."
+                                    title="Lowest and highest price an offer may have. Agents choose their bid prices inside this range, so it also scales their actions. Default 0 to 200 USD/MWh."
                                     aria-label="Help: bid bounds"><i class="fas fa-circle-info" aria-hidden="true"></i></button>
                             </legend>
                             <div class="row">
                                 <div class="col-12 col-sm-6 col-lg-3 mb-3">
-                                    <label for="lowerBound" class="form-label">Lower bid bound</label>
-                                    <div class="input-group has-validation">
-                                        <input type="number" id="lowerBound" class="form-control" step="1"
-                                            value="{{ wizard_config.initial.lowerBound }}" aria-describedby="lowerBound-feedback" required>
-                                        <span class="input-group-text">TL/MWh</span>
-                                    </div>
+                                    <label for="lowerBound" class="form-label">Lower bid bound (USD/MWh)</label>
+                                    <input type="number" id="lowerBound" class="form-control" step="1"
+                                        value="{{ wizard_config.initial.lowerBound }}" aria-describedby="lowerBound-feedback" required>
                                     <div class="invalid-feedback" id="lowerBound-feedback"></div>
                                 </div>
                                 <div class="col-12 col-sm-6 col-lg-3 mb-3">
-                                    <label for="upperBound" class="form-label">Upper bid bound</label>
-                                    <div class="input-group has-validation">
-                                        <input type="number" id="upperBound" class="form-control" step="1"
-                                            value="{{ wizard_config.initial.upperBound }}" aria-describedby="upperBound-feedback" required>
-                                        <span class="input-group-text">TL/MWh</span>
-                                    </div>
+                                    <label for="upperBound" class="form-label">Upper bid bound (USD/MWh)</label>
+                                    <input type="number" id="upperBound" class="form-control" step="1"
+                                        value="{{ wizard_config.initial.upperBound }}" aria-describedby="upperBound-feedback" required>
                                     <div class="invalid-feedback" id="upperBound-feedback"></div>
                                 </div>
                             </div>
@@ -307,7 +301,7 @@
                                         aria-label="Help: algorithm"><i class="fas fa-circle-info" aria-hidden="true"></i></button>
                                     and the fail-stack rule
                                     <button type="button" class="btn btn-link p-0 mb-0 info-tip" data-bs-toggle="tooltip"
-                                        title="Fail-stack: after L consecutive failed offers (rejected or margin below m_min), the next price of that plant is drawn just below the previous clearing price (at most δ TL/MWh lower). Baseline algorithms never use it."
+                                        title="Fail-stack: after L consecutive failed offers (rejected or margin below m_min), the next price of that plant is drawn just below the previous clearing price (at most δ USD/MWh lower). Baseline algorithms never use it."
                                         aria-label="Help: fail-stack"><i class="fas fa-circle-info" aria-hidden="true"></i></button>.
                                     Click a card to add the agent.</p>
                                 <p class="text-sm mb-2" id="library-status" role="status"></p>
@@ -696,7 +690,7 @@
                     body.appendChild(title);
                     body.appendChild(el('div', 'text-xs text-secondary',
                         typeName(row.type) + ' · ' + algorithmName(row.algorithm_type) + ' · Fail-stack ' + failstackText(row)
-                        + ' · Budget ' + row.budget + ' TL'));
+                        + ' · Budget ' + row.budget + ' USD'));
                     body.appendChild(el('div', 'text-xs', plantsText(row) + ' (total ' + formatNumber(rowCapacity(row)) + ' MW)'));
                     if (error) {
                         body.appendChild(el('div', 'text-xs text-danger font-weight-bold', error));
@@ -791,7 +785,7 @@
                     });
                     body.appendChild(plants);
                     body.appendChild(el('p', 'text-xs text-secondary mb-2',
-                        'Capacity ' + formatNumber(rowCapacity(row)) + ' MW · Budget ' + agent.budget + ' TL'));
+                        'Capacity ' + formatNumber(rowCapacity(row)) + ' MW · Budget ' + agent.budget + ' USD'));
                     var button = el('button', 'btn btn-sm mb-0 mt-auto ' + (added ? 'btn-success' : 'btn-outline-primary'),
                         added ? 'Added' : 'Add');
                     button.type = 'button';
@@ -1018,9 +1012,9 @@
                     }
                 } else if (step === 1) {
                     if (values.strategy === '') { errors.strategy = 'Choose a pricing strategy.'; }
-                    if (!isInt(values.lowerBound)) { errors.lowerBound = 'Enter the lower bid bound as a whole number (TL/MWh).'; }
+                    if (!isInt(values.lowerBound)) { errors.lowerBound = 'Enter the lower bid bound as a whole number (USD/MWh).'; }
                     if (!isInt(values.upperBound)) {
-                        errors.upperBound = 'Enter the upper bid bound as a whole number (TL/MWh).';
+                        errors.upperBound = 'Enter the upper bid bound as a whole number (USD/MWh).';
                     } else if (isInt(values.lowerBound) && Number(values.upperBound) <= Number(values.lowerBound)) {
                         errors.upperBound = 'The upper bid bound must be greater than the lower bid bound.';
                     }
@@ -1169,7 +1163,7 @@
                 var market = byId('review-market');
                 market.textContent = '';
                 addReviewItem(market, 'Pricing strategy', STRATEGY_LABELS[values.strategy] || '-');
-                addReviewItem(market, 'Bid bounds', values.lowerBound + ' to ' + values.upperBound + ' TL/MWh');
+                addReviewItem(market, 'Bid bounds', values.lowerBound + ' to ' + values.upperBound + ' USD/MWh');
 
                 var body = byId('review-agents');
                 body.textContent = '';

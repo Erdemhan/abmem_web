@@ -112,14 +112,14 @@ Her maddede: **ne yapılacak**, **nasıl doğrulanacak**. Type B/C maddeleri ayr
 - [x] Mevcut üç ayrı mekanizma kaldırılır: `market_service.py:231-232`'deki sayaç, `agent_service.py:69-71`'deki rastgele fiyat, TD3/PPO içindeki `failstack`, aksiyon küçültme, ödül çarpanı ve PPO'daki `risk_tolerance`.
 - [x] Yerine **tek bir kural** gelir. Kural algoritmaların dışında, `agent_service` içinde uygulanır ve tüm algoritmalar için aynıdır. Taslak (onay bekliyor, kesinleşince `FORMULATION.md`'ye yazılır):
   - **Başarısızlık tanımı (santral *i*, periyot *t*):** teklif reddedildiyse ya da kâr marjı eşiğin altındaysa `f_i(t) = 1`.
-    `kâr_marjı = g_i / (p_acc · q_acc)` → TL / TL, birimsiz. Eşik `m_min`, varsayılan 0 (yani zarar).
+    `kâr_marjı = g_i / (p_acc · q_acc)` → USD / USD, birimsiz. Eşik `m_min`, varsayılan 0 (yani zarar).
   - **Sayaç:** `n_i ← n_i + 1` başarısızlıkta, `n_i ← 0` başarıda. Sayaç ardışık başarısızlıkları sayar.
-  - **Müdahale:** `n_i ≥ L` ise o santralin bir sonraki fiyatı `U[max(alt_sınır, PTF(t−1) − δ), PTF(t−1))` aralığından çekilir ve `n_i ← 0` yapılır. `δ` TL/MWh cinsindendir (varsayılan 15, eski kuraldaki değer). Fiyatla aynı birimde olduğu için karşılaştırma tutarlıdır. Sonuç piyasa sınırlarına kırpılır.
+  - **Müdahale:** `n_i ≥ L` ise o santralin bir sonraki fiyatı `U[max(alt_sınır, PTF(t−1) − δ), PTF(t−1))` aralığından çekilir ve `n_i ← 0` yapılır. `δ` USD/MWh cinsindendir (varsayılan 15, eski kuraldaki değer). Fiyatla aynı birimde olduğu için karşılaştırma tutarlıdır. Sonuç piyasa sınırlarına kırpılır.
   - **Buffer'a giden aksiyon:** fiilen uygulanan fiyat (normalize uzayda). Müdahale bilgisi 1.2'deki loga yazılır.
   - **Algoritma uyumu:** DDPG, TD3, SAC ve RDPG off-policy olduğu için davranış politikasından farklı aksiyonlarla öğrenebilir. PPO on-policy'dir ve oran hesabı davranış politikasının olasılığını gerektirir. Bu yüzden PPO'da müdahale edilen adımlar politika kaybından maskelenir, değer fonksiyonu eğitiminde kullanılır.
   - **Parametreler (ajan başına):** `failstack_enabled` (varsayılan **kapalı**, adil karşılaştırmalar için), `failstack_limit` *L* (varsayılan 6), `failstack_delta` *δ* (varsayılan 15), `failstack_min_margin` *m_min* (varsayılan 0). Arayüz kısmı madde 2.1'de.
 - [x] Tüm algoritmalar için ortak bir `learning_starts` parametresi (örn. bir batch dolana kadar eğitim yok).
-- **Doğrulama:** kural kapalıyken tam sayı fiyat oranı yaklaşık 0. Kural açıkken müdahaleler sadece *L* ardışık başarısızlıktan sonra oluşur (sahte sonuçlarla unit test). Birim testi: para birimi ölçeklense (TL → kuruş) başarısızlık kararı değişmez. Tüm algoritmalar aynı periyotta eğitime başlar.
+- **Doğrulama:** kural kapalıyken tam sayı fiyat oranı yaklaşık 0. Kural açıkken müdahaleler sadece *L* ardışık başarısızlıktan sonra oluşur (sahte sonuçlarla unit test). Birim testi: para birimi ölçeklense (USD → sent) başarısızlık kararı değişmez. Tüm algoritmalar aynı periyotta eğitime başlar.
 
 ### 1.6 Algoritmaya özgü düzeltmeler (C5, C6, B3, A1)
 - [x] TD3: hedef aksiyon normalize uzayda `clamp(-1, 1)`, yumuşatma gürültüsü σ = 0.2, kırpma 0.5 (1.4'ten sonra doğru hale gelir). Ödülün failstack ile çarpılması kaldırılır.
@@ -226,7 +226,7 @@ Her maddede: **ne yapılacak**, **nasıl doğrulanacak**. Type B/C maddeleri ayr
 
 ### 2.6 Proxy ajan yönetimi girişi ve senaryo sihirbazı (İstek 6, onay 2026-10-07)
 - [x] **Ajan kütüphanesine giriş:** kenar çubuğuna "Agents" bağlantısı, ana sayfaya kaynak kartı gibi bir "Library Agents" kartı (sayaç sadece kütüphane ajanlarını sayar: `proxy=True, market=NULL`) ve hızlı "Yeni ajan" düğmesi.
-- [x] **Senaryo sihirbazı (oluşturma ve düzenleme aynı bileşen):** 4 adım: Temel bilgiler (ad, süre ön ayarları 1 gün/1 hafta/2 hafta/özel, mod; Gelişmiş: seed, değerlendirme penceresi, gecikmeler) → Piyasa (fiyatlandırma stratejisi kartlarla ve açıklamayla, fiyat aralığı varsayılan 0–200 TL/MWh) → Ajanlar (aranabilir ve türe göre filtrelenebilir kütüphane kartları, tıkla-ekle, "Yeni ajan" ajan sayfasıyla aynı form bileşenini modal olarak açar, eklenen ajanlar düzenlenebilir satırlar) → Özet (tüm ayarlar, "Kaydet" ve "Kaydet ve çalıştır"). Adım geçişinde alan doğrulaması, sunucu hataları ilgili adımda gösterilir.
+- [x] **Senaryo sihirbazı (oluşturma ve düzenleme aynı bileşen):** 4 adım: Temel bilgiler (ad, süre ön ayarları 1 gün/1 hafta/2 hafta/özel, mod; Gelişmiş: seed, değerlendirme penceresi, gecikmeler) → Piyasa (fiyatlandırma stratejisi kartlarla ve açıklamayla, fiyat aralığı varsayılan 0–200 USD/MWh) → Ajanlar (aranabilir ve türe göre filtrelenebilir kütüphane kartları, tıkla-ekle, "Yeni ajan" ajan sayfasıyla aynı form bileşenini modal olarak açar, eklenen ajanlar düzenlenebilir satırlar) → Özet (tüm ayarlar, "Kaydet" ve "Kaydet ve çalıştır"). Adım geçişinde alan doğrulaması, sunucu hataları ilgili adımda gösterilir.
 - [x] **Yardımcılar:** kapasite/talep uyarısı (seçilen süredeki talebe göre), taslağın tarayıcıda saklanması, şablon listesinde "Kopyala", alan açıklamaları (ⓘ).
 
 ### 2.7 Senaryo YAML içe/dışa aktarma ve kütüphane kartlarının sınırlanması (İstek 7, onay 2026-10-07)

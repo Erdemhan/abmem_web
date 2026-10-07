@@ -20,15 +20,15 @@
     "observation_reward (OfferOutcome, offer_profit in abmem/services/market/accounting.py)"
   ],
   "rule": {
-    "failure": "f_i(t) = 1 if the bid of plant i at t was rejected (accepted_quantity == 0) or margin_i < m_min, with margin_i = g_i / (p_acc * q_acc) (TL/TL, unitless).",
+    "failure": "f_i(t) = 1 if the bid of plant i at t was rejected (accepted_quantity == 0) or margin_i < m_min, with margin_i = g_i / (p_acc * q_acc) (USD/USD, unitless).",
     "counter": "n_i <- n_i + 1 if f_i(t) = 1, else n_i <- 0.",
-    "intervention": "If n_i >= L at the decision for t+1: price_i ~ U[max(low, PTF(t) - delta), PTF(t)), clipped to [low, high], then n_i <- 0. delta in TL/MWh.",
+    "intervention": "If n_i >= L at the decision for t+1: price_i ~ U[max(low, PTF(t) - delta), PTF(t)), clipped to [low, high], then n_i <- 0. delta in USD/MWh.",
     "buffer_action": "The applied price, converted with action_space.from_price, is the stored action. The intervened flag is recorded per plant.",
     "ppo": "Intervened steps are masked out of the clipped policy loss and kept in the value loss (implemented in rl_algorithms, package ppo).",
     "parameters": {
       "failstack_enabled": "default False",
       "failstack_limit L": "default 6",
-      "failstack_delta delta": "default 15 TL/MWh",
+      "failstack_delta delta": "default 15 USD/MWh",
       "failstack_min_margin m_min": "default 0"
     },
     "scope": "Learning algorithms only. Baselines (RANDOM, MARGINAL_COST, FIXED_MARKUP) never get interventions."
@@ -86,7 +86,7 @@
   "data_model_changes": "none in this spec (fields added by data_model)",
   "migrations": "none",
   "invariants": [
-    "Unit invariance: scaling all prices, costs, PTF, delta and bounds by the same factor (TL to kurus) does not change any failure decision, counter value or intervention flag.",
+    "Unit invariance: scaling all prices, costs, PTF, delta and bounds by the same factor (USD to kurus) does not change any failure decision, counter value or intervention flag.",
     "An intervention for plant i happens only after L consecutive failures of plant i since its last reset.",
     "Intervened prices satisfy low <= p <= high, and p < PTF(t-1) whenever PTF(t-1) - delta < PTF(t-1) and PTF(t-1) > low.",
     "The module holds no global state, reads no settings and does not import django."

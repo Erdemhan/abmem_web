@@ -225,7 +225,7 @@ def algorithm_fields(
         '<div class="failstack-fields"{}>'
         '<label class="mb-0">L<input type="number" min="1" step="1"'
         ' class="form-control failstack-limit"{} value="{}" data-default="{}"></label>'
-        '<label class="mb-0">&delta; (TL/MWh)<input type="number" min="0" step="0.01"'
+        '<label class="mb-0">&delta; (USD/MWh)<input type="number" min="0" step="0.01"'
         ' class="form-control failstack-delta"{} value="{}" data-default="{}"></label>'
         '<label class="mb-0">m_min<input type="number" step="0.0001"'
         ' class="form-control failstack-min-margin"{} value="{}" data-default="{}"></label>'

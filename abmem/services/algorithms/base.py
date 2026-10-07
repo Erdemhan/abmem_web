@@ -178,9 +178,9 @@ class PolicySpec:
         action_dim: Number of plants (one normalised action per plant), >= 1.
         price_low: Lower bid bound of the market.
         price_high: Upper bid bound of the market, > price_low.
-        plant_variable_costs: fuelCost per plant (TL/MWh), length action_dim.
+        plant_variable_costs: fuelCost per plant (USD/MWh), length action_dim.
         plant_static_costs: omCost + investmentCost + co2Cost per plant
-            (TL/MWh), length action_dim.
+            (USD/MWh), length action_dim.
     """
 
     obs_dim: int

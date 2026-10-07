@@ -188,7 +188,7 @@
       "class": "RandomPolicy, MarginalCostPolicy, FixedMarkupPolicy (BaseAgentAlgorithm), is_learning = False",
       "rules": [
         "RANDOM: u ~ U[-1, 1]^action_dim from the agent generator, independent of explore.",
-        "MARGINAL_COST: price_i = plant_variable_costs[i] (fuelCost, TL/MWh), clipped to [price_low, price_high], returned as u via the affine map of action_space (local pure implementation to avoid importing services.agent).",
+        "MARGINAL_COST: price_i = plant_variable_costs[i] (fuelCost, USD/MWh), clipped to [price_low, price_high], returned as u via the affine map of action_space (local pure implementation to avoid importing services.agent).",
         "FIXED_MARKUP: price_i = (plant_variable_costs[i] + plant_static_costs[i]) * (1 + markup), default markup 0.10 (OQ-6), clipped to [price_low, price_high], mapped to u.",
         "observe/update are no-ops, update returns None, exploration_scale returns None, fail-stack never applies (runtime_core checks is_learning)."
       ],

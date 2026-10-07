@@ -54,7 +54,7 @@
   ],
   "ui_contract": {
     "algorithm_select": "One select per agent with all AlgorithmType labels, default DDPG.",
-    "failstack_switch": "Checkbox switch next to the select. When on, inputs L (integer >= 1, default 6), delta (TL/MWh >= 0, default 15), m_min (default 0) are visible. When the selected algorithm is a baseline (RANDOM, MARGINAL_COST, FIXED_MARKUP) the switch is disabled and unchecked.",
+    "failstack_switch": "Checkbox switch next to the select. When on, inputs L (integer >= 1, default 6), delta (USD/MWh >= 0, default 15), m_min (default 0) are visible. When the selected algorithm is a baseline (RANDOM, MARGINAL_COST, FIXED_MARKUP) the switch is disabled and unchecked.",
     "watch_screen": "Agent table shows the algorithm label and a fail-stack on/off badge."
   },
   "data_model_changes": "none",

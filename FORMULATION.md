@@ -23,7 +23,7 @@ Entry format for equations:
 ---
 
 ## 1. Notation and units
-To formalise: currency TL, energy MWh, prices TL/MWh, one period = 1 hour, 24 periods = 1 day.
+To formalise: currency USD, energy MWh, prices USD/MWh, one period = 1 hour, 24 periods = 1 day.
 
 ## 2. Data
 To formalise: `abmem/data/marketData.xlsx` source and the 8808 valid DEMAND rows.

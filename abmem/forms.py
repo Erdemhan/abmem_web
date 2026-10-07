@@ -131,7 +131,7 @@ class AgentForm(forms.ModelForm):
             self.add_error("failstack_limit", "Fail-stack limit L must be >= 1.")
         delta = cleaned_data.get("failstack_delta")
         if delta is not None and delta < 0:
-            self.add_error("failstack_delta", "Fail-stack delta must be >= 0 TL/MWh.")
+            self.add_error("failstack_delta", "Fail-stack delta must be >= 0 USD/MWh.")
         if cleaned_data.get("failstack_enabled") and algorithm_type in BASELINE_TYPES:
             self.add_error(
                 "failstack_enabled",

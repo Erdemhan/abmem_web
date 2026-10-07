@@ -488,7 +488,7 @@
         planBox.appendChild(el('div', '', s.periods + ' ' + s.period_type + ' periods, ' + s.mode + ', seed ' + s.seed +
           ', evaluation periods ' + s.evaluation_periods + ', lags ' + s.observation_lags.join(', ')));
         planBox.appendChild(el('div', '', 'Market: ' + s.strategy + ', bids ' + s.bid_bounds[0] + ' to ' +
-          s.bid_bounds[1] + ' TL/MWh'));
+          s.bid_bounds[1] + ' USD/MWh'));
         planBox.appendChild(el('div', '', 'Scenario agents: ' + (s.agents.length ? s.agents.join(', ') : 'none')));
         planBox.appendChild(listLine('Resources reused', plan.resources.reuse));
         planBox.appendChild(listLine('Resources created', plan.resources.create));

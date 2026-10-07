@@ -71,7 +71,7 @@ SCENARIO_AGENT_MODES: Final[tuple[str, ...]] = (MODE_NEW, MODE_LIBRARY, MODE_SCE
 SEED_UPPER_BOUND: Final[int] = 2**31
 
 # Defaults of a new scenario in the wizard (PLAN 2.6): one week of hourly
-# periods and bid bounds of 0-200 TL/MWh.
+# periods and bid bounds of 0-200 USD/MWh.
 WIZARD_DEFAULT_PERIODS: Final[int] = 168
 WIZARD_DEFAULT_LOWER_BOUND: Final[int] = 0
 WIZARD_DEFAULT_UPPER_BOUND: Final[int] = 200
@@ -205,7 +205,7 @@ def _coerce_failstack_value(field_name: str, raw_value: Any) -> Any:
         return limit
     value = Agent._meta.get_field(field_name).clean(raw_value, None)
     if field_name == "failstack_delta" and value < 0:
-        raise ValidationError(f"must be >= 0 TL/MWh, got {value}.")
+        raise ValidationError(f"must be >= 0 USD/MWh, got {value}.")
     return value
 
 
@@ -1072,8 +1072,8 @@ class ScenarioHeader:
         mode: Simulation mode.
         period_type: Period type.
         strategy: Market pricing strategy.
-        lower_bound: Lower bid bound in TL/MWh.
-        upper_bound: Upper bid bound in TL/MWh, greater than ``lower_bound``.
+        lower_bound: Lower bid bound in USD/MWh.
+        upper_bound: Upper bid bound in USD/MWh, greater than ``lower_bound``.
     """
 
     name: str
@@ -1166,9 +1166,9 @@ def _parse_scenario_header(data: Mapping[str, Any]) -> ScenarioHeader:
     lower = _coerce_payload_int(data.get("lowerBound"))
     upper = _coerce_payload_int(data.get("upperBound"))
     if lower is None:
-        errors["lowerBound"] = ["Lower bid bound must be an integer (TL/MWh)."]
+        errors["lowerBound"] = ["Lower bid bound must be an integer (USD/MWh)."]
     if upper is None:
-        errors["upperBound"] = ["Upper bid bound must be an integer (TL/MWh)."]
+        errors["upperBound"] = ["Upper bid bound must be an integer (USD/MWh)."]
     elif lower is not None and upper <= lower:
         errors["upperBound"] = [
             "Upper bid bound must be greater than the lower bid bound."

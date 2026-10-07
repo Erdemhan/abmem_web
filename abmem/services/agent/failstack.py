@@ -3,14 +3,14 @@
 Per plant ``i`` and period ``t``:
 
 * Failure: ``f_i(t) = 1`` if the offer was rejected (``q_acc == 0``) or
-  ``margin_i = g_i / (p_acc * q_acc) < m_min``. The margin is TL / TL and
+  ``margin_i = g_i / (p_acc * q_acc) < m_min``. The margin is USD / USD and
   therefore unitless. If the accepted revenue ``p_acc * q_acc`` is 0, the
   offer is a failure only if ``g_i < 0`` (OQ-13).
 * Counter: ``n_i <- n_i + 1`` on failure, ``n_i <- 0`` on success, so the
   counter holds the number of consecutive failures.
 * Intervention: if ``n_i >= L`` at the next decision, the price of plant ``i``
   is drawn from ``U[max(low, PTF(t-1) - delta), PTF(t-1))``, clipped to
-  ``[low, high]``, and ``n_i <- 0``. ``delta`` is in TL/MWh, the unit of the
+  ``[low, high]``, and ``n_i <- 0``. ``delta`` is in USD/MWh, the unit of the
   price, so the comparison is dimensionally consistent.
 
 The module is pure. It holds no global state, reads no settings and does not
@@ -92,7 +92,7 @@ class FailStackParams:
     Attributes:
         limit: L, number of consecutive failures that triggers an
             intervention. Must be ``>= 1``.
-        delta: delta in TL/MWh, width of the intervention interval below
+        delta: delta in USD/MWh, width of the intervention interval below
             PTF(t-1). Must be finite and ``>= 0``.
         min_margin: m_min, unitless margin threshold. Must be finite.
     """
@@ -217,7 +217,7 @@ def margin(outcome: OfferOutcome, profit: Decimal) -> Decimal | None:
 
     Args:
         outcome: Cleared offer outcome.
-        profit: Profit g of the offer in TL (``offer_profit(outcome)``).
+        profit: Profit g of the offer in USD (``offer_profit(outcome)``).
 
     Returns:
         The margin, or None if the accepted revenue is 0 (which includes
@@ -242,7 +242,7 @@ def is_failure(outcome: OfferOutcome, profit: Decimal, min_margin: Decimal) -> b
 
     Args:
         outcome: Cleared offer outcome.
-        profit: Profit g of the offer in TL.
+        profit: Profit g of the offer in USD.
         min_margin: Threshold m_min (unitless).
 
     Returns:
@@ -318,8 +318,8 @@ def intervention_price(
     below PTF(t-1)) and then clipped to ``[low, high]``.
 
     Args:
-        ptf_prev: PTF(t-1) in TL/MWh.
-        delta: Interval width in TL/MWh, ``>= 0``.
+        ptf_prev: PTF(t-1) in USD/MWh.
+        delta: Interval width in USD/MWh, ``>= 0``.
         low: Lower bid bound.
         high: Upper bid bound.
         rng: Generator seeded per agent, the only source of randomness.

@@ -237,7 +237,7 @@
             <div class="card-header pb-0">
               <h6 class="mb-0">Agent summary</h6>
               <p class="text-xs text-secondary mb-0">Click an agent row to show the per-resource rows. Acceptance in percent
-                of offers, prices in TL/MWh, energy in MWh, money in TL.</p>
+                of offers, prices in USD/MWh, energy in MWh, money in USD.</p>
             </div>
             <div class="card-body px-0 pt-2 pb-2 table-responsive">
               <table class="table table-sm an-table mb-0">
@@ -456,7 +456,7 @@
       // ---- Charts --------------------------------------------------------
 
       function marketChart() {
-        var options = baseOptions('Period', 'PTF (TL/MWh)');
+        var options = baseOptions('Period', 'PTF (USD/MWh)');
         options.scales.y1 = { position: 'right', title: { display: true, text: 'Energy (MWh)' }, grid: { drawOnChartArea: false } };
         options.interaction = { mode: 'index', intersect: false };
         makeChart('market', {
@@ -478,7 +478,7 @@
           return { label: a.name, data: data.budgets[a.name].map(function (b, t) { return { x: t, y: b }; }),
             borderColor: color, backgroundColor: color, pointRadius: data.periods.length > 60 ? 0 : 2, borderWidth: 2 };
         });
-        var options = baseOptions('Period', 'Budget (TL)');
+        var options = baseOptions('Period', 'Budget (USD)');
         options.interaction = { mode: 'index', intersect: false };
         makeChart('budgets', { type: 'line', data: { datasets: datasets }, options: options });
       }
@@ -486,7 +486,7 @@
       function offersChart() {
         var datasets = offerDatasets(data.offers, function (o) { return o.agent; }, function (name) { return agentColor[name]; });
         datasets.push(ptfDataset());
-        makeChart('offers', { type: 'scatter', data: { datasets: datasets }, options: baseOptions('Period', 'Price (TL/MWh)') });
+        makeChart('offers', { type: 'scatter', data: { datasets: datasets }, options: baseOptions('Period', 'Price (USD/MWh)') });
       }
 
       function panelChart(agent) {
@@ -495,7 +495,7 @@
           return PALETTE[(index + 1) % PALETTE.length];
         });
         datasets.push(ptfDataset());
-        var options = baseOptions('Period', 'Price (TL/MWh)');
+        var options = baseOptions('Period', 'Price (USD/MWh)');
         options.plugins.title = { display: true, text: agent };
         makeChart('panel', { type: 'scatter', data: { datasets: datasets }, options: options });
         var summary = data.agents.filter(function (a) { return a.name === agent; })[0];
@@ -589,7 +589,7 @@
         body.innerHTML = '';
         [['Run', s.name + ' (#' + s.simulation_id + ')'], ['Seed', String(s.seed)],
           ['Periods', String(s.period_number)], ['Mode', s.mode], ['Market strategy', s.strategy],
-          ['Bid bounds (TL/MWh)', s.lower_bound + ' - ' + s.upper_bound],
+          ['Bid bounds (USD/MWh)', s.lower_bound + ' - ' + s.upper_bound],
           ['Observation lags', s.observation_lags.join(', ')],
           ['Evaluation periods', s.evaluation_periods ? String(s.evaluation_periods) : '0 (no evaluation window)'],
           ['Initial policies', s.warm_start_from
