@@ -218,12 +218,12 @@ Her maddede: **ne yapılacak**, **nasıl doğrulanacak**. Type B/C maddeleri ayr
 
 ## 4b. Uygulama sırasında çıkan takip işleri
 
-- [ ] **B13 (sonradan bulundu): `Agent.budget` taşabilir.** `max_digits=12` (en fazla ~9.99e9). Büyük kapasiteli uzun çalıştırmalarda periyot yazımı hata verir ve çalıştırma FAILED olarak biter. Alan genişletilmeli (migration). runtime_core worker'ı bildirdi.
+- [x] **B13 (sonradan bulundu, `3b653d9` ile düzeltildi): `Agent.budget` taşabilir.** `max_digits=12` (en fazla ~9.99e9). Büyük kapasiteli uzun çalıştırmalarda periyot yazımı hata verir ve çalıştırma FAILED olarak biter. Alan genişletilmeli (migration). runtime_core worker'ı bildirdi.
 - [ ] **Adil karşılaştırma notu (Faz 3):** RDPG, 24 adımlık bir pencere dolmadan öğrenemediği için duman testlerinde t = 49'da, diğer off-policy algoritmalar t = 33'te öğrenmeye başlıyor. PPO ise rollout dolduğunda güncelleniyor. Faz 3 deneylerinde tüm algoritmalar için eğitimin başladığı periyot eşitlenmeli (örn. ortak bir `learning_starts ≥ seq_len + lag`) ya da fark raporlanmalı (`fair-comparison`).
 - [ ] Ajan sayfasındaki modal formun `submitForm()` fonksiyonu sunucuya POST yapmıyor, sadece localStorage'a yazıyor (önceden var olan hata). Kütüphane arayüzü (5. dalga) bu akışı yeniden yazarken düzeltecek.
-- [ ] Kullanılmayan dosyalar: `offer_factory.py`, `period_factory.py`. `views.py`'de kullanılmayan `AgentFactory` import'u. `PyYAML` artık hiçbir yerde kullanılmıyor (`requirements.txt`).
+- [x] Kullanılmayan dosyalar silindi (`offer_factory.py`, `period_factory.py`, PyYAML). Kalan: `views.py`deki kullanılmayan `AgentFactory` import'u (5. dalga). `PyYAML` artık hiçbir yerde kullanılmıyor (`requirements.txt`).
 - [ ] `views.run_simulation`'ın `except` dalı tanımsız olabilecek `newSimulation`'a başvuruyor. 5. dalgada kütüphane servisine (`clone_scenario_for_run`) taşınırken düzeltilecek.
-- [ ] `hyperparam_optimization.py` eski `run(sim, hyperparams=...)` imzasını çağırıyor. 4. dalgadaki `hpo.service` bu dosyayı kaldırıyor.
+- [x] `hyperparam_optimization.py` eski `run(sim, hyperparams=...)` imzasını çağırıyor. 4. dalgadaki `hpo.service` bu dosyayı kaldırıyor.
 - [ ] Veritabanı: 0006–0012 henüz uygulanmadı (`BİOFUEL`/`WİND` isim düzeltmesi + yedek + migrate). Kullanıcının bu terminalde teyidini bekliyor.
 
 ---
