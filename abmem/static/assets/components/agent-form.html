@@ -1,11 +1,13 @@
 {% load abmem_choices %}
 <agent-form>
     <div class="card-body">
-        <form role="form text-left" id="agent-form" method="post" action="create">
+        <form role="form text-left" id="agent-form" method="post" action="{% url 'agent_create' %}"
+            data-create-url="{% url 'agent_create' %}" data-check-name-url="{% url 'agent_check_name' %}" data-agent-id="">
             {% csrf_token %}
             <!-- Agent bilgileri için alanlar -->
             <div class="mb-3">
-                <input type="text" id="agent_name" name="name" class="form-control" placeholder="Name" aria-label="Name" aria-describedby="password-addon" required>
+                <input type="text" id="agent_name" name="name" class="form-control" placeholder="Name" aria-label="Name" aria-describedby="agent-name-feedback" maxlength="20" required>
+                <div id="agent-name-feedback" class="invalid-feedback"></div>
             </div>
             <div class="mb-3">
                 <input type="number" id="budget" name="budget" class="form-control" placeholder="Budget" aria-label="Budget" aria-describedby="password-addon" required>
@@ -49,10 +51,7 @@
                                     </td>
                                     <td>
                                         <div class="mb-3">
-                                            <input type="number" name="capacities[]" class="form-control" placeholder="Capacity" aria-describedby="password-addon" required>
-                                        </div>
-                                        <div class="mb-3">
-                                            <input type="text" name="proxy" class="form-control" placeholder="Capacity" aria-describedby="password-addon" hidden="true" value="True">
+                                            <input type="number" name="capacities[]" class="form-control" placeholder="Capacity" min="1" step="1" required disabled>
                                         </div>
                                     </td>
                                     <td>
@@ -65,6 +64,8 @@
                                 </tr>
                             </tbody>
                         </table>
+
+                        <div id="agent-form-errors" class="alert alert-danger text-white d-none mx-3" role="alert"></div>
 
                         <!-- Yeni Plant ekleme butonu -->
                         <button type="button" class="mt-4 col bg-gradient-primary  border-radius-md mx-3 mb-2 zoom4-1" style="border: none;" onclick="addPlantRow()">
@@ -160,6 +161,14 @@
         agentFormFilterRows(false);
     });
 
+    // Point the form at the create endpoint (agentId empty) or at the update endpoint of a library agent.
+    function agentFormSetTarget(actionUrl, agentId) {
+        var form = document.getElementById("agent-form");
+        form.setAttribute("action", actionUrl || form.getAttribute("data-create-url"));
+        form.setAttribute("data-agent-id", agentId ? String(agentId) : "");
+        agentFormClearErrors();
+    }
+
     function addPlantRow() {
         var table = document.getElementById("plant_table").getElementsByTagName('tbody')[0];
         var rowTemplate = document.getElementById("row_template");
@@ -168,9 +177,11 @@
         newRow.style.display = "table-row";
 
         var selectElement = newRow.querySelector('select[name="resources[]"]');
+        selectElement.removeAttribute("id");
         selectElement.value = "";
         var inputElement = newRow.querySelector('input[name="capacities[]"]');
         inputElement.value = "";
+        inputElement.disabled = false;
 
         table.appendChild(newRow);
         agentFormFilterSelect(selectElement, document.getElementById("type").value, false);
@@ -181,7 +192,82 @@
         row.remove();
     }
 
+    // Live name check against the library (PLAN 2.3): GET agent/check-name, case-insensitive like the DB constraint.
+    var agentNameCheckTimer = null;
+    var agentNameCheckState = { name: null, available: null, message: "" };
+
+    function agentFormShowNameResult(result) {
+        var input = document.getElementById("agent_name");
+        var feedback = document.getElementById("agent-name-feedback");
+        if (result.available === false) {
+            input.classList.add("is-invalid");
+            feedback.textContent = result.message;
+        } else {
+            input.classList.remove("is-invalid");
+            feedback.textContent = "";
+        }
+    }
+
+    function agentFormCheckName() {
+        var form = document.getElementById("agent-form");
+        var name = document.getElementById("agent_name").value.trim();
+        var agentId = form.getAttribute("data-agent-id") || "";
+        var key = name + "\u0000" + agentId;
+        if (agentNameCheckState.name === key && agentNameCheckState.available !== null) {
+            return Promise.resolve(agentNameCheckState);
+        }
+        var params = new URLSearchParams({ name: name });
+        if (agentId) {
+            params.set("exclude_id", agentId);
+        }
+        return fetch(form.getAttribute("data-check-name-url") + "?" + params.toString(), {
+            headers: { "Accept": "application/json" }
+        }).then(function (response) {
+            return response.json();
+        }).then(function (result) {
+            agentNameCheckState = { name: key, available: result.available, message: result.message };
+            if (document.getElementById("agent_name").value.trim() === name) {
+                agentFormShowNameResult(result);
+            }
+            return agentNameCheckState;
+        });
+    }
+
+    $(document).on("input", "#agent_name", function () {
+        agentNameCheckState = { name: null, available: null, message: "" };
+        clearTimeout(agentNameCheckTimer);
+        agentNameCheckTimer = setTimeout(function () {
+            agentFormCheckName().catch(function () { /* the server validates again on submit */ });
+        }, 300);
+    });
+
+    function agentFormClearErrors() {
+        var box = document.getElementById("agent-form-errors");
+        box.classList.add("d-none");
+        box.textContent = "";
+        agentNameCheckState = { name: null, available: null, message: "" };
+        agentFormShowNameResult({ available: null, message: "" });
+    }
+
+    function agentFormShowErrors(errors) {
+        var box = document.getElementById("agent-form-errors");
+        box.textContent = "";
+        Object.keys(errors).forEach(function (key) {
+            errors[key].forEach(function (message) {
+                var line = document.createElement("div");
+                line.textContent = (key === "__all__" ? "" : key + ": ") + message;
+                box.appendChild(line);
+            });
+        });
+        box.classList.remove("d-none");
+        if (errors.name) {
+            agentFormShowNameResult({ available: false, message: errors.name.join(" ") });
+        }
+    }
+
+    // Create or update the library agent on the server (agent/create or agent/<id>/), then reload the list.
     function submitForm() {
+        var form = document.getElementById("agent-form");
         var agentName = document.getElementById("agent_name").value.trim();
         var budget = document.getElementById("budget").value.trim();
         var energyType = document.getElementById("type").value;
@@ -191,44 +277,54 @@
             return;
         }
 
-        var rows = document.querySelectorAll("#plant_table tbody tr");
-        var resourcesAdded = false;
-
+        var rows = agentFormPlantRows();
+        if (rows.length === 0) {
+            alert("Please add at least one resource.");
+            return;
+        }
         for (var i = 0; i < rows.length; i++) {
             var resourceSelect = rows[i].querySelector('select[name="resources[]"]');
             var capacityInput = rows[i].querySelector('input[name="capacities[]"]');
-
-            if (resourceSelect.value !== "" && capacityInput.value !== "") {
-                resourcesAdded = true;
-            }
-
-            if (!capacityInput.closest("#row_template") && (resourceSelect.value === "" || capacityInput.value === "")) {
+            if (resourceSelect.value === "" || capacityInput.value === "") {
                 alert("Please fill in all resource details.");
                 return;
             }
         }
 
-        if (!resourcesAdded) {
-            alert("Please add at least one resource.");
-            return;
-        }
-
-        var rowTemplate = document.getElementById("row_template");
-        rowTemplate.remove();
-
-        var agentData = {
-            name: agentName,
-            budget: budget,
-            type: energyType
-        };
-
-        var agents = JSON.parse(localStorage.getItem("agents")) || [];
-        agents.push(agentData);
-        localStorage.setItem("agents", JSON.stringify(agents));
-
-        $("#agent-modal").modal('hide');
-
-        // Clear the form for the next agent
-        document.getElementById("agent-form").reset();
+        var submitButton = document.getElementById("submit-button");
+        submitButton.disabled = true;
+        agentFormCheckName().catch(function () {
+            return { available: null };
+        }).then(function (nameResult) {
+            if (nameResult.available === false) {
+                submitButton.disabled = false;
+                return;
+            }
+            var data = new FormData(form);
+            data.delete("resources[]");
+            data.delete("capacities[]");
+            rows.forEach(function (row) {
+                data.append("resources[]", row.querySelector('select[name="resources[]"]').value);
+                data.append("capacities[]", row.querySelector('input[name="capacities[]"]').value);
+            });
+            return fetch(form.getAttribute("action"), {
+                method: "POST",
+                body: data,
+                headers: { "Accept": "application/json", "X-Requested-With": "XMLHttpRequest" }
+            }).then(function (response) {
+                return response.json().catch(function () { return {}; }).then(function (body) {
+                    submitButton.disabled = false;
+                    if (response.ok && body.status === "success") {
+                        $("#agent-modal").modal('hide');
+                        window.location.reload();
+                    } else {
+                        agentFormShowErrors(body.errors || { request: ["The request failed (HTTP " + response.status + ")."] });
+                    }
+                });
+            });
+        }).catch(function (error) {
+            submitButton.disabled = false;
+            agentFormShowErrors({ request: [String(error)] });
+        });
     }
 </script>

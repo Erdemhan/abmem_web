@@ -3,6 +3,10 @@ from typing import Any, Sequence
 from django import forms
 from django.core.exceptions import ValidationError
 
+from .services.agent.library_service import (
+    check_name_available,
+    normalize_name,
+)
 from .services.agent.resource_rules import validate_agent_resources
 from .services.algorithms.registry import BASELINE_TYPES
 from .models.models import Resource, Portfolio, Plant, Period, Offer, Agent
@@ -24,9 +28,12 @@ class ResourceForm(forms.ModelForm):
 
 
 class AgentForm(forms.ModelForm):
-    """Agent form with the resource rule (PLAN 2.2) and algorithm settings (PLAN 2.1).
+    """Library agent form (PLAN 2.3) with resource rule (2.2) and algorithm settings (2.1).
 
-    Resource rule violations are reported as non-field errors because the
+    The form edits library agents only (``proxy=True``, ``market=NULL``). The
+    name is checked with ``library_service.check_name_available``, the same
+    case-insensitive comparison as the database constraint, which stays the
+    final guard. Resource rule violations are reported as non-field errors because the
     plants are not fields of this form. Views expose them under the
     ``plants`` key. The algorithm and fail-stack fields are optional: an
     omitted value keeps the model default (or the stored value on edit).
@@ -47,7 +54,6 @@ class AgentForm(forms.ModelForm):
             "budget",
             "type",
             "name",
-            "proxy",
             "algorithm_type",
             "failstack_enabled",
             "failstack_limit",
@@ -70,9 +76,35 @@ class AgentForm(forms.ModelForm):
             **kwargs: Keyword arguments of ``forms.ModelForm``.
         """
         super().__init__(*args, **kwargs)
+        if self.instance.pk is None:
+            # New library agent: satisfies the constraint library_agent_is_proxy.
+            self.instance.proxy = True
+            self.instance.market = None
         self.plant_resources = plant_resources
         for name in self.OPTIONAL_FIELDS:
             self.fields[name].required = False
+
+    def clean_name(self) -> str:
+        """Normalise the name and reject a name already used by another library agent.
+
+        Returns:
+            The name without surrounding whitespace.
+
+        Raises:
+            ValidationError: Code ``required`` for an empty name, code
+                ``name_taken`` when a library agent with the same name
+                (case-insensitive) exists.
+        """
+        name = normalize_name(self.cleaned_data.get("name") or "")
+        if not name:
+            raise ValidationError("Agent name is required.", code="required")
+        if not check_name_available(name, exclude_id=self.instance.pk):
+            raise ValidationError(
+                f"A library agent named '{name}' already exists "
+                "(names are compared case-insensitively).",
+                code="name_taken",
+            )
+        return name
 
     def clean(self) -> dict[str, Any]:
         """Validate the model fields and, if available, the plant resources.

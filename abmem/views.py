@@ -1,45 +1,46 @@
-from django.shortcuts import render, redirect
-from .forms import ResourceForm, PlantForm, AgentForm
-from .models.models import Resource, Portfolio, Plant, Period
-from .models import Simulation, Agent, enums
-from django.http.response import HttpResponse
-from .services.starter import starter_service as StarterService
-from .services.simulation import simulation_factory as SimulationFactory
-from .services.agent import agent_factory as AgentFactory
-from .services.market import market_factory as MarketFactory
-from django.http import HttpResponseNotFound, HttpResponseBadRequest
-from django.shortcuts import render, get_object_or_404, redirect
-from django.http import JsonResponse
-from .models import Agent, Portfolio, Plant
-from .forms import AgentForm, PlantForm
-import copy
-from django.shortcuts import render, redirect
-from django.http import JsonResponse
-from .models import Simulation, Agent, Portfolio, Plant
-from django.views.decorators.csrf import csrf_exempt
 import json
-from django.shortcuts import render
-from django.http import JsonResponse
-from .models import Agent
+import logging
 import math
 import re
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from decimal import Decimal
+from typing import Any, Final
 
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
+from django.db.models.functions import Lower
+from django.http import (
+    HttpRequest,
+    HttpResponse,
+    HttpResponseBadRequest,
+    HttpResponseNotFound,
+    JsonResponse,
+)
+from django.shortcuts import get_object_or_404, redirect, render
+from django.views.decorators.csrf import csrf_exempt
+
+from .forms import AgentForm, PlantForm, ResourceForm
+from .models import Agent, Simulation, enums
 from .models.market import Market
+from .models.models import Plant, Portfolio, Resource
+from .services.agent import library_service
+from .services.agent.library_service import (
+    NAME_MAX_LENGTH,
+    AgentInput,
+    LibraryValidationError,
+    PlantInput,
+)
 from .services.agent.resource_rules import (
     allowed_energy_types_by_agent_type,
     validate_agent_resources,
 )
 from .services.algorithms.registry import BASELINE_TYPES
+from .services.market import market_factory as MarketFactory
+from .services.simulation import simulation_factory as SimulationFactory
+from .services.starter import starter_service as StarterService
 
-
-# RESOURCE RULE HELPERS (PLAN 2.2)
-ParsedAgent = tuple[
-    dict[str, Any], enums.AgentType, list[tuple[Resource, Any]], dict[str, Any]
-]
+logger = logging.getLogger(__name__)
 
 # Payload key of the fail-stack object -> Agent model field (PLAN 2.1, K3).
 FAILSTACK_PAYLOAD_FIELDS: tuple[tuple[str, str], ...] = (
@@ -47,6 +48,14 @@ FAILSTACK_PAYLOAD_FIELDS: tuple[tuple[str, str], ...] = (
     ("delta", "failstack_delta"),
     ("min_margin", "failstack_min_margin"),
 )
+
+# Agent entry modes of the scenario payload (spec agent_library,
+# scenario_payload_contract). "scenario" keeps an agent that already belongs
+# to the edited scenario (update page only).
+MODE_NEW: Final[str] = "new"
+MODE_LIBRARY: Final[str] = "library"
+MODE_SCENARIO: Final[str] = "scenario"
+SCENARIO_AGENT_MODES: Final[tuple[str, ...]] = (MODE_NEW, MODE_LIBRARY, MODE_SCENARIO)
 
 
 def _add_errors(
@@ -204,7 +213,9 @@ def _coerce_switch(raw_value: Any) -> bool:
             return True
         if text in ("false", "off", "0", ""):
             return False
-    raise ValidationError(f"Fail-stack switch must be true or false, got {raw_value!r}.")
+    raise ValidationError(
+        f"Fail-stack switch must be true or false, got {raw_value!r}."
+    )
 
 
 def _parse_agent_algorithm(agent_data: Mapping[str, Any]) -> dict[str, Any]:
@@ -317,88 +328,534 @@ def _parse_plants(raw_plants: Any) -> list[tuple[Resource, Any]]:
     return plants
 
 
-def _parse_agents(agents_data: Any) -> list[ParsedAgent]:
-    """Validate every agent of a simulation payload before any write.
+def _entry_key(index: int, field: str) -> str:
+    """Return the error key of one field of one payload agent.
+
+    Args:
+        index: 0-based position of the agent in the ``agents`` list.
+        field: Field name.
+
+    Returns:
+        ``"agents[<index>].<field>"``.
+    """
+    return f"agents[{index}].{field}"
+
+
+def _coerce_budget(raw_value: Any) -> Decimal:
+    """Validate a payload budget with the ``Agent.budget`` field rules.
+
+    Args:
+        raw_value: Number or numeric string.
+
+    Returns:
+        The budget as ``Decimal``.
+
+    Raises:
+        ValidationError: Missing, not a finite number or too many digits.
+    """
+    if isinstance(raw_value, bool) or raw_value is None or raw_value == "":
+        raise ValidationError("Budget is required.")
+    if isinstance(raw_value, float):
+        if not math.isfinite(raw_value):
+            raise ValidationError(f"Budget {raw_value} is not a finite number.")
+        raw_value = repr(raw_value)
+    return Agent._meta.get_field("budget").clean(raw_value, None)
+
+
+def _coerce_capacity(raw_value: Any) -> int:
+    """Convert a payload plant capacity to a positive integer.
+
+    Args:
+        raw_value: int, integral float or digit string.
+
+    Returns:
+        The capacity in MW.
+
+    Raises:
+        ValidationError: Not an integer or not positive.
+    """
+    value: int | None = None
+    if isinstance(raw_value, int) and not isinstance(raw_value, bool):
+        value = raw_value
+    elif isinstance(raw_value, float) and math.isfinite(raw_value):
+        if raw_value.is_integer():
+            value = int(raw_value)
+    elif isinstance(raw_value, str):
+        text = raw_value.strip()
+        if text.lstrip("-").isdigit():
+            value = int(text)
+    if value is None or value <= 0:
+        raise ValidationError(
+            f"capacity must be a positive integer, got {raw_value!r}."
+        )
+    return value
+
+
+def _validate_entry_name(raw_name: Any) -> str:
+    """Normalise and check the format of an agent name.
+
+    Args:
+        raw_name: Value of the ``name`` key.
+
+    Returns:
+        The name without surrounding whitespace.
+
+    Raises:
+        ValidationError: Not a string, empty, or longer than ``NAME_MAX_LENGTH``.
+    """
+    if not isinstance(raw_name, str) or not library_service.normalize_name(raw_name):
+        raise ValidationError("Agent name is required.", code="required")
+    name = library_service.normalize_name(raw_name)
+    if len(name) > NAME_MAX_LENGTH:
+        raise ValidationError(
+            f"Agent name must have at most {NAME_MAX_LENGTH} characters "
+            f"({len(name)} given).",
+            code="max_length",
+        )
+    return name
+
+
+def _library_name_taken_message(name: str) -> str:
+    """Return the message for a name already used by a library agent.
+
+    Args:
+        name: The normalised name.
+
+    Returns:
+        Human-readable message (same wording as the library service).
+    """
+    return (
+        f"A library agent named '{name}' already exists "
+        "(names are compared case-insensitively)."
+    )
+
+
+def _parse_agent_fields(
+    agent_data: Mapping[str, Any], prefix: str
+) -> tuple[dict[str, Any], tuple[PlantInput, ...]]:
+    """Validate the content fields of one 'new' or 'scenario' payload agent.
+
+    Args:
+        agent_data: One entry of the ``agents`` list.
+        prefix: Text put in front of every message (the agent label).
+
+    Returns:
+        ``(fields, plants)``: ``fields`` holds ``type``, ``budget``,
+        ``algorithm_type`` and the fail-stack fields, ``plants`` the plant
+        inputs in payload order.
+
+    Raises:
+        ValidationError: Mapping from field name (``type``, ``budget``,
+            ``algorithm_type``, ``failstack_*``, ``plants``) to prefixed
+            messages.
+    """
+    errors: dict[str, list[str]] = {}
+    fields: dict[str, Any] = {}
+    agent_type = None
+    resources: list[tuple[Resource, Any]] = []
+    try:
+        agent_type = _coerce_agent_type(agent_data.get("type"))
+        fields["type"] = agent_type
+    except ValidationError as exc:
+        _add_errors(errors, exc, "type", prefix)
+    try:
+        fields["budget"] = _coerce_budget(agent_data.get("budget"))
+    except ValidationError as exc:
+        _add_errors(errors, exc, "budget", prefix)
+    try:
+        fields.update(_parse_agent_algorithm(agent_data))
+    except ValidationError as exc:
+        _add_errors(errors, exc, "algorithm_type", prefix)
+    try:
+        resources = _parse_plants(agent_data.get("plants"))
+    except ValidationError as exc:
+        _add_errors(errors, exc, "plants", prefix)
+    plants: list[PlantInput] = []
+    if "plants" not in errors:
+        for number, (resource, raw_capacity) in enumerate(resources, start=1):
+            try:
+                plants.append(PlantInput(resource.id, _coerce_capacity(raw_capacity)))
+            except ValidationError as exc:
+                errors.setdefault("plants", []).extend(
+                    f"{prefix}Plant {number}: {message}" for message in exc.messages
+                )
+    if agent_type is not None and "plants" not in errors:
+        try:
+            validate_agent_resources(
+                agent_type, [resource for resource, _ in resources]
+            )
+        except ValidationError as exc:
+            _add_errors(errors, exc, "plants", prefix)
+    if errors:
+        raise ValidationError(errors)
+    return fields, tuple(plants)
+
+
+@dataclass(frozen=True)
+class ScenarioAgentEntry:
+    """One validated entry of the ``agents`` list of a scenario payload.
+
+    Attributes:
+        index: 0-based position in the payload.
+        mode: ``MODE_NEW``, ``MODE_LIBRARY`` or ``MODE_SCENARIO``.
+        name: Name the scenario agent will have.
+        data: Agent input for the ``new`` and ``scenario`` modes.
+        library_agent: Selected library agent (``library`` mode).
+        scenario_agent: Kept agent of the edited scenario (``scenario`` mode).
+    """
+
+    index: int
+    mode: str
+    name: str
+    data: AgentInput | None = None
+    library_agent: Agent | None = None
+    scenario_agent: Agent | None = None
+
+
+def _coerce_id(raw_value: Any) -> int | None:
+    """Return ``raw_value`` as a positive integer id, or None when it is not one.
+
+    Args:
+        raw_value: int or digit string.
+
+    Returns:
+        The id or None.
+    """
+    if isinstance(raw_value, bool):
+        return None
+    if isinstance(raw_value, int):
+        return raw_value if raw_value > 0 else None
+    if isinstance(raw_value, str) and raw_value.strip().isdigit():
+        return int(raw_value.strip()) or None
+    return None
+
+
+def _parse_scenario_agents(
+    agents_data: Any, market: Market | None
+) -> list[ScenarioAgentEntry]:
+    """Validate every agent of a scenario payload before any write.
+
+    Entry modes (``mode`` key, default ``new`` for payloads of older pages):
+
+    * ``new``: name, type, budget, algorithm, fail-stack and plants of a new
+      agent. It is added to the library and copied into the scenario, so
+      its name must be free in the library (case-insensitive).
+    * ``library``: ``library_agent_id`` of a library agent to copy. The same
+      library agent may appear only once (OQ-14).
+    * ``scenario`` (update only): ``agent_id`` of an agent of ``market`` plus
+      its edited fields. The agent is kept and updated in place, the
+      library is not changed.
 
     Args:
         agents_data: Value of the ``agents`` key of the JSON payload.
+        market: Market of the edited scenario, None when creating.
 
     Returns:
-        One ``(agent_data, agent_type, [(resource, capacity), ...],
-        algorithm)`` tuple per agent, ``algorithm`` from
-        ``_parse_agent_algorithm``.
+        One entry per payload agent, in payload order.
 
     Raises:
-        ValidationError: Mapping from field name to messages, each message
-            prefixed with the agent it belongs to.
+        ValidationError: Mapping from error key to messages. Content errors
+            use the field name (``type``, ``plants``, ...), identity errors
+            ``agents[<i>].name``, ``agents[<i>].library_agent_id``,
+            ``agents[<i>].agent_id`` or ``agents[<i>].mode``. Every message
+            names the agent it belongs to.
     """
     if not isinstance(agents_data, list):
         raise ValidationError({"agents": ["Agents must be a list."]})
     errors: dict[str, list[str]] = {}
-    parsed: list[ParsedAgent] = []
-    for index, agent_data in enumerate(agents_data, start=1):
+    entries: list[ScenarioAgentEntry] = []
+    market_agents = (
+        {agent.id: agent for agent in market.agent_set.all()} if market else {}
+    )
+    seen_library_ids: set[int] = set()
+    seen_agent_ids: set[int] = set()
+
+    def add(key: str, message: str) -> None:
+        errors.setdefault(key, []).append(message)
+
+    for index, agent_data in enumerate(agents_data):
+        label = f"Agent {index + 1}"
         if not isinstance(agent_data, dict):
-            errors.setdefault("agents", []).append(f"Agent {index}: malformed entry.")
+            add("agents", f"{label}: malformed entry.")
             continue
-        prefix = f"Agent {index} ({agent_data.get('name', '')}): "
-        agent_errors: dict[str, list[str]] = {}
-        agent_type = None
-        plants: list[tuple[Resource, Any]] = []
-        algorithm: dict[str, Any] = {}
-        try:
-            agent_type = _coerce_agent_type(agent_data.get("type"))
-        except ValidationError as exc:
-            _add_errors(agent_errors, exc, "type", prefix)
-        try:
-            algorithm = _parse_agent_algorithm(agent_data)
-        except ValidationError as exc:
-            _add_errors(agent_errors, exc, "algorithm_type", prefix)
-        try:
-            plants = _parse_plants(agent_data.get("plants"))
-        except ValidationError as exc:
-            _add_errors(agent_errors, exc, "plants", prefix)
-        if agent_type is not None and "plants" not in agent_errors:
-            try:
-                validate_agent_resources(
-                    agent_type, [resource for resource, _ in plants]
+        mode = agent_data.get("mode") or MODE_NEW
+        if mode not in SCENARIO_AGENT_MODES or (mode == MODE_SCENARIO and not market):
+            allowed = SCENARIO_AGENT_MODES if market else (MODE_NEW, MODE_LIBRARY)
+            add(
+                _entry_key(index, "mode"),
+                f"{label}: unknown mode {mode!r}, expected one of {', '.join(allowed)}.",
+            )
+            continue
+
+        if mode == MODE_LIBRARY:
+            library_id = _coerce_id(agent_data.get("library_agent_id"))
+            library_agent = (
+                Agent.objects.filter(
+                    id=library_id, proxy=True, market__isnull=True
+                ).first()
+                if library_id is not None
+                else None
+            )
+            if library_agent is None:
+                add(
+                    _entry_key(index, "library_agent_id"),
+                    f"{label}: library agent "
+                    f"{agent_data.get('library_agent_id')!r} does not exist.",
                 )
-            except ValidationError as exc:
-                _add_errors(agent_errors, exc, "plants", prefix)
-        if agent_errors:
-            for key, messages in agent_errors.items():
-                errors.setdefault(key, []).extend(messages)
-        else:
-            parsed.append((agent_data, agent_type, plants, algorithm))
+            elif library_agent.id in seen_library_ids:
+                add(
+                    _entry_key(index, "library_agent_id"),
+                    f"{label} ({library_agent.name}): this library agent is "
+                    "already part of the scenario. A library agent can be "
+                    "added to a scenario only once.",
+                )
+            else:
+                seen_library_ids.add(library_agent.id)
+                entries.append(
+                    ScenarioAgentEntry(
+                        index, mode, library_agent.name, library_agent=library_agent
+                    )
+                )
+            continue
+
+        scenario_agent = None
+        if mode == MODE_SCENARIO:
+            agent_id = _coerce_id(agent_data.get("agent_id"))
+            scenario_agent = market_agents.get(agent_id) if agent_id else None
+            if scenario_agent is None:
+                add(
+                    _entry_key(index, "agent_id"),
+                    f"{label}: agent {agent_data.get('agent_id')!r} is not part "
+                    "of this scenario.",
+                )
+                continue
+            if scenario_agent.id in seen_agent_ids:
+                add(
+                    _entry_key(index, "agent_id"),
+                    f"{label}: agent {scenario_agent.id} appears twice.",
+                )
+                continue
+            seen_agent_ids.add(scenario_agent.id)
+
+        prefix = f"{label} ({agent_data.get('name', '')}): "
+        entry_ok = True
+        name = ""
+        try:
+            name = _validate_entry_name(agent_data.get("name"))
+        except ValidationError as exc:
+            entry_ok = False
+            add(_entry_key(index, "name"), prefix + exc.messages[0])
+        if (
+            entry_ok
+            and mode == MODE_NEW
+            and not library_service.check_name_available(name)
+        ):
+            entry_ok = False
+            add(_entry_key(index, "name"), prefix + _library_name_taken_message(name))
+        try:
+            fields, plants = _parse_agent_fields(agent_data, prefix)
+        except ValidationError as exc:
+            entry_ok = False
+            _add_errors(errors, exc, "agents", "")
+            continue
+        if not entry_ok:
+            continue
+        data = AgentInput(name=name, plants=plants, **fields)
+        entries.append(
+            ScenarioAgentEntry(
+                index, mode, name, data=data, scenario_agent=scenario_agent
+            )
+        )
+
+    # Names must be unique inside the scenario (case-sensitive, per-market
+    # constraint) and new agents must not collide with each other in the
+    # library (case-insensitive). The database constraints stay the final guard.
+    used_names: set[str] = set()
+    new_names: set[str] = set()
+    for entry in entries:
+        message = None
+        if entry.name in used_names:
+            message = (
+                f"the name '{entry.name}' is used by another agent of this scenario."
+            )
+        elif entry.mode == MODE_NEW and entry.name.lower() in new_names:
+            message = (
+                f"the name '{entry.name}' is used by another new agent "
+                "(library names are compared case-insensitively)."
+            )
+        if message is not None:
+            add(
+                _entry_key(entry.index, "name"),
+                f"Agent {entry.index + 1} ({entry.name}): {message}",
+            )
+        used_names.add(entry.name)
+        if entry.mode == MODE_NEW:
+            new_names.add(entry.name.lower())
+    # OQ-14 also covers a library agent whose copy is kept in the scenario.
+    kept_sources = {
+        entry.scenario_agent.source_id
+        for entry in entries
+        if entry.scenario_agent is not None and entry.scenario_agent.source_id
+    }
+    for entry in entries:
+        if entry.library_agent is not None and entry.library_agent.id in kept_sources:
+            add(
+                _entry_key(entry.index, "library_agent_id"),
+                f"Agent {entry.index + 1} ({entry.name}): this library agent is "
+                "already part of the scenario. A library agent can be added to "
+                "a scenario only once.",
+            )
     if errors:
         raise ValidationError(errors)
-    return parsed
+    return entries
 
 
-def _create_agents(
-    market: Market, parsed_agents: list[ParsedAgent], proxy: bool
-) -> None:
-    """Create agents, portfolios and plants from validated payload entries.
+def _entry_error(entry: ScenarioAgentEntry, exc: ValidationError) -> ValidationError:
+    """Re-key a service error raised while writing one payload agent.
 
     Args:
-        market: Market the agents belong to.
-        parsed_agents: Output of ``_parse_agents``.
-        proxy: Proxy flag for every created row.
+        entry: The entry being written.
+        exc: Error of the library service or of model validation.
+
+    Returns:
+        ``ValidationError`` keyed by ``agents[<i>].<field>`` with messages
+        prefixed by the agent label.
     """
-    for agent_data, agent_type, plants, algorithm in parsed_agents:
-        agent = Agent.objects.create(
-            name=agent_data["name"],
-            state=enums.AgentState.CREATED,
-            type=agent_type,
-            budget=agent_data["budget"],
-            market=market,
-            proxy=proxy,
-            **algorithm,
-        )
-        portfolio = Portfolio.objects.create(agent=agent, proxy=proxy)
-        for resource, capacity in plants:
-            Plant.objects.create(
-                portfolio=portfolio, resource=resource, capacity=capacity, proxy=proxy
+    prefix = f"Agent {entry.index + 1} ({entry.name}): "
+    if hasattr(exc, "error_dict"):
+        items = exc.message_dict.items()
+    else:
+        items = [("name", exc.messages)]
+    return ValidationError(
+        {
+            _entry_key(entry.index, key): [prefix + message for message in messages]
+            for key, messages in items
+        }
+    )
+
+
+def _update_scenario_agent(agent: Agent, data: AgentInput) -> None:
+    """Update a kept scenario agent in place and replace its plants.
+
+    The agent's ``source``, ``algorithm_params`` and portfolio row are kept.
+    The library agent it was copied from is not changed.
+
+    Args:
+        agent: Agent of the edited scenario.
+        data: Validated values from the payload.
+
+    Raises:
+        ValidationError: Field validation failed or the name is already used
+            in the scenario (database constraint).
+    """
+    agent.name = data.name
+    agent.budget = data.budget
+    agent.type = data.type
+    agent.algorithm_type = data.algorithm_type
+    agent.failstack_enabled = data.failstack_enabled
+    agent.failstack_limit = data.failstack_limit
+    agent.failstack_delta = data.failstack_delta
+    agent.failstack_min_margin = data.failstack_min_margin
+    agent.clean_fields(exclude={"market", "source", "state"})
+    try:
+        with transaction.atomic():
+            agent.save()
+    except IntegrityError:
+        raise ValidationError(
+            {
+                "name": [
+                    f"An agent named '{agent.name}' already exists in this scenario."
+                ]
+            }
+        ) from None
+    resources = Resource.objects.in_bulk({plant.resource_id for plant in data.plants})
+    portfolio, _ = Portfolio.objects.get_or_create(
+        agent=agent, defaults={"proxy": agent.proxy}
+    )
+    portfolio.plant_set.all().delete()
+    Plant.objects.bulk_create(
+        [
+            Plant(
+                portfolio=portfolio,
+                resource=resources[plant.resource_id],
+                capacity=plant.capacity,
+                proxy=agent.proxy,
             )
+            for plant in data.plants
+        ]
+    )
+
+
+def _write_scenario_agents(market: Market, entries: list[ScenarioAgentEntry]) -> None:
+    """Replace the agents of a proxy market with the validated payload entries.
+
+    Must run inside ``transaction.atomic``. Agents of ``market`` that are not
+    kept by a ``scenario`` entry are deleted first, kept agents are updated,
+    then ``new`` entries go through ``library_service.add_new_agent_to_scenario``
+    and ``library`` entries through ``library_service.copy_agent``.
+
+    Args:
+        market: Market of the proxy scenario.
+        entries: Output of ``_parse_scenario_agents``.
+
+    Raises:
+        ValidationError: Keyed by ``agents[<i>].<field>`` when the library
+            service or the database rejects an entry (for example a name
+            taken between validation and write).
+    """
+    kept_ids = [entry.scenario_agent.id for entry in entries if entry.scenario_agent]
+    market.agent_set.exclude(id__in=kept_ids).delete()
+    for entry in entries:
+        if entry.mode != MODE_SCENARIO:
+            continue
+        try:
+            _update_scenario_agent(entry.scenario_agent, entry.data)
+        except ValidationError as exc:
+            raise _entry_error(entry, exc) from exc
+    for entry in entries:
+        try:
+            if entry.mode == MODE_NEW:
+                library_service.add_new_agent_to_scenario(entry.data, market)
+            elif entry.mode == MODE_LIBRARY:
+                library_service.copy_agent(entry.library_agent, market, proxy=True)
+        except LibraryValidationError as exc:
+            raise _entry_error(entry, exc) from exc
+
+
+def _save_scenario(
+    write: Callable[[], None], entries: list[ScenarioAgentEntry]
+) -> JsonResponse | None:
+    """Run a scenario write in one transaction and map rejections to HTTP 400.
+
+    Args:
+        write: Callable without arguments that writes the simulation, the
+            market and (through ``_write_scenario_agents``) the agents.
+        entries: The validated agent entries (used for the error message of
+            an unexpected constraint violation).
+
+    Returns:
+        None on success, else the HTTP 400 ``JsonResponse``.
+    """
+    try:
+        with transaction.atomic():
+            write()
+    except ValidationError as exc:
+        return _validation_error_response(exc)
+    except IntegrityError as exc:
+        logger.warning("Scenario write rejected by a database constraint: %s", exc)
+        return JsonResponse(
+            {
+                "errors": {
+                    "agents": [
+                        "The agents could not be saved because a database "
+                        "constraint rejected them (for example two agents with "
+                        f"the same name among {len(entries)} agents)."
+                    ]
+                }
+            },
+            status=400,
+        )
+    return None
 
 
 def _plant_form_errors(plant_forms: list[PlantForm]) -> dict[str, list[str]]:
@@ -435,52 +892,121 @@ def _agent_form_errors(form: AgentForm) -> dict[str, list[str]]:
     return errors
 
 
-# SYSTEM
-def run_simulation(request, simulation_id):
-    simulation = get_object_or_404(Simulation, id=simulation_id)
+def _wants_json(request: HttpRequest) -> bool:
+    """Return whether the client asked for a JSON response (AJAX form submit).
+
+    Args:
+        request: The request.
+
+    Returns:
+        True when ``Accept`` contains ``application/json`` or the request is
+        marked with ``X-Requested-With: XMLHttpRequest``.
+    """
+    return (
+        "application/json" in request.headers.get("Accept", "")
+        or request.headers.get("X-Requested-With") == "XMLHttpRequest"
+    )
+
+
+def _library_agent_payload(agent: Agent) -> dict[str, Any]:
+    """Serialise a library agent for the library dialog and the agent form.
+
+    Args:
+        agent: Library agent (portfolio and plants may be prefetched).
+
+    Returns:
+        ``{id, name, type, type_name, budget, algorithm_type,
+        algorithm_name, failstack: {enabled, active, limit, delta,
+        min_margin}, plants: [{resource_id, resource_name, energy_type,
+        capacity}]}``. Decimals are strings.
+    """
+    agent_type = enums.AgentType.get(getattr(agent.type, "value", agent.type))
+    algorithm = enums.AlgorithmType.get(
+        getattr(agent.algorithm_type, "value", agent.algorithm_type)
+    )
     try:
-        if simulation.proxy or simulation.state != enums.SimulationState.CREATED:
-            newSimulation = copy.deepcopy(simulation)
-            newSimulation.id = None
-            newSimulation.state = enums.SimulationState.CREATED
-            newSimulation.currentPeriod = -1
-            newSimulation.proxy = False
-            newSimulation.save()
-            newMarket = copy.deepcopy(simulation.market)
-            newMarket.id = None
-            newMarket.state = enums.MarketState.CREATED
-            newMarket.simulation = newSimulation
-            newMarket.proxy = False
-            newMarket.save()
+        plant_rows = list(agent.portfolio.plant_set.all())
+    except Portfolio.DoesNotExist:
+        plant_rows = []
+    plant_rows.sort(key=lambda plant: plant.id)
+    return {
+        "id": agent.id,
+        "name": agent.name,
+        "type": agent_type.value if agent_type is not None else None,
+        "type_name": agent_type.name if agent_type is not None else "",
+        "budget": str(agent.budget),
+        "algorithm_type": algorithm.value if algorithm is not None else None,
+        "algorithm_name": algorithm.name if algorithm is not None else "",
+        "failstack": {
+            "enabled": bool(agent.failstack_enabled),
+            "active": bool(agent.failstack_enabled) and algorithm not in BASELINE_TYPES,
+            "limit": agent.failstack_limit,
+            "delta": str(agent.failstack_delta),
+            "min_margin": str(agent.failstack_min_margin),
+        },
+        "plants": [
+            {
+                "resource_id": plant.resource_id,
+                "resource_name": plant.resource.name,
+                "energy_type": getattr(
+                    plant.resource.energyType, "value", plant.resource.energyType
+                ),
+                "capacity": plant.capacity,
+            }
+            for plant in plant_rows
+        ],
+    }
 
-            for agent in list(simulation.market.agent_set.all()):
-                newAgent = copy.deepcopy(agent)
-                newAgent.id = None
-                newAgent.market = newMarket
-                newAgent.proxy = False
-                newAgent.save()
-                newPortfolio = copy.deepcopy(agent.portfolio)
-                newPortfolio.id = None
-                newPortfolio.proxy = False
-                newPortfolio.agent = newAgent
-                newPortfolio.save()
-                for plant in list(agent.portfolio.plant_set.all()):
-                    newPlant = copy.deepcopy(plant)
-                    newPlant.id = None
-                    newPlant.portfolio = newPortfolio
-                    newPlant.proxy = False
-                    newPlant.save()
-            simulation_id = StarterService.start(newSimulation)
-            return redirect("watch_simulation", simulation_id=simulation_id)
-    except Exception as e:
-        print(str(e))
-        if newSimulation.id != None:
-            newSimulation.delete()
-        if newMarket.id != None:
-            newMarket.delete()
-        return HttpResponseBadRequest()
 
-    return redirect("simulation_list")
+def _library_agents():
+    """Return the queryset of library agents with plants prefetched, by name.
+
+    Returns:
+        ``QuerySet[Agent]`` of agents with ``proxy=True`` and ``market=NULL``.
+    """
+    return (
+        Agent.objects.filter(proxy=True, market__isnull=True)
+        .select_related("portfolio")
+        .prefetch_related("portfolio__plant_set__resource")
+        .order_by(Lower("name"), "id")
+    )
+
+
+# SYSTEM
+def run_simulation(request: HttpRequest, simulation_id: int) -> HttpResponse:
+    """Clone a proxy scenario into a new run and start it.
+
+    The scenario (simulation, market, agents, portfolios, plants) is copied
+    atomically by ``library_service.clone_scenario_for_run``. A run
+    (non-proxy simulation) is not cloned again, the request redirects to its
+    watch page.
+
+    Args:
+        request: The request.
+        simulation_id: Id of the simulation.
+
+    Returns:
+        Redirect to the watch page of the new run, redirect to the watch page
+        of ``simulation_id`` for a run, HTTP 400 when the scenario cannot be
+        cloned, HTTP 500 when the run process cannot be started.
+    """
+    simulation = get_object_or_404(Simulation, id=simulation_id)
+    if not simulation.proxy:
+        return redirect("watch_simulation", simulation_id=simulation.id)
+    try:
+        run = library_service.clone_scenario_for_run(simulation)
+    except (ValidationError, ValueError) as exc:
+        logger.warning("Scenario %s could not be cloned: %s", simulation.id, exc)
+        return HttpResponseBadRequest(f"The scenario could not be cloned: {exc}")
+    try:
+        run_id = StarterService.start(run)
+    except Exception:
+        logger.exception(
+            "Run %s of scenario %s could not be started", run.id, simulation.id
+        )
+        run.delete()
+        return HttpResponse("The simulation run could not be started.", status=500)
+    return redirect("watch_simulation", simulation_id=run_id)
 
 
 def dashboard(request):
@@ -659,56 +1185,82 @@ def simulation_list(request):
     return render(request, "pages/simulation-list.html", {"simulations": simulations})
 
 
+def _scenario_page_context(**extra: Any) -> dict[str, Any]:
+    """Return the template context shared by the scenario create/update pages.
+
+    Args:
+        **extra: Additional context entries.
+
+    Returns:
+        Context with ``resources`` and ``allowed_energy_types``.
+    """
+    return {
+        "resources": Resource.objects.all(),
+        "allowed_energy_types": allowed_energy_types_by_agent_type(),
+        **extra,
+    }
+
+
 @csrf_exempt
-def create_simulation(request):
-    if request.method == "POST":
-        try:
-            data = json.loads(request.body)
-        except json.JSONDecodeError:
-            return JsonResponse({"errors": {"body": ["Invalid JSON."]}}, status=400)
-        simulation_name = data.get("simulation_name")
-        simulationMode = int(data["simulationMode"])
-        periodNumber = int(data["periodNumber"])
-        periodType = int(data["periodType"])
+def create_simulation(request: HttpRequest) -> HttpResponse:
+    """Render the scenario form (GET) or create a proxy scenario (POST, JSON).
 
-        marketStrategy = int(data["strategy"])
-        lowerBound = int(data["lowerBound"])
-        upperBound = int(data["upperBound"])
+    Agent entries follow ``_parse_scenario_agents`` (modes ``new`` and
+    ``library``). Everything is written in one transaction.
 
-        # Validate every agent before the first write (PLAN 2.2).
-        try:
-            parsed_agents = _parse_agents(data.get("agents", []))
-        except ValidationError as exc:
-            return _validation_error_response(exc)
+    Args:
+        request: The request.
 
-        with transaction.atomic():
-            simulation = SimulationFactory.create(
-                name=simulation_name,
-                mode=enums.SimulationMode(simulationMode),
-                periodType=enums.PeriodType(periodType),
-                periodNumber=periodNumber,
-                proxy=True,
-            )
+    Returns:
+        The page, ``{"status": "success", "simulation_id": id}``, or HTTP 400
+        ``{"errors": {...}}``.
+    """
+    if request.method != "POST":
+        return render(request, "pages/simulation-create.html", _scenario_page_context())
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"errors": {"body": ["Invalid JSON."]}}, status=400)
+    simulation_name = data.get("simulation_name")
+    simulationMode = int(data["simulationMode"])
+    periodNumber = int(data["periodNumber"])
+    periodType = int(data["periodType"])
 
-            market = MarketFactory.create(
-                sim=simulation,
-                lowerBound=lowerBound,
-                upperBound=upperBound,
-                strategy=enums.MarketStrategy(marketStrategy),
-            )
+    marketStrategy = int(data["strategy"])
+    lowerBound = int(data["lowerBound"])
+    upperBound = int(data["upperBound"])
 
-            _create_agents(market, parsed_agents, proxy=market.proxy)
-        return JsonResponse({"status": "success"}, status=200)
-    else:
-        resources = Resource.objects.all()
-        return render(
-            request,
-            "pages/simulation-create.html",
-            {
-                "resources": resources,
-                "allowed_energy_types": allowed_energy_types_by_agent_type(),
-            },
+    # Validate every agent before the first write (PLAN 2.2, 2.3).
+    try:
+        entries = _parse_scenario_agents(data.get("agents", []), market=None)
+    except ValidationError as exc:
+        return _validation_error_response(exc)
+
+    created: dict[str, Simulation] = {}
+
+    def write() -> None:
+        simulation = SimulationFactory.create(
+            name=simulation_name,
+            mode=enums.SimulationMode(simulationMode),
+            periodType=enums.PeriodType(periodType),
+            periodNumber=periodNumber,
+            proxy=True,
         )
+        market = MarketFactory.create(
+            sim=simulation,
+            lowerBound=lowerBound,
+            upperBound=upperBound,
+            strategy=enums.MarketStrategy(marketStrategy),
+        )
+        _write_scenario_agents(market, entries)
+        created["simulation"] = simulation
+
+    error_response = _save_scenario(write, entries)
+    if error_response is not None:
+        return error_response
+    return JsonResponse(
+        {"status": "success", "simulation_id": created["simulation"].id}, status=200
+    )
 
 
 def delete_simulation(request, simulation_id):
@@ -722,71 +1274,81 @@ def delete_simulation(request, simulation_id):
 
 
 @csrf_exempt
-def update_simulation(request, simulation_id):
+def update_simulation(request: HttpRequest, simulation_id: int) -> HttpResponse:
+    """Render the scenario edit page (GET) or update a proxy scenario (POST, JSON).
+
+    Agent entries follow ``_parse_scenario_agents`` (modes ``new``,
+    ``library`` and ``scenario``). Agents of the scenario that the payload
+    does not keep are deleted. Everything is written in one transaction.
+
+    Args:
+        request: The request.
+        simulation_id: Id of the proxy simulation.
+
+    Returns:
+        The page, ``{"status": "success"}``, or HTTP 400.
+    """
     if request.method == "GET":
-        resources = Resource.objects.all()
         simulation = get_object_or_404(Simulation, id=simulation_id)
-        agents = list(simulation.market.agent_set.all())
+        agents = list(
+            simulation.market.agent_set.select_related("source").order_by("id")
+        )
         return render(
             request,
             "pages/simulation-update.html",
-            {
-                "simulation": simulation,
-                "agents": agents,
-                "resources": resources,
-                "allowed_energy_types": allowed_energy_types_by_agent_type(),
-            },
+            _scenario_page_context(simulation=simulation, agents=agents),
         )
 
-    if request.method == "POST":
-        try:
-            data = json.loads(request.body)
-        except json.JSONDecodeError:
-            return JsonResponse({"errors": {"body": ["Invalid JSON."]}}, status=400)
+    if request.method != "POST":
+        return HttpResponseBadRequest()
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        return JsonResponse({"errors": {"body": ["Invalid JSON."]}}, status=400)
 
-        simulation_name = data.get("simulation_name")
-        simulationMode = int(data["simulationMode"])
-        periodNumber = int(data["periodNumber"])
-        periodType = int(data["periodType"])
+    simulation_name = data.get("simulation_name")
+    simulationMode = int(data["simulationMode"])
+    periodNumber = int(data["periodNumber"])
+    periodType = int(data["periodType"])
 
-        marketStrategy = int(data["strategy"])
-        lowerBound = int(data["lowerBound"])
-        upperBound = int(data["upperBound"])
+    marketStrategy = int(data["strategy"])
+    lowerBound = int(data["lowerBound"])
+    upperBound = int(data["upperBound"])
 
-        simulation = get_object_or_404(Simulation, id=simulation_id)
+    simulation = get_object_or_404(Simulation, id=simulation_id)
+    if not simulation.proxy:
+        return HttpResponseBadRequest()
 
-        if simulation.proxy:
-            # Validate every agent before the first write (PLAN 2.2).
-            try:
-                parsed_agents = _parse_agents(data.get("agents", []))
-            except ValidationError as exc:
-                return _validation_error_response(exc)
+    # Validate every agent before the first write (PLAN 2.2, 2.3).
+    try:
+        entries = _parse_scenario_agents(
+            data.get("agents", []), market=simulation.market
+        )
+    except ValidationError as exc:
+        return _validation_error_response(exc)
 
-            with transaction.atomic():
-                simulation.name = simulation_name
-                simulation.mode = enums.SimulationMode(simulationMode)
-                simulation.periodNumber = periodNumber
-                simulation.periodType = enums.PeriodType(periodType)
-                simulation.state = enums.SimulationState.CREATED
-                simulation.currentPeriod = -1
-                simulation.proxy = True
-                simulation.save()
+    def write() -> None:
+        simulation.name = simulation_name
+        simulation.mode = enums.SimulationMode(simulationMode)
+        simulation.periodNumber = periodNumber
+        simulation.periodType = enums.PeriodType(periodType)
+        simulation.state = enums.SimulationState.CREATED
+        simulation.currentPeriod = -1
+        simulation.proxy = True
+        simulation.save()
 
-                market = simulation.market
-                market.lowerBidBound = lowerBound
-                market.upperBidBound = upperBound
-                market.strategy = enums.MarketStrategy(marketStrategy)
-                market.save()
+        market = simulation.market
+        market.lowerBidBound = lowerBound
+        market.upperBidBound = upperBound
+        market.strategy = enums.MarketStrategy(marketStrategy)
+        market.save()
 
-                market.agent_set.all().delete()
+        _write_scenario_agents(market, entries)
 
-                _create_agents(market, parsed_agents, proxy=True)
-
-            return JsonResponse({"status": "success"}, status=200)
-        else:
-            return HttpResponseBadRequest()
-
-    return render(request, "create_simulation.html")
+    error_response = _save_scenario(write, entries)
+    if error_response is not None:
+        return error_response
+    return JsonResponse({"status": "success"}, status=200)
 
 
 def simulation_view(request, sim_id):
@@ -794,15 +1356,59 @@ def simulation_view(request, sim_id):
     return render(request, "pages/blank.html", {"simulations": simulations})
 
 
-# AGENT
+# AGENT (library, PLAN 2.3)
 def get_agents(request):
     agents = Agent.objects.all().values("name", "type", "budget")
     return JsonResponse(list(agents), safe=False)
 
 
-def create_agent_and_related(request):
-    if request.method != "POST":
-        return HttpResponseBadRequest()
+def _agent_input_from_form(form: AgentForm, plant_forms: list[PlantForm]) -> AgentInput:
+    """Build the library service input from a valid AgentForm and plant forms.
+
+    The values are read from ``form.instance``, which holds the submitted
+    values merged with the defaults (create) or the stored values (edit) for
+    omitted optional fields.
+
+    Args:
+        form: A valid ``AgentForm``.
+        plant_forms: Valid ``PlantForm`` instances.
+
+    Returns:
+        The agent input.
+    """
+    agent = form.instance
+    return AgentInput(
+        name=agent.name,
+        budget=Decimal(agent.budget),
+        type=agent.type,
+        algorithm_type=agent.algorithm_type,
+        failstack_enabled=bool(agent.failstack_enabled),
+        failstack_limit=agent.failstack_limit,
+        failstack_delta=Decimal(agent.failstack_delta),
+        failstack_min_margin=Decimal(agent.failstack_min_margin),
+        plants=tuple(
+            PlantInput(
+                plant_form.cleaned_data["resource"].id,
+                plant_form.cleaned_data["capacity"],
+            )
+            for plant_form in plant_forms
+        ),
+    )
+
+
+def _save_library_agent(request: HttpRequest, instance: Agent | None) -> HttpResponse:
+    """Validate the agent form POST and create or update a library agent.
+
+    Args:
+        request: POST with the ``AgentForm`` fields plus ``resources[]`` and
+            ``capacities[]``.
+        instance: Library agent to update, None to create one.
+
+    Returns:
+        HTTP 400 ``{"errors": {...}}`` on invalid input. On success
+        ``{"status": "success", "agent": {...}}`` for a JSON client, else a
+        redirect to the agent list.
+    """
     resources = request.POST.getlist("resources[]")
     capacities = request.POST.getlist("capacities[]")
     plant_forms = [
@@ -815,94 +1421,158 @@ def create_agent_and_related(request):
 
     agent_form = AgentForm(
         request.POST,
+        instance=instance,
         plant_resources=[form.cleaned_data["resource"] for form in plant_forms],
     )
     if not agent_form.is_valid():
         return JsonResponse({"errors": _agent_form_errors(agent_form)}, status=400)
 
-    with transaction.atomic():
-        agent = agent_form.save()
-        portfolio = Portfolio.objects.create(agent=agent, proxy=agent.proxy)
-
-        for form in plant_forms:
-            capacity = form.cleaned_data["capacity"]
-            Plant.objects.create(
-                portfolio=portfolio,
-                resource=form.cleaned_data["resource"],
-                capacity=capacity,
-                proxy=portfolio.proxy,
-            )
-
-    return redirect("dashboard")
-
-
-def update_agent(request, agent_id):
-    agent = get_object_or_404(Agent, id=agent_id)
-    portfolio = agent.portfolio
-    if agent.proxy:
-        if request.method == "POST":
-            resources = request.POST.getlist("resources[]")
-            capacities = request.POST.getlist("capacities[]")
-
-            plant_forms = [
-                PlantForm({"resource": resource, "capacity": capacity})
-                for resource, capacity in zip(resources, capacities)
-            ]
-            plant_errors = _plant_form_errors(plant_forms)
-            if plant_errors:
-                return JsonResponse({"errors": plant_errors}, status=400)
-
-            agent_form = AgentForm(
-                request.POST,
-                instance=agent,
-                plant_resources=[form.cleaned_data["resource"] for form in plant_forms],
-            )
-            if not agent_form.is_valid():
-                return JsonResponse(
-                    {"errors": _agent_form_errors(agent_form)}, status=400
-                )
-
-            with transaction.atomic():
-                agent_form.save()
-
-                # Sil mevcut Plant'leri
-                Plant.objects.filter(portfolio=portfolio).delete()
-
-                # Yeni Plant'leri ekle
-                for plant_form in plant_forms:
-                    plant = plant_form.save(commit=False)
-                    plant.portfolio = portfolio
-                    plant.save()
-
-            return redirect("agent_list")
+    data = _agent_input_from_form(agent_form, plant_forms)
+    try:
+        if instance is None:
+            agent = library_service.create_library_agent(data)
         else:
-            return HttpResponseBadRequest()
-    return HttpResponseBadRequest()
+            agent = library_service.update_library_agent(instance, data)
+    except LibraryValidationError as exc:
+        return _validation_error_response(exc)
 
-
-def delete_agent(request, agent_id):
-    agent = get_object_or_404(Agent, id=agent_id)
-
-    if request.method == "POST":
-        agent.delete()
-        return redirect("agent_list")  # agent_list sayfasına yönlendirme
-    else:
-        return HttpResponseBadRequest()
-
-
-def agent_list(request):
-    if request.method == "GET":
-        resources = Resource.objects.all()
-        agents = Agent.objects.filter(proxy=True)
-        return render(
-            request,
-            "pages/agent-list.html",
-            {
-                "resources": resources,
-                "agents": agents,
-                "allowed_energy_types": allowed_energy_types_by_agent_type(),
-            },
+    if _wants_json(request):
+        return JsonResponse(
+            {"status": "success", "agent": _library_agent_payload(agent)}, status=200
         )
+    return redirect("agent_list")
+
+
+def create_agent_and_related(request: HttpRequest) -> HttpResponse:
+    """Create a library agent with its plants (POST only).
+
+    Args:
+        request: The request.
+
+    Returns:
+        See ``_save_library_agent``. HTTP 400 for other methods.
+    """
+    if request.method != "POST":
+        return HttpResponseBadRequest()
+    return _save_library_agent(request, None)
+
+
+def update_agent(request: HttpRequest, agent_id: int) -> HttpResponse:
+    """Update a library agent and replace its plants (POST only).
+
+    Copies of the agent in scenarios and runs are not changed.
+
+    Args:
+        request: The request.
+        agent_id: Id of the library agent.
+
+    Returns:
+        See ``_save_library_agent``. HTTP 400 for other methods or when the
+        agent is not a library agent.
+    """
+    agent = get_object_or_404(Agent, id=agent_id)
+    if request.method != "POST":
+        return HttpResponseBadRequest()
+    if not agent.is_library:
+        return JsonResponse(
+            {"errors": {"agent": ["Only library agents can be edited here."]}},
+            status=400,
+        )
+    return _save_library_agent(request, agent)
+
+
+def delete_agent(request: HttpRequest, agent_id: int) -> HttpResponse:
+    """Delete a library agent (POST only). Its copies keep working with ``source`` NULL.
+
+    Args:
+        request: The request.
+        agent_id: Id of the library agent.
+
+    Returns:
+        Redirect to the agent list (JSON ``{"status": "success"}`` for a JSON
+        client), HTTP 400 for other methods or a non-library agent.
+    """
+    agent = get_object_or_404(Agent, id=agent_id)
+    if request.method != "POST" or not agent.is_library:
+        return HttpResponseBadRequest()
+    agent.delete()
+    if _wants_json(request):
+        return JsonResponse({"status": "success"}, status=200)
+    return redirect("agent_list")
+
+
+def check_agent_name(request: HttpRequest) -> JsonResponse:
+    """Live uniqueness check of a library agent name.
+
+    Uses ``library_service.check_name_available`` (database ``LOWER``, the
+    same comparison as the constraint ``uniq_library_agent_name_ci``).
+
+    Args:
+        request: GET with ``name`` and optional ``exclude_id`` (the agent
+            being edited).
+
+    Returns:
+        ``{"available": bool, "message": str}``. HTTP 400 for a malformed
+        ``exclude_id``, HTTP 405 for other methods.
+    """
+    if request.method != "GET":
+        return JsonResponse(
+            {"available": False, "message": "Method not allowed."}, status=405
+        )
+    raw_exclude = request.GET.get("exclude_id", "").strip()
+    exclude_id = None
+    if raw_exclude:
+        exclude_id = _coerce_id(raw_exclude)
+        if exclude_id is None:
+            return JsonResponse(
+                {"available": False, "message": "exclude_id must be an agent id."},
+                status=400,
+            )
+    try:
+        name = _validate_entry_name(request.GET.get("name", ""))
+    except ValidationError as exc:
+        return JsonResponse({"available": False, "message": exc.messages[0]})
+    if not library_service.check_name_available(name, exclude_id=exclude_id):
+        return JsonResponse(
+            {"available": False, "message": _library_name_taken_message(name)}
+        )
+    return JsonResponse({"available": True, "message": ""})
+
+
+def library_agents_json(request: HttpRequest) -> JsonResponse:
+    """List the library agents for the "select from library" dialog.
+
+    Args:
+        request: The request.
+
+    Returns:
+        JSON list of ``_library_agent_payload`` objects ordered by name.
+    """
+    return JsonResponse(
+        [_library_agent_payload(agent) for agent in _library_agents()], safe=False
+    )
+
+
+def agent_list(request: HttpRequest) -> HttpResponse:
+    """Render the agent library page (library agents only).
+
+    Args:
+        request: The request.
+
+    Returns:
+        The page, HTTP 400 for other methods.
+    """
+    if request.method != "GET":
+        return HttpResponseBadRequest()
+    return render(
+        request,
+        "pages/agent-list.html",
+        {
+            "resources": Resource.objects.all(),
+            "agents": _library_agents(),
+            "allowed_energy_types": allowed_energy_types_by_agent_type(),
+        },
+    )
 
 
 """

@@ -37,7 +37,7 @@
     <main class="main-content position-relative max-height-vh-100 h-100 border-radius-lg">
 
         <!-- NAVBAR -->
-        {% include '../static/assets/components/navbar.html' with contextName="Agent" pageName="Create" topPageName="ABMEM" %}
+        {% include '../static/assets/components/navbar.html' with contextName="Agent" pageName="Library" topPageName="ABMEM" %}
         <!-- END NAVBAR -->
 
         <!-- CONTAINER -->
@@ -72,7 +72,8 @@
                     <div class="col-12">
                         <div class="card mb-4">
                             <div class="card-header pb-0">
-                                <h6>Agents</h6>
+                                <h6>Agent Library</h6>
+                                <p class="text-sm mb-0">Library agents are templates. Scenarios get copies of them, so editing or deleting a library agent does not change existing scenarios or runs.</p>
                             </div>
                             <div class="card-body px-0 pb-2 pt-0">
                                 <div class="table-responsive">
@@ -94,6 +95,9 @@
                                                 <th
                                                     class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">
                                                     Fail-stack</th>
+                                                <th
+                                                    class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">
+                                                    Plants</th>
                                             </tr>
                                         </thead>
                                         <tbody>
@@ -138,6 +142,13 @@
                                                     </div>
                                                 </td>
                                                 <td>
+                                                    <div class="d-flex flex-column px-2 py-1 text-sm">
+                                                        {% for plant in agent.portfolio.plant_set.all %}
+                                                        <span>{{ plant.resource.name }}: {{ plant.capacity }} MW</span>
+                                                        {% endfor %}
+                                                    </div>
+                                                </td>
+                                                <td>
                                                     <row class="row">
                                                         <div type="button"
                                                             class="icon icon-shape bg-gradient-primary shadow text-center border-radius-md zoom4-1"
@@ -145,7 +156,8 @@
                                                             <i class="fa-solid fa-pencil"></i>
                                                         </div>
                                                         <div class="col-2">
-                                                            <form action="delete/{{ agent.id }}/" method="POST">
+                                                            <form action="{% url 'agent_delete' agent.id %}" method="POST"
+                                                                onsubmit="return confirm('Delete this library agent? Scenarios and runs that use a copy of it are not changed.');">
                                                                 {% csrf_token %}
                                                                 <button type="submit"
                                                                     class="center icon icon-shape bg-gradient-danger text-center border-radius-md zoom4-1"
@@ -199,6 +211,7 @@
             $("#type").val('').change();
             $("#plant_table tbody").find("tr:not(#row_template)").remove();
             resetAlgorithmFields($("#agent-form"));
+            agentFormSetTarget(null, null);
         }
 
 
@@ -213,8 +226,8 @@
         {% for agent in agents %}
         $("#pen-{{ agent.id }}").click(function () {
             resetForm();
-            $("#agent_name").val('{{ agent.name }}');
-            $("#agent-form").attr('action', '{{ agent.id }}/');
+            $("#agent_name").val('{{ agent.name|escapejs }}');
+            agentFormSetTarget('{% url "agent_update" agent.id %}', {{ agent.id }});
             $("#budget").val('{{ agent.budget }}');
             $("#type").val('{{ agent.type.value }}').change();
             setAlgorithmFields($("#agent-form"), {
@@ -238,9 +251,7 @@
                         </select>
                     </td>
                     <td>
-                        <input type="text" name="capacities[]" class="form-control" value="{{ plant.capacity }}">
-                        <input type="text" name="proxy" class="form-control" placeholder="Capacity"
-                                                aria-describedby="password-addon" hidden="true" value="True">
+                        <input type="number" name="capacities[]" class="form-control" min="1" step="1" value="{{ plant.capacity }}">
                     </td>
                     <td>
                                        
@@ -261,11 +272,6 @@
             $("#agent-modal").modal('show');
         });
         {% endfor %}
-
-        function deleteRow(button) {
-            var row = button.parentNode.parentNode;
-            row.parentNode.removeChild(row);
-        }
     </script>
 
 

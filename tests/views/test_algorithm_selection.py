@@ -93,8 +93,8 @@ def test_create_stores_algorithm_and_failstack(
         ],
     )
     assert response.status_code == 200, response.content
-    ddpg = Agent.objects.get(name="ddpg")
-    ppo = Agent.objects.get(name="ppo")
+    ddpg = Agent.objects.get(name="ddpg", market__isnull=False)
+    ppo = Agent.objects.get(name="ppo", market__isnull=False)
     assert ddpg.algorithm_type == AlgorithmType.DDPG
     assert ddpg.failstack_enabled is False
     assert ppo.algorithm_type == AlgorithmType.PPO
@@ -110,7 +110,7 @@ def test_create_defaults_without_algorithm_keys(
 ) -> None:
     response = _post_create(client, [_agent(fossil, "plain")])
     assert response.status_code == 200, response.content
-    agent = Agent.objects.get(name="plain")
+    agent = Agent.objects.get(name="plain", market__isnull=False)
     assert agent.algorithm_type == AlgorithmType.DDPG
     assert agent.failstack_enabled is False
     assert (
@@ -128,7 +128,7 @@ def test_create_defaults_without_algorithm_keys(
 def test_create_accepts_algorithm_name(client: Client, fossil: Resource) -> None:
     response = _post_create(client, [_agent(fossil, "td3", "TD3")])
     assert response.status_code == 200, response.content
-    assert Agent.objects.get(name="td3").algorithm_type == AlgorithmType.TD3
+    assert Agent.objects.get(name="td3", market__isnull=False).algorithm_type == AlgorithmType.TD3
 
 
 @pytest.mark.django_db
@@ -145,7 +145,7 @@ def test_disabled_failstack_values_are_stored(client: Client, fossil: Resource) 
         ],
     )
     assert response.status_code == 200, response.content
-    agent = Agent.objects.get(name="rnd")
+    agent = Agent.objects.get(name="rnd", market__isnull=False)
     assert agent.failstack_enabled is False
     assert agent.failstack_limit == 9
     assert agent.failstack_delta == Decimal("4")
@@ -393,6 +393,7 @@ def test_update_agent_keeps_algorithm_when_omitted(
     client: Client, fossil: Resource
 ) -> None:
     agent = make_agent_with_plants(make_market(), [(fossil, 7)], name="lib-old")
+    agent.market = None  # library agent (PLAN 2.3)
     agent.proxy = True
     agent.algorithm_type = AlgorithmType.PPO
     agent.save()
@@ -405,6 +406,7 @@ def test_update_agent_keeps_algorithm_when_omitted(
 @pytest.mark.django_db
 def test_agent_list_shows_algorithm(client: Client, fossil: Resource) -> None:
     agent = make_agent_with_plants(make_market(), [(fossil, 7)], name="lib-list")
+    agent.market = None  # library agent (PLAN 2.3)
     agent.proxy = True
     agent.algorithm_type = AlgorithmType.RANDOM
     agent.failstack_enabled = False

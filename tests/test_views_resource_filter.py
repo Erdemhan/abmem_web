@@ -101,7 +101,8 @@ def test_create_simulation_matrix(
     if allowed:
         assert response.status_code == 200
         assert Simulation.objects.count() == 1
-        agent = Agent.objects.get()
+        # scenario copy; the 'new' agent is also added to the library (PLAN 2.3)
+        agent = Agent.objects.get(market__isnull=False)
         assert agent.type == agent_type
         assert list(
             agent.portfolio.plant_set.values_list("resource_id", flat=True)
@@ -144,7 +145,7 @@ def test_create_simulation_hybrid_with_all_types(
         _simulation_payload([_agent(3, ids + ids[:1])]),
     )
     assert response.status_code == 200
-    assert Plant.objects.count() == 4
+    assert Plant.objects.filter(portfolio__agent__market__isnull=False).count() == 4
 
 
 @pytest.mark.parametrize(
@@ -244,7 +245,9 @@ def test_update_simulation_matrix(
     if allowed:
         assert response.status_code == 200
         assert simulation.name == "rf-sim"
-        assert list(Agent.objects.values_list("name", flat=True)) == ["new"]
+        assert list(
+            simulation.market.agent_set.values_list("name", flat=True)
+        ) == ["new"]
     else:
         assert response.status_code == 400
         assert agent_type.name in response.json()["errors"]["plants"][0]
@@ -375,6 +378,7 @@ def test_update_agent_matrix(
         name="lib-agent",
         agent_type=AgentType.FOSSIL,
     )
+    agent.market = None  # library agent (PLAN 2.3)
     agent.proxy = True
     agent.save()
     response = client.post(
@@ -404,6 +408,7 @@ def test_agent_list_renders_rule(
         [(resources[EnergyType.RENEWABLE], 1)],
         agent_type=AgentType.RENEWABLE,
     )
+    agent.market = None  # library agent (PLAN 2.3)
     agent.proxy = True
     agent.save()
     response = client.get(reverse("agent_list"))
