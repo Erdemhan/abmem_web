@@ -161,7 +161,7 @@ Her maddede: **ne yapılacak**, **nasıl doğrulanacak**. Type B/C maddeleri ayr
 - **Doğrulama:** sentetik bir amaç fonksiyonuyla (örn. bilinen optimumlu bir test fonksiyonu) ABC'nin optimuma yaklaştığını gösteren unit test.
 
 ### 1.12 Performans (A10)
-- [ ] Teklifler `bulk_create`/`bulk_update` ile yazılır. Her durum değişikliğinde `agent.save()` çağrılmaz (sadece gerekli alanlar, `update_fields` ile).
+- [x] Teklifler `bulk_create`/`bulk_update` ile yazılır. Her durum değişikliğinde `agent.save()` çağrılmaz (sadece gerekli alanlar, `update_fields` ile).
 - [x] Ölü kod temizliği: `estimatePTF`, `MPIP` (kullanılacaksa ayrı tutulur), `parallel_service`, `multi_objective_abc.py`, boş `visualization_service`, tekrarlanan `ReplayBuffer`'lar.
 - **Doğrulama:** 8 ajan × 336 periyot çalıştırmasının süresi önce/sonra ölçülür.
 
@@ -220,8 +220,8 @@ Her maddede: **ne yapılacak**, **nasıl doğrulanacak**. Type B/C maddeleri ayr
 
 - [x] **B13 (sonradan bulundu, `3b653d9` ile düzeltildi): `Agent.budget` taşabilir.** `max_digits=12` (en fazla ~9.99e9). Büyük kapasiteli uzun çalıştırmalarda periyot yazımı hata verir ve çalıştırma FAILED olarak biter. Alan genişletilmeli (migration). runtime_core worker'ı bildirdi.
 - [ ] **Adil karşılaştırma notu (Faz 3):** RDPG, 24 adımlık bir pencere dolmadan öğrenemediği için duman testlerinde t = 49'da, diğer off-policy algoritmalar t = 33'te öğrenmeye başlıyor. PPO ise rollout dolduğunda güncelleniyor. Faz 3 deneylerinde tüm algoritmalar için eğitimin başladığı periyot eşitlenmeli (örn. ortak bir `learning_starts ≥ seq_len + lag`) ya da fark raporlanmalı (`fair-comparison`).
-- [ ] **Tarayıcı testinde bulundu (2026-10-07): senaryo formunda seed, `evaluation_periods` ve gecikme seti alanları yok.** OQ-16 seed'in arayüzde düzenlenebilir olmasını istiyordu. Şu an arayüzden oluşturulan her senaryo varsayılan değerleri (seed 17081999, değerlendirme penceresi 0, gecikmeler [1, 24]) kullanıyor.
-- [ ] **Tarayıcı testinde bulundu: engelleyici `alert()`/`confirm()` kullanımı.** Senaryo kaydı sonrası `alert(successMessage)` sayfayı kilitliyor (`simulation-create.html:633`, `simulation-update.html:689`). Doğrulama uyarıları da `alert` kullanıyor. Sayfa içi bildirimle değiştirilmeli.
+- [x] **Tarayıcı testinde bulundu (2026-10-07): senaryo formunda seed, `evaluation_periods` ve gecikme seti alanları yok.** OQ-16 seed'in arayüzde düzenlenebilir olmasını istiyordu. Şu an arayüzden oluşturulan her senaryo varsayılan değerleri (seed 17081999, değerlendirme penceresi 0, gecikmeler [1, 24]) kullanıyor.
+- [x] **Tarayıcı testinde bulundu: engelleyici `alert()`/`confirm()` kullanımı.** Senaryo kaydı sonrası `alert(successMessage)` sayfayı kilitliyor (`simulation-create.html:633`, `simulation-update.html:689`). Doğrulama uyarıları da `alert` kullanıyor. Sayfa içi bildirimle değiştirilmeli.
 - [x] Ajan sayfasındaki modal formun `submitForm()` fonksiyonu sunucuya POST yapmıyor, sadece localStorage'a yazıyor (önceden var olan hata). Kütüphane arayüzü (5. dalga) bu akışı yeniden yazarken düzeltecek.
 - [x] Kullanılmayan dosyalar silindi (`offer_factory.py`, `period_factory.py`, PyYAML). `AgentFactory` ve `agent_factory.py` 5. dalgada kaldırıldı. `PyYAML` artık hiçbir yerde kullanılmıyor (`requirements.txt`).
 - [x] `views.run_simulation`'ın `except` dalı tanımsız olabilecek `newSimulation`'a başvuruyor. 5. dalgada kütüphane servisine (`clone_scenario_for_run`) taşınırken düzeltilecek.
@@ -231,9 +231,9 @@ Her maddede: **ne yapılacak**, **nasıl doğrulanacak**. Type B/C maddeleri ayr
 ---
 
 ## 5. Faz 3 — Uçtan uca doğrulama ve dokümantasyon
-- [ ] Arayüzden: kütüphaneden ajan seçerek senaryo oluştur → çalıştır → izle → HPO çalışması başlat → izle → en iyi parametreleri uygula.
+- [x] Arayüzden: kütüphaneden ajan seçerek senaryo oluştur → çalıştır → izle → HPO çalışması başlat → izle → en iyi parametreleri uygula.
 - [ ] Çok seed'li deney: her algoritma karşılaştırma ajanlarına karşı, güven aralıklarıyla (`statistical-validity`, `fair-comparison` skill'leri). Öğrenme iddiası ancak eğitimli ajan karşılaştırma koşullarından ayrıştığında yapılır.
-- [ ] `analiz.md`'ye bulguların kapanış durumu eklenir. `ARCHITECTURE.md` yazılır, codebase-memory'deki ADR güncellenir.
+- [x] `analiz.md`'ye bulguların kapanış durumu eklenir. `ARCHITECTURE.md` yazılır, codebase-memory'deki ADR güncellenir.
 
 ---
 

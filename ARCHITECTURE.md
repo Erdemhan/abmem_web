@@ -1,6 +1,6 @@
 # Architecture — ABMEM (target state after PLAN.md)
 
-**Status:** Approved by the user on 2026-10-06, including the resolutions of all open questions (section 11).
+**Status:** Approved by the user on 2026-10-06, including the resolutions of all open questions (section 11). Implemented in waves 0-6, see section 12.
 **Sources:** `PLAN.md` (decisions K1–K11, including the fail-stack rule of item 1.5) and `analiz.md` (defect IDs C1–C9, B1–B10, A1–A10).
 **Scope:** Target architecture after Faz 0, Faz 1 and Faz 2. Module specs live in `specs/*.json`, the parallel execution plan in `specs/EXECUTION_ORDER.md`.
 **Binding reference:** `FORMULATION.md` at the repository root (user-locked, outline in section 10) overrides this document for every equation, symbol and parameter value. If code and `FORMULATION.md` disagree, the code is corrected.
@@ -744,3 +744,18 @@ Location: `FORMULATION.md` at the repository root (OQ-10). Agents create only th
 | OQ-17 | Stale RUNNING studies | Heartbeat field, stale RUNNING studies become FAILED after a timeout. |
 | OQ-18 | Equal-price split | Equal share capped at offer quantity (water-filling). Oracle: tied A=100, B=10, remaining D=60 gives B=10, A=50. |
 | OQ-19 | Parallel onlookers | Batch-synchronous parallel ABC accepted, described in `FORMULATION.md` as a variant of Karaboga (2005). |
+
+## 12. Implementation status (2026-10-07)
+
+All waves 0-6 of `specs/EXECUTION_ORDER.md` are implemented on branch `refactor/plan-execution` (HEAD `d4e675f`, 1357 tests). The local development database is migrated to `0013_agent_budget_precision`. A browser end-to-end check covered the library agent modal, the agent-type resource filter, the live name check, scenario creation through both library paths, a real web-started run and a real HPO study.
+
+Deviations from the specs, made during implementation:
+- Migration chain ends at `0013_agent_budget_precision` (B13, `Agent.budget` max_digits 20), one step beyond the planned `0012`.
+- `market_service.run_period` inserts the Period row once after clearing and no longer writes the transient `WAITINGAGENTS` market state (PLAN 1.12). `specs/runtime_core.json` still describes the earlier placeholder insert.
+- The scenario update payload has a third agent mode `scenario` (keep an agent already in the scenario and edit it in place), in addition to `new` and `library`.
+- `RandomPolicy` declares `stochastic_when_greedy`: it stays random with `explore=False`, and the shared policy contract skips the greedy-determinism check for it.
+- `Simulation.seed` is limited to `[0, 2**31)` in the UI and HPO because the column is a signed 32-bit integer (the model check constraint allows `< 2**32`, which the column type makes unreachable).
+- Scenario run settings (seed, evaluation_periods, observation_lags) are editable on the scenario pages (OQ-16). Blocking browser dialogs were replaced by in-page banners and confirmation modals.
+- Tests run with `web_project.settings_test`: DEBUG on, no `.env` needed, one test database per checkout, created as UTF8 from `template0` (the server's template databases are WIN1252).
+
+Open items: the multi-seed comparative experiment (protocol details pending, `FORMULATION.md` section 9), the remaining `FORMULATION.md` sections, persistence of trained policies (A9), and equalising the learning start across algorithms for fair comparison.

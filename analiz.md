@@ -868,6 +868,58 @@ Kısacası ABC, "üreticilerin ortalama kârı ve PTF'ye yakın teklif verme" ka
 
 ---
 
+## 12. Bulguların kapanış durumu (2026-10-07)
+
+Tüm düzeltmeler `refactor/plan-execution` dalındadır (HEAD `d4e675f`, 1357 test geçiyor). "Düzeltildi" sütunu, ilgili kodun değiştirildiğini ve testle doğrulandığını belirtir. Düzeltmelerin öğrenme kalitesi üzerindeki etkisi ayrıca ölçülmemiştir. Bu, protokolü `FORMULATION.md` bölüm 9'da açık maddeler olarak duran çok seed'li karşılaştırma deneyinde gösterilecektir.
+
+| ID | Durum | Commit(ler) | Not |
+|---|---|---|---|
+| C1 | Düzeltildi | `7f3cbdc`, `a4c0b35` | K1 ödülü float ve kırpmasız. `int()` kaldırıldı. Duman testleri gradyan güncellemelerinin ve critic kaybının oluştuğunu doğruluyor. |
+| C2 | Düzeltildi | `7f3cbdc`, `a4c0b35` | Tek `build_observation`, karar ve öğrenmede aynı gözlem. Geçiş `(o_{t-1}, a_{t-1}, r_{t-1}, o_t)`. |
+| C3 | Düzeltildi | `0bf30ef`, `03f7639`, `91f7eed`, `127559f`, `b25de0b` | Gürültü sadece `select_action(explore=True)` içinde. Hedef ağlar gürültüsüz. |
+| C4 | Düzeltildi | `7f3cbdc`, `0bf30ef` | Özellik başına sabit normalizasyon (EQ-02), aksiyonlar [-1, 1]. Farklı durumların farklı vektör ürettiği test ediliyor. |
+| C5 | Düzeltildi | `91f7eed` | TD3 hedef aksiyonu normalize uzayda kırpılıyor. |
+| C6 | Düzeltildi | `672c9f2` | PPO log-olasılığı örnekleme anında saklanıyor. Müdahale edilen adımlar politika kaybından maskeleniyor. |
+| C7 | Düzeltildi | `b0f3103`, `a4c0b35`, algoritma commit'leri | Algoritma içi fail-stack mantıkları kaldırıldı. Tek kural ajan başına açılıp kapatılıyor (K3). |
+| C8 | Düzeltildi | `9dd7fce`, `49503b2` | Standart gözcü seçimi, ağırlıklı tek amaç, Pareto sadece bilgi (EQ-11a). |
+| C9 | Kısmen | `a4c0b35`, `49503b2` | Seed tüm kaynakları kapsıyor ve HPO çok seed'li değerlendiriyor. Algoritma karşılaştırmasının çok seed'li deneyi henüz yapılmadı. |
+| B1 | Düzeltildi | `7f3cbdc`, `a4c0b35` | Gecikmeler `periodNumber` ile adresleniyor, eksik gecikme 0 ile doldurulmuyor. |
+| B2 | Düzeltildi | `7f3cbdc` | Ödül ajanın tüm santralleri üzerinden. |
+| B3 | Düzeltildi | `127559f` | Pencere bazlı eğitim, adım başına gerçek aksiyon. |
+| B4 | Düzeltildi | `b1d641a` | Eşit pay, teklif miktarıyla sınırlı bölüştürme (OQ-18). |
+| B5 | Düzeltildi | `b0f3103` | Boyutsal olarak tutarlı marj tanımı, eski `ptf = -1` okuması ortadan kalktı. |
+| B6 | Düzeltildi | `7f3cbdc`, `a4c0b35` | Fiyatlar piyasa sınırlarıyla eşleniyor. |
+| B7 | Düzeltildi | `0bf30ef` | Ortak `learning_starts`. RDPG ve PPO yapıları gereği daha geç güncelleniyor (`PLAN.md` 4b, adil karşılaştırma notu). |
+| B8 | Düzeltildi | `b1d641a` | Kabul miktarı ondalıklı. |
+| B9 | Düzeltildi | `49503b2` | Amaç veritabanından, gerçek başlangıç bütçesi ve toplam kapasiteyle hesaplanıyor. |
+| B10 | Düzeltildi | `a4c0b35`, `49503b2` | `SimulationContext` ve çalışma başına parametre uzayı. Aynı süreçte iki çalıştırma test ediliyor. |
+| B11 | Düzeltildi | `b1d641a` | `metDemand` kabul edilen miktarların toplamı. |
+| B12 | Düzeltildi | `013625f` | `Period.demand` ondalıklı (migration 0010). |
+| B13 | Düzeltildi | `3b653d9` | `Agent.budget` 20 haneye genişletildi (migration 0013). |
+| A1 | Düzeltildi | algoritma commit'leri | Her politika santral başına bir aksiyon döndürüyor. |
+| A2 | Düzeltildi | `a4c0b35`, `d611d54` | Arayüzden çalıştırma tarayıcıda gerçek bir süreçle doğrulandı (çalıştırma 33643, FINISHED). |
+| A3 | Düzeltildi | `a4c0b35` | Çift tanımlar kaldırıldı. |
+| A4 | Düzeltildi | `a4c0b35`, `62a6815` | YAML başlatma yolu kaldırıldı. CCGT `FOSSIL`. |
+| A5 | Düzeltildi | `381f439` | `sys.path` ve import anındaki `django.setup()` yok. Testle korunuyor. |
+| A6 | Düzeltildi | `a427224`, `1a83f43` | Migration'lar git'te, gizli bilgiler ortam değişkeninde. Eski anahtar ve parola git geçmişinde duruyor. |
+| A7 | Düzeltildi | `8c4f09c` | WebSocket katmanı kaldırıldı (K10). |
+| A8 | Düzeltildi | `b1d641a` | `DemandSeries` uzunluk, NaN ve sıfır talep doğrulaması. |
+| A9 | Kısmen | birçok commit | Testler (1357) ve `requirements.txt` var. Eğitilmiş modellerin kaydedilip yüklenmesi hâlâ yok. |
+| A10 | Düzeltildi | `a4c0b35`, `d4e675f` | Ölü kod silindi. Periyot başına SQL sayısı 9'dan 7'ye indi. Toplam süre ölçüm gürültüsü içinde değişmedi, çünkü sürenin çoğu torch güncellemelerinde. |
+| A11 | Düzeltildi | `fe22f88` | Migration zinciri boş veritabanına uygulanıyor. |
+
+Bölüm 8'deki eksiklerin durumu:
+- Yazılı formülasyon: `FORMULATION.md` kısmen dolu. Onaylanan girdiler EQ-02, EQ-11a, EQ-11b ve deney ilkeleri. Diğer bölümler kullanıcı onayı bekliyor.
+- Değerlendirme protokolü: karşılaştırma politikaları, değerlendirme penceresi ve seed altyapısı hazır. Deneyin kendisi ve ayrıntıları açık.
+- Öğrenme tanılamaları: `AgentStepLog` ile periyot başına ödül, kayıplar, Q ve müdahale bilgisi kaydediliyor.
+- Ajanların kalıcılığı: açık (A9).
+- Yapılandırma yönetimi: `AlgorithmConfig`, `AlgorithmDefault` ve `Agent.algorithm_params` ile tek katmanlı çözüm.
+- Girdi doğrulama: talep, kaynak kuralı, isim tekilliği ve senaryo ayarları sunucu tarafında doğrulanıyor.
+- Durdurma ve hata durumları: `SimulationState.FAILED` ve `Simulation.error` var. Simülasyon için durdurma düğmesi yok, HPO için iptal var.
+- Testler: birim, entegrasyon, duman, sorgu bütçesi ve sonuç parmak izi testleri.
+
+---
+
 ## Kaynakça
 
 - Agarwal, R., Schwarzer, M., Castro, P. S., Courville, A., & Bellemare, M. G. (2021). Deep reinforcement learning at the edge of the statistical precipice. *NeurIPS*.
