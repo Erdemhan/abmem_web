@@ -904,7 +904,7 @@ Tüm düzeltmeler `refactor/plan-execution` dalındadır (HEAD `d4e675f`, 1357 t
 | A6 | Düzeltildi | `a427224`, `1a83f43` | Migration'lar git'te, gizli bilgiler ortam değişkeninde. Eski `SECRET_KEY` artık kullanılmıyor (`.env`'de yeni anahtar). Eski veritabanı parolası git geçmişinde duruyor, veritabanı paylaşılmadığı için kullanıcı kararıyla (2026-10-07) değiştirilmedi. |
 | A7 | Düzeltildi | `8c4f09c` | WebSocket katmanı kaldırıldı (K10). |
 | A8 | Düzeltildi | `b1d641a` | `DemandSeries` uzunluk, NaN ve sıfır talep doğrulaması. |
-| A9 | Kısmen | birçok commit | Testler (1357) ve `requirements.txt` var. Eğitilmiş modellerin kaydedilip yüklenmesi hâlâ yok. |
+| A9 | Düzeltildi | birçok commit, `84a74c0` | Testler ve `requirements.txt` var. Biten çalıştırmalar öğrenen ajanların checkpoint'ini kaydediyor (`PolicyCheckpoint`, `checkpoints/`), yeni çalıştırma bunlardan başlatılabiliyor ya da sadece değerlendirme yapabiliyor. Gerçek veritabanında doğrulandı (33652 → 33653). |
 | A10 | Düzeltildi | `a4c0b35`, `d4e675f` | Ölü kod silindi. Periyot başına SQL sayısı 9'dan 7'ye indi. Toplam süre ölçüm gürültüsü içinde değişmedi, çünkü sürenin çoğu torch güncellemelerinde. |
 | A11 | Düzeltildi | `fe22f88` | Migration zinciri boş veritabanına uygulanıyor. |
 
@@ -912,7 +912,7 @@ Bölüm 8'deki eksiklerin durumu:
 - Yazılı formülasyon: `FORMULATION.md` kısmen dolu. Onaylanan girdiler EQ-02, EQ-11a, EQ-11b ve deney ilkeleri. Diğer bölümler kullanıcı onayı bekliyor.
 - Değerlendirme protokolü: karşılaştırma politikaları, değerlendirme penceresi ve seed altyapısı hazır. Deneyin kendisi ve ayrıntıları açık.
 - Öğrenme tanılamaları: `AgentStepLog` ile periyot başına ödül, kayıplar, Q ve müdahale bilgisi kaydediliyor.
-- Ajanların kalıcılığı: açık (A9).
+- Ajanların kalıcılığı: kapandı (A9, `84a74c0`).
 - Yapılandırma yönetimi: `AlgorithmConfig`, `AlgorithmDefault` ve `Agent.algorithm_params` ile tek katmanlı çözüm.
 - Girdi doğrulama: talep, kaynak kuralı, isim tekilliği ve senaryo ayarları sunucu tarafında doğrulanıyor.
 - Durdurma ve hata durumları: `SimulationState.FAILED` ve `Simulation.error` var. Simülasyon için durdurma düğmesi yok, HPO için iptal var.

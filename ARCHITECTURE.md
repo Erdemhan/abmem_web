@@ -758,6 +758,8 @@ Deviations from the specs, made during implementation:
 - Scenario run settings (seed, evaluation_periods, observation_lags) are editable on the scenario pages (OQ-16). Blocking browser dialogs were replaced by in-page banners and confirmation modals.
 - Tests run with `web_project.settings_test`: DEBUG on, no `.env` needed, one test database per checkout, created as UTF8 from `template0` (the server's template databases are WIN1252).
 
-Open items: the multi-seed comparative experiment (protocol details pending, `FORMULATION.md` section 9), the remaining `FORMULATION.md` sections, persistence of trained policies (A9), and equalising the learning start across algorithms for fair comparison.
+Open items: the multi-seed comparative experiment (protocol details pending, `FORMULATION.md` section 9), the remaining `FORMULATION.md` sections, and equalising the learning start across algorithms for fair comparison.
 
 - Run-time seed selection and the per-run analysis tab (PLAN 2.5, `aa0de9e`): `run_simulation` accepts a POST seed; routes `simulation/<id>/analysis/`, `simulation/<id>/analysis/data/`, `simulation/<id>/export/<periods|offers|steps>.csv`. The initial budget of a run is reconstructed from the stored final budget and the per-period offer profits (no stored initial budget). Verified in a real browser on run 33643 and with a seeded run (33651, seed 12345).
+
+- Policy persistence (A9, `84a74c0`): finished non-HPO runs save one checkpoint per learning agent (`PolicyCheckpoint`, files under `ABMEM_CHECKPOINT_DIR`, loaded with `torch.load(weights_only=True)`). The run dialog can warm-start from a finished run of the same scenario (`Simulation.scenario`, `Simulation.warm_start_from`) and optionally freeze the loaded policies (`Simulation.freeze_policies`). Warm-started runs keep their own seeded generators. Migration `0014_policy_checkpoint`.
