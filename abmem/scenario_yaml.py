@@ -116,6 +116,7 @@ AGENT_KEYS: Final[tuple[str, ...]] = (
     "algorithm_params",
     "failstack",
     "plants",
+    "library_agent",
 )
 AGENT_REQUIRED_KEYS: Final[tuple[str, ...]] = ("name", "type", "budget", "algorithm", "plants")
 FAILSTACK_KEYS: Final[tuple[str, ...]] = ("enabled", "limit", "delta", "min_margin")
@@ -266,6 +267,12 @@ def scenario_document(simulation: Simulation) -> dict[str, Any]:
                 ],
             }
         )
+        # The library agent of a scenario copy can carry another name (e.g.
+        # scenario agent SOLAR copied from library agent SOLAR_2). Exporting it
+        # lets the import match the right library agent.
+        source = agent.source
+        if source is not None and source.name != agent.name:
+            agents[-1]["library_agent"] = source.name
     resource_docs = [
         {
             "name": resource.name,
@@ -541,6 +548,8 @@ class AgentSpec:
         fields: ``type``, ``budget``, ``algorithm_type`` and fail-stack fields.
         algorithm_params: Per-agent algorithm parameters.
         plants: ``(resource spec, capacity)`` pairs in file order.
+        library_name: Name of the library agent (``library_agent`` key,
+            defaults to ``name``).
         library: Matching library agent (reused), or None (created).
     """
 
@@ -549,7 +558,23 @@ class AgentSpec:
     fields: dict[str, Any]
     algorithm_params: dict[str, Any]
     plants: list[tuple[ResourceSpec, int]]
+    library_name: str = ""
     library: Agent | None = None
+
+    def config_key(self) -> tuple[Any, ...]:
+        """Return a hashable key of the configuration (for in-file comparison)."""
+        fields = self.fields
+        return (
+            fields["type"],
+            Decimal(fields["budget"]),
+            fields["algorithm_type"],
+            json.dumps(self.algorithm_params, sort_keys=True, default=str),
+            bool(fields["failstack_enabled"]),
+            int(fields["failstack_limit"]),
+            Decimal(fields["failstack_delta"]),
+            Decimal(fields["failstack_min_margin"]),
+            tuple(sorted((r.name.lower(), c) for r, c in self.plants)),
+        )
 
 
 @dataclass
@@ -595,8 +620,10 @@ class ImportPlan:
                 "create": [s.name for s in self.resources if s.existing is None],
             },
             "agents": {
-                "reuse": [s.library.name for s in self.agents if s.library is not None],
-                "create": [s.name for s in self.agents if s.library is None],
+                "reuse": sorted({s.library.name for s in self.agents if s.library is not None}),
+                "create": sorted(
+                    {s.library_name for s in self.agents if s.library is None}, key=str.lower
+                ),
             },
             "errors": {},
         }
@@ -785,6 +812,13 @@ def _parse_agent(
     except ValidationError as exc:
         ok = False
         errors.add(f"{path}.name", label + exc.messages[0])
+    library_name = name
+    if "library_agent" in mapping:
+        try:
+            library_name = wizard._validate_entry_name(mapping.get("library_agent"))
+        except ValidationError as exc:
+            ok = False
+            errors.add(f"{path}.library_agent", label + exc.messages[0])
     agent_type = _enum_by_name(mapping.get("type"), AgentType, f"{path}.type", errors)
     ok = ok and agent_type is not None
     fields: dict[str, Any] = {"type": agent_type}
@@ -874,7 +908,7 @@ def _parse_agent(
             errors.merge(exc, {}, f"{path}.plants", label)
     if not ok:
         return None
-    return AgentSpec(index, name, fields, dict(params), plants)
+    return AgentSpec(index, name, fields, dict(params), plants, library_name=library_name)
 
 
 def _library_differences(spec: AgentSpec, library: Agent) -> list[str]:
@@ -982,10 +1016,29 @@ def build_import_plan(document: Any) -> ImportPlan:
         seen[key] = index
         agents.append(spec)
 
+    # A library agent may appear at most once in a scenario (OQ-14). When
+    # several file agents name the same library agent (e.g. CCGT and CCGT2 of
+    # an older scenario, both copied from library agent CCGT), the first one
+    # uses it and every later one is matched under its own scenario name.
+    used_library_names: set[str] = set()
+    for spec in agents:
+        key = spec.library_name.lower()
+        if key in used_library_names:
+            spec.library_name = spec.name
+            key = spec.name.lower()
+        used_library_names.add(key)
+    for spec in agents:
+        if sum(1 for other in agents if other.library_name.lower() == spec.library_name.lower()) > 1:
+            errors.add(
+                f"agents[{spec.index}].library_agent",
+                f"Agent {spec.index + 1} ({spec.name}): library agent '{spec.library_name}' "
+                "would be used twice in this scenario.",
+            )
+
     conflicts: list[str] = []
     for spec in agents:
         library = (
-            _lower_name_filter(Agent.objects.filter(market__isnull=True), spec.name)
+            _lower_name_filter(Agent.objects.filter(market__isnull=True), spec.library_name)
             .order_by("id")
             .first()
         )
@@ -993,7 +1046,7 @@ def build_import_plan(document: Any) -> ImportPlan:
             continue
         differences = _library_differences(spec, library)
         if differences:
-            conflicts.append(spec.name)
+            conflicts.append(spec.library_name)
             errors.add(
                 f"agents[{spec.index}]",
                 f"Library agent '{library.name}' already exists with a different "
@@ -1032,13 +1085,18 @@ def apply_import_plan(plan: ImportPlan) -> Simulation:
             spec.existing = Resource.objects.create(
                 name=spec.name, energyType=spec.energy_type, **spec.costs
             )
+    created: dict[str, Agent] = {}
     for spec in plan.agents:
         if spec.library is not None:
             continue
+        key = spec.library_name.lower()
+        if key in created:
+            spec.library = created[key]
+            continue
         fields = spec.fields
-        spec.library = library_service.create_library_agent(
+        spec.library = created[key] = library_service.create_library_agent(
             AgentInput(
-                name=spec.name,
+                name=spec.library_name,
                 budget=fields["budget"],
                 type=fields["type"],
                 algorithm_type=fields["algorithm_type"],

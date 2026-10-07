@@ -222,8 +222,10 @@ def test_export_file_content_and_name(client: Client, scenario: Simulation) -> N
         "algorithm_params": {"lr_actor": 0.0005, "hidden_sizes": [64, 64]},
         "failstack": {"enabled": True, "limit": 4, "delta": 12.5, "min_margin": 0.025},
         "plants": [{"resource": "Gas", "capacity": 300}, {"resource": "Gas", "capacity": 150}],
+        "library_agent": "Thermal",
     }
     assert green["name"] == "Green"
+    assert "library_agent" not in green
     assert green["algorithm"] == "MARGINAL_COST"
     assert green["algorithm_params"] == {}
     assert "bid_bounds: [0, 250]" in text
@@ -259,7 +261,7 @@ def test_round_trip_into_an_empty_database(client: Client, scenario: Simulation)
     assert preview.status_code == 200, preview.content
     plan = preview.json()
     assert plan["resources"] == {"reuse": [], "create": ["Gas", "Wind"]}
-    assert plan["agents"] == {"reuse": [], "create": ["Thermal A", "Green"]}
+    assert plan["agents"] == {"reuse": [], "create": ["Green", "Thermal"]}
     assert plan["scenario"]["name"] == "Export test"
     assert plan["errors"] == {}
     assert _counts() == (0, 0, 0, 0, 0, 0)
@@ -273,28 +275,25 @@ def test_round_trip_into_an_empty_database(client: Client, scenario: Simulation)
     assert _normalized(scenario_yaml.scenario_document(imported)) == original
 
     library = Agent.objects.filter(market__isnull=True)
-    assert sorted(library.values_list("name", flat=True)) == ["Green", "Thermal A"]
+    assert sorted(library.values_list("name", flat=True)) == ["Green", "Thermal"]
     assert all(agent.proxy for agent in library)
-    for agent in imported.market.agent_set.all():
-        assert agent.proxy
-        assert agent.source is not None and agent.source.name == agent.name
+    sources = {agent.name: agent.source.name for agent in imported.market.agent_set.all()}
+    assert sources == {"Thermal A": "Thermal", "Green": "Green"}
+    assert all(agent.proxy for agent in imported.market.agent_set.all())
 
 
 def test_reimport_into_the_same_database_reuses_everything(
     client: Client, scenario: Simulation
 ) -> None:
+    # "Thermal A" is a scenario name; the export carries library_agent: Thermal,
+    # so both library agents are reused without editing the file.
     text = _export(client, scenario)
-    # "Thermal A" is a scenario name; the library agent is "Thermal". Make the
-    # file refer to library names so both agents are reused.
-    document = _document(text)
-    document["agents"][0]["name"] = "thermal"
-    text = _dump(document)
     resources_before = Resource.objects.count()
     library_before = Agent.objects.filter(market__isnull=True).count()
 
     plan = _preview(client, text).json()
     assert plan["resources"] == {"reuse": ["Gas", "Wind"], "create": []}
-    assert plan["agents"] == {"reuse": ["Thermal", "Green"], "create": []}
+    assert plan["agents"] == {"reuse": ["Green", "Thermal"], "create": []}
 
     response = _confirm(client, text)
     assert response.status_code == 200, response.content
@@ -303,19 +302,39 @@ def test_reimport_into_the_same_database_reuses_everything(
     assert Resource.objects.count() == resources_before
     assert Agent.objects.filter(market__isnull=True).count() == library_before
     copies = {agent.name: agent for agent in imported.market.agent_set.all()}
-    assert set(copies) == {"thermal", "Green"}
-    assert copies["thermal"].source.name == "Thermal"
+    assert set(copies) == {"Thermal A", "Green"}
+    assert copies["Thermal A"].source.name == "Thermal"
 
 
-def test_exported_scenario_names_create_new_library_agents(
+def test_without_library_agent_key_the_name_is_the_library_name(
     client: Client, scenario: Simulation
 ) -> None:
-    text = _export(client, scenario)
+    document = _document(_export(client, scenario))
+    del document["agents"][0]["library_agent"]
+    text = _dump(document)
     plan = _preview(client, text).json()
     assert plan["agents"] == {"reuse": ["Green"], "create": ["Thermal A"]}
     response = _confirm(client, text)
     assert response.status_code == 200
     assert Agent.objects.filter(market__isnull=True, name="Thermal A").exists()
+
+
+def test_second_agent_of_a_shared_library_agent_gets_its_own(
+    client: Client, scenario: Simulation
+) -> None:
+    """A library agent may appear once per scenario (OQ-14): later file agents
+    naming the same library agent are matched under their own scenario name."""
+    document = _document(_export(client, scenario))
+    thermal = document["agents"][0]
+    twin = dict(thermal, name="Thermal B", budget=1.0)
+    document["agents"].append(twin)
+    plan = _preview(client, _dump(document)).json()
+    assert plan["agents"] == {"reuse": ["Green", "Thermal"], "create": ["Thermal B"]}
+    response = _confirm(client, _dump(document))
+    assert response.status_code == 200, response.content
+    imported = Simulation.objects.get(id=response.json()["simulation_id"])
+    sources = {agent.name: agent.source.name for agent in imported.market.agent_set.all()}
+    assert sources == {"Thermal A": "Thermal", "Thermal B": "Thermal B", "Green": "Green"}
 
 
 def test_resource_name_match_is_case_insensitive(client: Client, scenario: Simulation) -> None:
