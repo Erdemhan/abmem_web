@@ -1,59 +1,31 @@
-"""Command-line entry point for the ABC hyperparameter search.
+"""Command-line entry point for the hyperparameter search (PLAN 2.4).
 
-Run from the repository root:
+Thin wrapper around the ``run_hpo`` management command. Run from the
+repository root:
 
-    python -m abmem.services.algorithms.optimization.optimizer
+    python -m abmem.services.algorithms.optimization.optimizer --study 12
+    python -m abmem.services.algorithms.optimization.optimizer --config study.json
 """
 
-import timeit
-from datetime import datetime
+from __future__ import annotations
+
+import sys
+from collections.abc import Sequence
 
 from abmem.bootstrap import setup_django
 
-# Shared settings
-COLONY_SIZE = 2
-MAX_ITER = 2
-LIMIT = 5
-SEED = 17081999
-ALGORITHMS = ["PPO"]  # "RDPG", "DDPG",  "TD3", "PPO", "SAC"
 
+def main(argv: Sequence[str] | None = None) -> None:
+    """Configure Django and run ``run_hpo`` with the given arguments.
 
-def main() -> None:
-    """Run the hyperparameter search for every algorithm in ``ALGORITHMS``."""
+    Args:
+        argv: Command arguments, ``sys.argv[1:]`` when None.
+    """
     setup_django()
-    from django.conf import settings
+    from django.core.management import call_command
 
-    from .abc_logger import ABCLogger
-    from .hyperparam_optimization import optimize_hyperparams
-
-    for algorithm in ALGORITHMS:
-        logger = ABCLogger(
-            algorithm_name=algorithm,
-            log_dir=str(settings.BASE_DIR / "abc_logs"),
-            meta_info={
-                "colony_size": COLONY_SIZE,
-                "max_iter": MAX_ITER,
-                "limit": LIMIT,
-                "seed": SEED,
-            },
-        )
-
-        logger.log_text(
-            f"\n>>> Starting {algorithm} optimization at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} <<<"
-        )
-
-        start = timeit.default_timer()
-        optimize_hyperparams(
-            colony_size=COLONY_SIZE,
-            max_iter=MAX_ITER,
-            limit=LIMIT,
-            seed=SEED,
-            algorithm_type=algorithm,
-        )
-        elapsed = timeit.default_timer() - start
-        logger.log_text(
-            f"✅ {algorithm} optimization completed in {elapsed:.2f} seconds"
-        )
+    args = list(sys.argv[1:] if argv is None else argv)
+    call_command("run_hpo", *args)
 
 
 if __name__ == "__main__":

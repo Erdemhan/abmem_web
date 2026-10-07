@@ -1,4 +1,4 @@
-from django.urls import path
+from django.urls import include, path
 from . import views
 
 
@@ -24,5 +24,6 @@ urlpatterns = [
     path('simulation/watch/<str:simulation_id>/', views.watch_simulation, name='watch_simulation'),
     path('simulation/status/', views.get_simulation_status, name='get_simulation_status'),
     path('simulation/next/', views.nextPeriod, name='nextPeriod'),
+    path('hpo/', include('abmem.hpo_urls')),
 ]
 

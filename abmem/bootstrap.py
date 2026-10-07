@@ -60,3 +60,18 @@ def init_hpo_worker() -> None:
 
     torch.set_num_threads(1)
     connections.close_all()
+
+
+def run_hpo_process(study_id: int) -> None:
+    """Run one hyperparameter study in a spawned child process (K8).
+
+    Top-level and picklable so it can be used as a
+    ``multiprocessing.Process`` target under the ``spawn`` start method.
+
+    Args:
+        study_id: Primary key of the study (state CREATED).
+    """
+    setup_django()
+    from abmem.services.hpo import hpo_service
+
+    hpo_service.run_study(study_id)

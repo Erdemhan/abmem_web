@@ -82,7 +82,8 @@ def test_setup_django_is_idempotent() -> None:
     "module",
     [
         "abmem.bootstrap",
-        "abmem.services.algorithms.optimization.hyperparam_optimization",
+        "abmem.services.hpo.worker",
+        "abmem.services.algorithms.optimization.optimizer",
     ],
 )
 def test_module_imports_without_django_setup(module: str) -> None:
