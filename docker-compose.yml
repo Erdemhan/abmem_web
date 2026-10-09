@@ -1,0 +1,55 @@
+# ABMEM: web application and PostgreSQL database.
+#   Start:   docker compose up --build      (first start builds the image)
+#   Stop:    docker compose down            (data is kept in the volumes)
+#   Open:    http://localhost:8000/
+# Values can be changed in a .env file next to this file (see .env.docker.example).
+name: abmem
+
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${DB_NAME:-abmem}
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-abmem}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  web:
+    build: .
+    image: abmem-web
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DJANGO_DEBUG: "false"
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      DB_NAME: ${DB_NAME:-abmem}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-abmem}
+      DB_HOST: db
+      DB_PORT: "5432"
+      ABMEM_LOAD_STARTER_DATA: ${ABMEM_LOAD_STARTER_DATA:-true}
+      ABMEM_PORT: ${ABMEM_PORT:-8000}
+    ports:
+      # Bound to this computer only. Use "8000:8000" to reach it from the network.
+      - "127.0.0.1:${ABMEM_PORT:-8000}:8000"
+    volumes:
+      - checkpoints:/app/checkpoints
+      - sim-data:/app/sim_data
+      - app-state:/var/lib/abmem
+
+volumes:
+  db-data:
+  checkpoints:
+  sim-data:
+  app-state:

@@ -273,6 +273,12 @@ Spec: `specs/algorithms_tab.json`.
 - [x] **Market parameters:** clearing algorithms get an optional config class like agent algorithms, a `ClearingDefault` table edited on this page and per-scenario overrides in the wizard (`Market.clearing_params`). MERIT_ORDER has no parameters.
 - [x] **Reproducibility:** every run stores a snapshot of the parameters it actually used (agents and clearing). The analysis tab shows the snapshot. Changing a default affects only runs started afterwards.
 
+### 2.13 Docker setup (request 13, 2026-10-09)
+Guide: `docs/docker.md`.
+- [x] `docker compose up --build -d` starts PostgreSQL 16 and the web app (gunicorn, WhiteNoise, PyTorch CPU) on a computer without Python or PostgreSQL. The start script waits for the database, creates a secret key in a volume, applies the migrations and loads the starter data into an empty database (`manage.py load_starter_data`, files in `abmem/starter_data/`).
+- [x] Volumes for the database, checkpoints, JSON offer exports and the secret key. `/` redirects to `/dev/`.
+- [ ] End-to-end run inside the container after the JSON export fix (blocked: Docker Desktop disk full on the host).
+
 ## 4b. Uygulama sırasında çıkan takip işleri
 
 - [x] **B13 (sonradan bulundu, `3b653d9` ile düzeltildi): `Agent.budget` taşabilir.** `max_digits=12` (en fazla ~9.99e9). Büyük kapasiteli uzun çalıştırmalarda periyot yazımı hata verir ve çalıştırma FAILED olarak biter. Alan genişletilmeli (migration). runtime_core worker'ı bildirdi.

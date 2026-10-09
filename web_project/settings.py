@@ -54,7 +54,28 @@ _load_dotenv(BASE_DIR / ".env")
 DEBUG = _env_bool("DJANGO_DEBUG", default=False)
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "")
+def _read_secret_file(path: str) -> str:
+    """Return the stripped content of a secret file, or "" when it is unreadable.
+
+    Args:
+        path: File path, empty for no file.
+
+    Returns:
+        The secret, or an empty string.
+    """
+    if not path:
+        return ""
+    try:
+        return Path(path).read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+
+
+# DJANGO_SECRET_KEY_FILE lets the Docker container keep its generated key in a
+# volume, so `manage.py` commands run with `docker compose exec` see it too.
+SECRET_KEY = os.environ.get("DJANGO_SECRET_KEY", "") or _read_secret_file(
+    os.environ.get("DJANGO_SECRET_KEY_FILE", "")
+)
 if not SECRET_KEY:
     if not DEBUG:
         raise ImproperlyConfigured(
@@ -84,6 +105,8 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # Serves the collected static files when DEBUG is off (Docker image).
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -166,6 +189,20 @@ STATICFILES_DIRS = [
     BASE_DIR / "abmem" / "static",
 ]
 
+# Target of ``collectstatic``, set by the Docker image. WhiteNoise serves it
+# when DEBUG is off. Unset (local development) it stays None and runserver
+# serves the files from STATICFILES_DIRS. The compressed storage keeps the
+# original file names, so the template links with a ``?v=`` query keep
+# working.
+STATIC_ROOT = os.environ.get("DJANGO_STATIC_ROOT") or None
+
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedStaticFilesStorage",
+    },
+}
+
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
@@ -185,3 +222,7 @@ ABMEM_HPO_HEARTBEAT_TIMEOUT = float(
 # agent, referenced by PolicyCheckpoint rows. A relative value is resolved
 # against BASE_DIR.
 ABMEM_CHECKPOINT_DIR = BASE_DIR / os.environ.get("ABMEM_CHECKPOINT_DIR", "checkpoints")
+
+# JSON offer export written at the end of every run. Empty keeps the default
+# BASE_DIR / "abm_ddpg" / "sim_data" (see simulation_service._sim_data_dir).
+ABMEM_SIM_DATA_DIR = os.environ.get("ABMEM_SIM_DATA_DIR", "")

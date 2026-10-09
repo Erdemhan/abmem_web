@@ -1,0 +1,143 @@
+# ABMEM scenario export
+# Exported: 2026-10-09T13:02:42+00:00
+# Source scenario id: 529
+format_version: 1
+scenario:
+  name: Mixed
+  mode: ONLYRESULT
+  period_type: HOUR
+  periods: 1440
+  seed: 17081999
+  evaluation_periods: 20
+  observation_lags: [1, 24]
+  demand:
+    day:
+      max: 55000.0
+      min: 30000.0
+      std: 4000.0
+      mean: 42000.0
+      distribution: NORMAL
+    seed: 1
+    night:
+      max: 45000.0
+      min: 25000.0
+      std: 3000.0
+      mean: 34000.0
+      distribution: NORMAL
+    seasons: null
+    version: 1
+    day_end_hour: 20
+    day_start_hour: 8
+    autocorrelation: 0.9
+    evening_ramp_hours: 8
+    morning_ramp_hours: 8
+market:
+  strategy: PAYASBID
+  clearing_algorithm: MERIT_ORDER
+  bid_bounds: [0, 200]
+resources:
+- name: Biofuel
+  energy_type: FOSSIL
+  fuel_cost: 11.76
+  om_cost: 0.57
+  investment_cost: 7.13
+  co2_cost: 0.00
+  emission: 0.00
+- name: CCGT
+  energy_type: FOSSIL
+  fuel_cost: 4.71
+  om_cost: 0.29
+  investment_cost: 4.08
+  co2_cost: 0.00
+  emission: 0.00
+- name: Geothermal
+  energy_type: RENEWABLE
+  fuel_cost: 0.00
+  om_cost: 0.57
+  investment_cost: 7.13
+  co2_cost: 0.00
+  emission: 0.00
+- name: Hydro
+  energy_type: RENEWABLE
+  fuel_cost: 0.00
+  om_cost: 0.29
+  investment_cost: 2.85
+  co2_cost: 0.00
+  emission: 0.00
+- name: Solar
+  energy_type: RENEWABLE
+  fuel_cost: 0.00
+  om_cost: 1.14
+  investment_cost: 19.03
+  co2_cost: 0.00
+  emission: 0.00
+agents:
+- name: SOLAR
+  type: RENEWABLE
+  budget: 0.00
+  algorithm: DDPG
+  algorithm_params: {}
+  failstack:
+    enabled: false
+    limit: 6
+    delta: 15.00
+    min_margin: 0.0000
+  plants:
+  - resource: Solar
+    capacity: 9375
+  library_agent: SOLAR_2
+- name: GEOTHERMAL
+  type: RENEWABLE
+  budget: 0.00
+  algorithm: DDPG
+  algorithm_params: {}
+  failstack:
+    enabled: false
+    limit: 6
+    delta: 15.00
+    min_margin: 0.0000
+  plants:
+  - resource: Geothermal
+    capacity: 9375
+  library_agent: GEOTHERMAL_2
+- name: BIOFUEL
+  type: FOSSIL
+  budget: 0.00
+  algorithm: DDPG
+  algorithm_params: {}
+  failstack:
+    enabled: false
+    limit: 6
+    delta: 15.00
+    min_margin: 0.0000
+  plants:
+  - resource: Biofuel
+    capacity: 9375
+  library_agent: BIOFUEL_2
+- name: HYDRO
+  type: RENEWABLE
+  budget: 0.00
+  algorithm: DDPG
+  algorithm_params: {}
+  failstack:
+    enabled: false
+    limit: 6
+    delta: 15.00
+    min_margin: 0.0000
+  plants:
+  - resource: Hydro
+    capacity: 9375
+  library_agent: HYDRO_2
+- name: CCGT
+  type: FOSSIL
+  budget: 0.00
+  algorithm: DDPG
+  algorithm_params: {}
+  failstack:
+    enabled: false
+    limit: 6
+    delta: 15.00
+    min_margin: 0.0000
+  plants:
+  - resource: CCGT
+    capacity: 12500

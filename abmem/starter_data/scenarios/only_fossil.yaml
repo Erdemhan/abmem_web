@@ -1,0 +1,120 @@
+# ABMEM scenario export
+# Exported: 2026-10-09T13:02:42+00:00
+# Source scenario id: 530
+format_version: 1
+scenario:
+  name: Only Fossil
+  mode: PERIODBYPERIOD
+  period_type: HOUR
+  periods: 336
+  seed: 17081999
+  evaluation_periods: 0
+  observation_lags: [1, 24]
+market:
+  strategy: PAYASBID
+  clearing_algorithm: MERIT_ORDER
+  bid_bounds: [0, 200]
+resources:
+- name: Biofuel
+  energy_type: FOSSIL
+  fuel_cost: 11.76
+  om_cost: 0.57
+  investment_cost: 7.13
+  co2_cost: 0.00
+  emission: 0.00
+- name: CCGT
+  energy_type: FOSSIL
+  fuel_cost: 4.71
+  om_cost: 0.29
+  investment_cost: 4.08
+  co2_cost: 0.00
+  emission: 0.00
+- name: Coal
+  energy_type: FOSSIL
+  fuel_cost: 5.71
+  om_cost: 0.37
+  investment_cost: 4.57
+  co2_cost: 0.00
+  emission: 0.00
+agents:
+- name: CCGT
+  type: FOSSIL
+  budget: 0.00
+  algorithm: DDPG
+  algorithm_params: {}
+  failstack:
+    enabled: false
+    limit: 6
+    delta: 15.00
+    min_margin: 0.0000
+  plants:
+  - resource: CCGT
+    capacity: 12500
+- name: CCGT2
+  type: FOSSIL
+  budget: 0.00
+  algorithm: DDPG
+  algorithm_params: {}
+  failstack:
+    enabled: false
+    limit: 6
+    delta: 15.00
+    min_margin: 0.0000
+  plants:
+  - resource: CCGT
+    capacity: 12500
+  library_agent: CCGT
+- name: COAL
+  type: FOSSIL
+  budget: 0.00
+  algorithm: DDPG
+  algorithm_params: {}
+  failstack:
+    enabled: false
+    limit: 6
+    delta: 15.00
+    min_margin: 0.0000
+  plants:
+  - resource: Coal
+    capacity: 12500
+- name: COAL2
+  type: FOSSIL
+  budget: 0.00
+  algorithm: DDPG
+  algorithm_params: {}
+  failstack:
+    enabled: false
+    limit: 6
+    delta: 15.00
+    min_margin: 0.0000
+  plants:
+  - resource: Coal
+    capacity: 12500
+  library_agent: COAL
+- name: BIOFUEL
+  type: FOSSIL
+  budget: 0.00
+  algorithm: DDPG
+  algorithm_params: {}
+  failstack:
+    enabled: false
+    limit: 6
+    delta: 15.00
+    min_margin: 0.0000
+  plants:
+  - resource: Biofuel
+    capacity: 12500
+- name: BIOFUEL2
+  type: FOSSIL
+  budget: 0.00
+  algorithm: DDPG
+  algorithm_params: {}
+  failstack:
+    enabled: false
+    limit: 6
+    delta: 15.00
+    min_margin: 0.0000
+  plants:
+  - resource: Biofuel
+    capacity: 12500
+  library_agent: BIOFUEL

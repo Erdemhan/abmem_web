@@ -9,7 +9,17 @@ Project documents:
 - `specs/` — module specifications and `EXECUTION_ORDER.md`
 - `FORMULATION.md` — locked formulation and parameter register
 
-## Installation
+## Quick start with Docker
+
+On a computer without Python or PostgreSQL, install Docker Desktop and run
+
+```bash
+docker compose up --build -d
+```
+
+then open http://localhost:8000/. The first start sets up the database and loads the starter scenarios. See `docs/docker.md` for details.
+
+## Installation (development)
 
 Requirements: Python 3.11, PostgreSQL 16 (other recent versions should work).
 

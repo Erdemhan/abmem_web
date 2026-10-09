@@ -76,6 +76,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
+from collections.abc import Iterable
 from typing import Any, Final, Mapping
 
 import yaml
@@ -134,6 +135,8 @@ MARKET_KEYS: Final[tuple[str, ...]] = (
     "bid_bounds",
 )
 MARKET_REQUIRED_KEYS: Final[tuple[str, ...]] = ("strategy", "bid_bounds")
+RESOURCES_KIND: Final[str] = "resources"
+
 RESOURCE_COST_FIELDS: Final[tuple[tuple[str, str], ...]] = (
     ("fuel_cost", "fuelCost"),
     ("om_cost", "omCost"),
@@ -260,6 +263,22 @@ _ExportDumper.add_representer(Decimal, _represent_decimal)
 _ExportDumper.add_representer(list, _represent_list)
 
 
+def resource_document(resource: Resource) -> dict[str, Any]:
+    """Return the document entry of one resource.
+
+    Args:
+        resource: The resource.
+
+    Returns:
+        ``{"name", "energy_type", <cost keys>}`` with Decimal costs.
+    """
+    return {
+        "name": resource.name,
+        "energy_type": EnergyType(resource.energyType).name,
+        **{key: Decimal(getattr(resource, attr)) for key, attr in RESOURCE_COST_FIELDS},
+    }
+
+
 def scenario_document(simulation: Simulation) -> dict[str, Any]:
     """Build the version-1 document of a proxy scenario.
 
@@ -312,14 +331,7 @@ def scenario_document(simulation: Simulation) -> dict[str, Any]:
         if source is not None and source.name != agent.name:
             agents[-1]["library_agent"] = source.name
     resource_docs = [
-        {
-            "name": resource.name,
-            "energy_type": EnergyType(resource.energyType).name,
-            **{
-                key: Decimal(getattr(resource, attr))
-                for key, attr in RESOURCE_COST_FIELDS
-            },
-        }
+        resource_document(resource)
         for resource in sorted(resources.values(), key=lambda r: (r.name.lower(), r.id))
     ]
     return {
@@ -387,6 +399,34 @@ def export_scenario_yaml(simulation: Simulation, *, now: datetime | None = None)
         default_flow_style=False,
     )
     return header + body
+
+
+def export_resources_yaml(resources: Iterable[Resource]) -> str:
+    """Serialise a list of resources as a ``kind: resources`` document.
+
+    The ``resources`` list has the same entries as in a scenario document, so
+    :func:`import_resources` applies the same matching rules.
+
+    Args:
+        resources: Resources to export, written in name order.
+
+    Returns:
+        The YAML text.
+    """
+    ordered = sorted(resources, key=lambda r: (r.name.lower(), r.id))
+    document = {
+        "format_version": FORMAT_VERSION,
+        "kind": RESOURCES_KIND,
+        "resources": [resource_document(resource) for resource in ordered],
+    }
+    body = yaml.dump(
+        document,
+        Dumper=_ExportDumper,
+        sort_keys=False,
+        allow_unicode=True,
+        default_flow_style=False,
+    )
+    return "# ABMEM resource list export\n" + body
 
 
 # ---------------------------------------------------------------- parsing
@@ -1307,6 +1347,54 @@ def apply_import_plan(plan: ImportPlan) -> Simulation:
     for spec in plan.agents:
         library_service.copy_agent(spec.library, market, proxy=True, name=spec.name)
     return simulation
+
+
+def import_resources(document: Any) -> list[Resource]:
+    """Validate a ``kind: resources`` document and create the new resources.
+
+    A resource whose name exists (case-insensitively) with the same values is
+    reused. The same name with different values is an error, as in a
+    scenario import.
+
+    Args:
+        document: Output of ``load_yaml_bytes``.
+
+    Returns:
+        The resources of the document in file order (reused or created).
+
+    Raises:
+        ScenarioImportError: Validation error or conflict (nothing written).
+    """
+    errors = _Errors()
+    mapping = _check_mapping(
+        document,
+        "document",
+        ("format_version", "kind", "resources"),
+        ("format_version", "kind", "resources"),
+        errors,
+    )
+    specs: dict[str, ResourceSpec] = {}
+    if mapping is not None:
+        if mapping.get("format_version") != FORMAT_VERSION:
+            errors.add(
+                "format_version",
+                f"Unsupported format_version {mapping.get('format_version')!r}; "
+                f"expected {FORMAT_VERSION}.",
+            )
+        if mapping.get("kind") != RESOURCES_KIND:
+            errors.add("kind", f"kind must be '{RESOURCES_KIND}'.")
+        specs = _parse_resources(mapping.get("resources"), errors)
+    if errors:
+        raise ScenarioImportError(errors.items)
+    with transaction.atomic():
+        result: list[Resource] = []
+        for spec in sorted(specs.values(), key=lambda item: item.index):
+            if spec.existing is None:
+                spec.existing = Resource.objects.create(
+                    name=spec.name, energyType=spec.energy_type, **spec.costs
+                )
+            result.append(spec.existing)
+    return result
 
 
 def import_scenario(document: Any) -> tuple[ImportPlan, Simulation]:

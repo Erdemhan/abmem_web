@@ -178,3 +178,6 @@ backups/
 
 # Saved policies of finished runs (settings.ABMEM_CHECKPOINT_DIR)
 checkpoints/
+
+# collectstatic output (Docker image builds it inside the container)
+staticfiles/

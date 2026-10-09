@@ -1,0 +1,5 @@
+# Dependencies of the Docker image: the runtime requirements plus the
+# application server. gunicorn does not run on Windows, so it is kept out of
+# requirements.txt.
+-r requirements.txt
+gunicorn==23.0.0

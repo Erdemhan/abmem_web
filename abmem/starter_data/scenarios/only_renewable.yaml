@@ -1,0 +1,126 @@
+# ABMEM scenario export
+# Exported: 2026-10-09T13:02:42+00:00
+# Source scenario id: 531
+format_version: 1
+scenario:
+  name: Only Renewable
+  mode: ONLYRESULT
+  period_type: HOUR
+  periods: 336
+  seed: 17081999
+  evaluation_periods: 0
+  observation_lags: [1, 24]
+market:
+  strategy: PAYASBID
+  clearing_algorithm: MERIT_ORDER
+  bid_bounds: [0, 200]
+resources:
+- name: Geothermal
+  energy_type: RENEWABLE
+  fuel_cost: 0.00
+  om_cost: 0.57
+  investment_cost: 7.13
+  co2_cost: 0.00
+  emission: 0.00
+- name: Hydro
+  energy_type: RENEWABLE
+  fuel_cost: 0.00
+  om_cost: 0.29
+  investment_cost: 2.85
+  co2_cost: 0.00
+  emission: 0.00
+- name: Solar
+  energy_type: RENEWABLE
+  fuel_cost: 0.00
+  om_cost: 1.14
+  investment_cost: 19.03
+  co2_cost: 0.00
+  emission: 0.00
+- name: Wind
+  energy_type: RENEWABLE
+  fuel_cost: 0.00
+  om_cost: 0.61
+  investment_cost: 10.15
+  co2_cost: 0.00
+  emission: 0.00
+agents:
+- name: HYDRO
+  type: RENEWABLE
+  budget: 0.00
+  algorithm: DDPG
+  algorithm_params: {}
+  failstack:
+    enabled: false
+    limit: 6
+    delta: 15.00
+    min_margin: 0.0000
+  plants:
+  - resource: Hydro
+    capacity: 12500
+- name: GEOTHERMAL
+  type: RENEWABLE
+  budget: 0.00
+  algorithm: DDPG
+  algorithm_params: {}
+  failstack:
+    enabled: false
+    limit: 6
+    delta: 15.00
+    min_margin: 0.0000
+  plants:
+  - resource: Geothermal
+    capacity: 12500
+- name: SOLAR
+  type: RENEWABLE
+  budget: 0.00
+  algorithm: DDPG
+  algorithm_params: {}
+  failstack:
+    enabled: false
+    limit: 6
+    delta: 15.00
+    min_margin: 0.0000
+  plants:
+  - resource: Solar
+    capacity: 12500
+- name: SOLAR2
+  type: RENEWABLE
+  budget: 0.00
+  algorithm: DDPG
+  algorithm_params: {}
+  failstack:
+    enabled: false
+    limit: 6
+    delta: 15.00
+    min_margin: 0.0000
+  plants:
+  - resource: Solar
+    capacity: 12500
+  library_agent: SOLAR
+- name: WIND
+  type: RENEWABLE
+  budget: 0.00
+  algorithm: DDPG
+  algorithm_params: {}
+  failstack:
+    enabled: false
+    limit: 6
+    delta: 15.00
+    min_margin: 0.0000
+  plants:
+  - resource: Wind
+    capacity: 12500
+- name: WIND2
+  type: RENEWABLE
+  budget: 0.00
+  algorithm: DDPG
+  algorithm_params: {}
+  failstack:
+    enabled: false
+    limit: 6
+    delta: 15.00
+    min_margin: 0.0000
+  plants:
+  - resource: Wind
+    capacity: 12500
+  library_agent: WIND
