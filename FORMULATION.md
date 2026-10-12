@@ -5,7 +5,7 @@
 > and this file disagree, the code is corrected, not this file.
 >
 > **Status (2026-10-07):** skeleton plus the entries approved by the user on
-> 2026-10-07 (EQ-02, EQ-02b, EQ-02c, experiment principles in section 9, EQ-11a, EQ-11b). All
+> 2026-10-07 and 2026-10-12 (EQ-02, EQ-02b, EQ-02c, experiment principles and EQ-09a in section 9, EQ-11a, EQ-11b). All
 > other sections are still to be formalised. Approved decisions that each section must formalise are
 > listed under "To formalise" with their source (PLAN.md K1-K11,
 > ARCHITECTURE.md section 11 OQ-1..OQ-19).
@@ -79,7 +79,15 @@ To formalise: evaluation window `evaluation_periods` (OQ-5), seeds, repetitions.
 2. The period in which gradient updates start is equalised across algorithms (RDPG needs a full sequence window and PPO a full rollout, so a common start period is set for all), or any remaining difference is reported.
 3. Results are reported over several seeds with confidence intervals.
 
-Still open (user decision required before the experiment): number of seeds, the common start period, scenarios, run length and evaluation window, confidence-interval method.
+### EQ-09a: Common learning start (approved 2026-10-12)
+- Formula: let $t_0$ be the first period with a complete observation (all lags available) and let a transition $(o_{t-1}, a_{t-1}, r_t, o_t)$ be stored once per training period $t > t_0$. Every learning agent $i$ makes its first gradient update after exactly $L$ stored transitions, that is in period $t_0 + L$, with
+  $L = L_{	ext{scenario}}$ if the scenario sets it, otherwise $L = \max_i n_i$,
+  where $n_i$ is the requirement of agent $i$: $n_i = \ell_i$ (`learning_starts`) for DDPG, TD3 and SAC, $n_i = \max(\ell_i, K_i)$ for RDPG with sequence length $K_i$, and $n_i = \max(\ell_i, R_i)$ for PPO with rollout length $R_i$. A scenario value must satisfy $n_i \le L_{	ext{scenario}} \le B_i$ for every learning agent, $B_i$ being the replay buffer capacity (no upper limit for PPO). PPO discards the first $L - R_i$ transitions when $L > R_i$, so its first rollout of $R_i$ transitions completes at the $L$-th transition. Later updates follow each algorithm's own schedule (every period for replay-buffer algorithms, every $R_i$ transitions for PPO).
+- Source: principle 2 of this section. Fixed initial data collection before learning follows the start-up phase of TD3 (Fujimoto, van Hoof and Meger, 2018, Addressing Function Approximation Error in Actor-Critic Methods, ICML, Sec. 6.1). Equal experimental conditions across compared algorithms follow Henderson et al. (2018, Deep Reinforcement Learning that Matters, AAAI, Sec. "Experimental Analysis").
+- Explanation: all learning agents of a run start updating in the same period, and runs of the same scenario use the same $L$ when the scenario sets it, so a comparison of algorithms does not depend on a different amount of pre-learning experience. With default parameters $\ell_i = R_i = 64$ and $K_i = 24$, so $L = 64$ for every algorithm. The transitions PPO discards come from its initial policy, so the first rollout stays on-policy. The value used by a run is recorded in its parameter snapshot.
+- Code: `abmem/services/simulation/context.py::common_learning_starts`, `abmem/services/algorithms/algorithm_config.py::AlgorithmConfig.first_update_transitions`, `learning_starts_limit`, `abmem/services/algorithms/ppo.py::PPOAlgorithm.observe`, `ready_to_learn`, `abmem/models/simulation.py::Simulation.learning_starts`
+
+Still open (user decision required before the experiment): number of seeds, the value of the common learning start if it is not automatic, scenarios, run length and evaluation window, confidence-interval method.
 
 ## 10. Evaluation metrics
 To formalise: agent score and market score definitions (legacy definitions: `docs/legacy_rewards.md`, corrections B9).
