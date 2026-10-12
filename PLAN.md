@@ -284,6 +284,11 @@ Spec: `specs/common_learning_start.json`. Closes the deferred fairness note in s
 - [x] Every learning agent of a run makes its first gradient update after the same number of stored transitions. Optional scenario value `learning_starts`, empty = the largest requirement of the run's learning agents. PPO collects its first rollout so that it completes at the same point.
 - [x] Wizard field, YAML key, analysis display.
 
+### 2.15 HPO target mode (request 15, approved 2026-10-12)
+Spec: `specs/hpo_target_mode.json`. Second option of decision K7.
+- [ ] HPO study setting: all agents run the study algorithm (current) or only the agents that already use it are tuned. In the second mode the agent part of the objective uses only the tuned agents.
+- [ ] Create page: switch, scenario first, algorithm list limited to the scenario's learning algorithms.
+
 ## 4b. Uygulama sırasında çıkan takip işleri
 
 - [x] **B13 (sonradan bulundu, `3b653d9` ile düzeltildi): `Agent.budget` taşabilir.** `max_digits=12` (en fazla ~9.99e9). Büyük kapasiteli uzun çalıştırmalarda periyot yazımı hata verir ve çalıştırma FAILED olarak biter. Alan genişletilmeli (migration). runtime_core worker'ı bildirdi.

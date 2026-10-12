@@ -1,0 +1,42 @@
+{
+  "spec_id": "hpo_target_mode",
+  "title": "HPO target mode: tune all agents as the study algorithm, or only the agents that already use it",
+  "status": "approved",
+  "approval_note": "Requested and approved by the user on 2026-10-12 (PLAN.md 2.15). Adds the second option of decision K7. The agent part of the objective uses only the tuned agents in the new mode (user choice).",
+  "plan_items": ["2.15"],
+  "model": {
+    "field": "HPOStudy.target = CharField(max_length=16, choices ALL / MATCHING, default 'ALL'). Migration 0020. Existing studies are ALL (current behaviour).",
+    "meaning": {
+      "ALL": "Current K7 behaviour: every agent of the cloned scenario runs the study algorithm (forced_algorithm) with the trial parameters.",
+      "MATCHING": "Only the agents whose algorithm_type equals the study algorithm receive the trial parameters (algorithm overrides and searched agent fields such as fail-stack). All other agents run unchanged with their own algorithm and parameters."
+    }
+  },
+  "validation": [
+    "MATCHING requires at least one agent of the scenario with algorithm_type == study algorithm, and the study algorithm must be a learning algorithm. Form error on 'algorithm_type' otherwise.",
+    "ALL keeps the current validation."
+  ],
+  "runtime": [
+    "Worker (abmem/services/hpo/worker.py): with ALL keep forced_algorithm. With MATCHING pass no forced_algorithm and apply algorithm_overrides and searched agent fields only to the matching agents (clone_scenario_for_run and simulation_service.run need an option to restrict overrides to one algorithm key, for example an 'override_algorithm' argument resolved in context.agent_params). The same applies to the final evaluation on held-out seeds and to any re-run of the best parameters.",
+    "The common learning start (PLAN 2.14) keeps working: it is computed over all learning agents of the run."
+  ],
+  "objective": [
+    "score_simulation gains an optional agent filter. With MATCHING the agent score is the mean over the tuned agents only. The market score is unchanged (whole market). With ALL nothing changes.",
+    "The study page shows which agents were tuned."
+  ],
+  "apply_best": "The 'apply best parameters' actions keep their targets (algorithm default or agents). In MATCHING mode, applying to agents applies only to the matching agents of the scenario.",
+  "ui": [
+    "HPO create page: a switch 'Tune only the agents that already use the algorithm' (off = ALL, current behaviour), with a short help text for both modes.",
+    "When the switch is on: the scenario template select comes first, the algorithm select is disabled until a scenario is chosen and then lists only the learning algorithms present in that scenario (with the number of agents using each). Changing the scenario resets an algorithm that is not present. When the switch is off the algorithm select lists every learning algorithm as now.",
+    "The scenario's algorithm list comes from a small JSON endpoint or from data embedded in the page, no duplicated algorithm registry.",
+    "Study list and study page show the mode (All agents / Only matching agents)."
+  ],
+  "docs": "Update ARCHITECTURE.md K7 / section 7.2 and the HPO part of docs if present. FORMULATION.md is not changed (the objective formula is not registered there yet).",
+  "tests": [
+    "Model default ALL, migration applies.",
+    "Create form: MATCHING with a scenario without the algorithm rejected, with it accepted, ALL unchanged.",
+    "Worker MATCHING: only matching agents get the overrides, other agents keep their algorithm and params, no forced algorithm.",
+    "Objective with an agent filter: mean over the filtered agents, market score unchanged.",
+    "Scenario algorithm list endpoint/data: only learning algorithms present, with counts.",
+    "Full suite green, result fingerprint unchanged."
+  ]
+}
