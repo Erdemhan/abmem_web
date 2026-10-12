@@ -511,7 +511,9 @@ def test_status_json_shape_history_scatter_and_progress(scenario: Simulation) ->
     }
     assert data["status"] == "RUNNING"
     # (2 + 1 * 2 * 2 + 0 scouts) * 1 search seed + 1 evaluation seed.
-    assert data["progress"] == {"done": 4, "total": 7}
+    progress = data["progress"]
+    assert (progress["done"], progress["total"]) == (4, 7)
+    assert set(progress) == {"done", "total", "elapsed_seconds", "remaining_seconds"}
     # Iteration 0 best is 2.0 (0 + 2), iteration 1 adds 0.4 (dominated by the first trial), best stays 2.0.
     assert data["history"] == [[0, 2.0], [1, 2.0]]
     assert data["search_best"] == {"score": 2.0, "params": {"gamma": 0.95}}

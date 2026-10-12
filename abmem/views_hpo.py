@@ -19,6 +19,7 @@ import json
 import logging
 import math
 from collections.abc import Iterable, Mapping
+from datetime import datetime
 from typing import Any, Final
 
 from django.core.exceptions import ValidationError
@@ -160,6 +161,42 @@ def _total_trials(study: HPOStudy, n_scout_candidates: int) -> int:
     """
     candidates = study.colony_size * (1 + 2 * study.max_iter) + n_scout_candidates
     return candidates * len(study.search_seeds) + len(study.evaluation_seeds)
+
+
+def hpo_time_estimate(
+    started_at: datetime | None,
+    finished_at: datetime | None,
+    now: datetime,
+    done: int,
+    total: int,
+    *,
+    running: bool,
+) -> tuple[float | None, float | None]:
+    """Return the elapsed and the estimated remaining seconds of a study.
+
+    The remaining time is the mean wall time per finished trial (elapsed time
+    divided by finished trials, so parallel trials are included) times the
+    trials still to run.
+
+    Args:
+        started_at: Start of the study, None before it starts.
+        finished_at: End of the study, None while it runs.
+        now: Current time.
+        done: Finished or failed trials.
+        total: Expected trials.
+        running: True while the study is running.
+
+    Returns:
+        ``(elapsed, remaining)``. ``elapsed`` is None before the start.
+        ``remaining`` is None when the study does not run or no trial has
+        finished yet, and never negative.
+    """
+    if started_at is None:
+        return None, None
+    elapsed = max(((finished_at or now) - started_at).total_seconds(), 0.0)
+    if not running or done <= 0:
+        return elapsed, None
+    return elapsed, elapsed / done * max(total - done, 0)
 
 
 def _candidate_key(row: Mapping[str, Any]) -> tuple[int, int, int, str]:
@@ -305,7 +342,23 @@ def _status_payload(study: HPOStudy) -> dict[str, Any]:
         "started_at": _iso(study.started_at),
         "finished_at": _iso(study.finished_at),
         "heartbeat_at": _iso(study.heartbeat_at),
-        "progress": {"done": done, "total": total},
+        "progress": {
+            "done": done,
+            "total": total,
+            **dict(
+                zip(
+                    ("elapsed_seconds", "remaining_seconds"),
+                    hpo_time_estimate(
+                        study.started_at,
+                        study.finished_at,
+                        timezone.now(),
+                        done,
+                        total,
+                        running=_status_name(study.status, HPOStatus) == "RUNNING",
+                    ),
+                )
+            ),
+        },
         "best_score": _finite_or_none(study.best_score),
         "best_params": study.best_params,
         "search_best": (

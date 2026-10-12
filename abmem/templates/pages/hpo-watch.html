@@ -60,6 +60,7 @@
                   <div class="progress-bar bg-gradient-info" id="hpo-progress-bar" role="progressbar" style="width: 0%; height: 8px;"
                     aria-valuemin="0" aria-valuemax="100"></div>
                 </div>
+                <div class="text-xs text-secondary mt-1" id="hpo-time-text" aria-live="polite"></div>
               </div>
               <div class="text-xs text-secondary mt-2">
                 Colony {{ study.colony_size }}, {{ study.max_iter }} iterations, limit {{ study.limit }} -
@@ -331,6 +332,31 @@
           : data.trials_total + ' trials, newest first. Hover a failed status to see its error.';
       }
 
+      // Human-readable duration, e.g. 3 h 20 min, 12 min, 40 s.
+      function formatDuration(seconds) {
+        var s = Math.round(seconds);
+        if (s < 60) { return s + ' s'; }
+        var m = Math.round(s / 60);
+        if (m < 60) { return m + ' min'; }
+        var h = Math.floor(m / 60), rest = m % 60;
+        if (h < 48) { return h + ' h' + (rest ? ' ' + rest + ' min' : ''); }
+        return Math.floor(h / 24) + ' d ' + (h % 24) + ' h';
+      }
+
+      // Elapsed time and the estimate from the mean wall time per finished trial.
+      function timeText(progress, status) {
+        if (progress.elapsed_seconds === null || progress.elapsed_seconds === undefined) {
+          return status === 'CREATED' ? 'Waiting to start.' : '';
+        }
+        var text = 'Elapsed ' + formatDuration(progress.elapsed_seconds);
+        if (status === 'RUNNING') {
+          text += progress.remaining_seconds === null || progress.remaining_seconds === undefined
+            ? '. The remaining time is estimated after the first finished trial.'
+            : '. About ' + formatDuration(progress.remaining_seconds) + ' left (from the mean time per finished trial).';
+        }
+        return text;
+      }
+
       function render(data) {
         lastStatus = data.status;
         var badge = $('hpo-status');
@@ -340,6 +366,7 @@
         var pct = total > 0 ? Math.min(100, Math.round(100 * done / total)) : 0;
         $('hpo-progress-text').textContent = done + ' / ' + total + ' trials (' + pct + '%)';
         $('hpo-progress-bar').style.width = pct + '%';
+        $('hpo-time-text').textContent = timeText(data.progress, data.status);
         $('hpo-cancel').classList.toggle('d-none', !(ACTIVE.indexOf(data.status) >= 0 && !data.cancel_requested));
         var errorBox = $('hpo-error-box');
         errorBox.classList.toggle('d-none', !data.error);
