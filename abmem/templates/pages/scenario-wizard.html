@@ -125,10 +125,10 @@
                                 <div class="col-12 col-sm-6 col-lg-4">
                                     <label for="periodCount" class="form-label">Number of periods</label>
                                     <!-- periodNumber holds the stored value in hours: count x hours of the unit. -->
-                                    <div class="input-group">
-                                        <input type="number" id="periodCount" class="form-control" min="1" step="1"
+                                    <div class="d-flex gap-2 align-items-start">
+                                        <input type="number" id="periodCount" class="form-control flex-grow-1" min="1" step="1"
                                             value="{{ run_period_count }}" aria-describedby="periodNumber-hint periodNumber-feedback" required>
-                                        <select class="form-control" id="periodUnit" aria-label="Duration unit">
+                                        <select class="form-control w-auto flex-shrink-0" id="periodUnit" aria-label="Duration unit">
                                             {% for key, label, hours in period_units %}
                                             <option value="{{ key }}" data-hours="{{ hours }}" {% if key == run_period_unit %}selected{% endif %}>{{ label }}</option>
                                             {% endfor %}
@@ -1578,8 +1578,11 @@
                 var result = state.learningResult;
                 if (!result) { return { text: '', tone: 'muted' }; }
                 if (result.value === null) { return { text: 'No learning agents.', tone: 'muted' }; }
-                var text = 'Learning starts in period ' + result.first_period + ' ('
-                    + (result.automatic ? 'automatic' : 'set') + ': ' + result.value + ' transitions).';
+                // first_period = t0 + L, t0 = longest lag + 1 (first period with a complete observation).
+                var observed = result.first_period - result.value;
+                var text = 'Learning starts in period ' + result.first_period + ' = ' + observed
+                    + ' (first period with all ' + (observed - 1) + ' h of lagged prices) + '
+                    + result.value + ' transitions (' + (result.automatic ? 'automatic' : 'set on the scenario') + ').';
                 var warning = learningWarning(result);
                 return warning ? { text: text + ' ' + warning, tone: 'warning' } : { text: text, tone: 'muted' };
             }
