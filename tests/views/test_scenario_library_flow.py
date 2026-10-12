@@ -261,13 +261,26 @@ def test_edited_library_entry_is_saved_with_the_edited_values(
     assert edited.algorithm_type == "TD3"
     assert (edited.failstack_limit, edited.failstack_delta) == (5, Decimal("2.5"))
     assert _plants(edited) == [(fossil.id, 200)]
-    assert edited.algorithm_params == lib_a.algorithm_params
+    # PPO parameters of the library agent do not apply to TD3, they are cleared.
+    assert edited.algorithm_params == {}
     lib_a.refresh_from_db()
     assert (
         {field: getattr(lib_a, field) for field in COPIED_AGENT_FIELDS},
         _plants(lib_a),
     ) == library_before
     assert Agent.objects.filter(market__isnull=True).count() == 1
+
+
+def test_edited_library_entry_keeps_params_for_the_same_algorithm(
+    client: Client, fossil: Resource, coal: Resource
+) -> None:
+    lib_a = _library_agent(coal)
+    simulation = _scenario(
+        client, [_edited_library_entry(lib_a, fossil, algorithm_type="PPO")]
+    )
+    (edited,) = simulation.market.agent_set.all()
+    assert edited.algorithm_type == "PPO"
+    assert edited.algorithm_params == lib_a.algorithm_params
 
 
 @pytest.mark.parametrize(
@@ -506,7 +519,8 @@ def test_update_keeps_edits_adds_and_removes(
     assert (edited.failstack_enabled, edited.failstack_limit) == (False, 2)
     assert edited.budget == Decimal("42")
     assert _plants(edited) == [(coal.id, 11)]
-    assert edited.algorithm_params == {"actor_lr": 0.001}
+    # The algorithm changed from PPO to RDPG, so the PPO parameters are cleared.
+    assert edited.algorithm_params == {}
     _assert_copy(agents["LibC"], lib_c)
     assert agents["Fresh"].source == Agent.objects.get(
         name="Fresh", market__isnull=True

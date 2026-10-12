@@ -824,8 +824,10 @@ def _entry_error(entry: ScenarioAgentEntry, exc: ValidationError) -> ValidationE
 def _update_scenario_agent(agent: Agent, data: AgentInput) -> None:
     """Update a kept scenario agent in place and replace its plants.
 
-    The agent's ``source``, ``algorithm_params`` and portfolio row are kept.
-    The library agent it was copied from is not changed.
+    The agent's ``source`` and portfolio row are kept. ``algorithm_params``
+    are kept when the algorithm stays the same and cleared when it changes,
+    because they belong to the previous algorithm and the form does not edit
+    them. The library agent it was copied from is not changed.
 
     Args:
         agent: Agent of the edited scenario.
@@ -835,6 +837,8 @@ def _update_scenario_agent(agent: Agent, data: AgentInput) -> None:
         ValidationError: Field validation failed or the name is already used
             in the scenario (database constraint).
     """
+    if str(agent.algorithm_type) != str(data.algorithm_type):
+        agent.algorithm_params = {}
     agent.name = data.name
     agent.budget = data.budget
     agent.type = data.type
