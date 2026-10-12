@@ -148,15 +148,10 @@ class PPOAlgorithm(BaseAgentAlgorithm):
 
         Raises:
             TypeError: If an argument has the wrong type.
-            ValueError: If ``learning_starts`` exceeds ``rollout_length``. The
-                rollout buffer could then never reach ``learning_starts``.
         """
         super().__init__(spec, config, rng)
-        if config.learning_starts > config.rollout_length:
-            raise ValueError(
-                f"learning_starts ({config.learning_starts}) must be <= "
-                f"rollout_length ({config.rollout_length}) for PPO"
-            )
+        # Transitions passed to observe, stored or dropped (PLAN 2.14).
+        self._seen = 0
         self.policy = TanhGaussianPolicy(
             spec.obs_dim, spec.action_dim, config.hidden_sizes, config.initial_log_std
         ).to(self.device)
@@ -255,13 +250,22 @@ class PPOAlgorithm(BaseAgentAlgorithm):
         """
         if self._frozen:
             return
+        seen = self._seen
+        self._seen += 1
+        # With learning_starts > rollout_length, the oldest pre-learning
+        # transitions are dropped so that the first rollout is complete after
+        # exactly learning_starts transitions, like the first update of the
+        # replay-buffer algorithms (PLAN 2.14). They come from the initial
+        # policy, so the stored rollout stays on-policy.
+        if seen < self.config.learning_starts - self.config.rollout_length:
+            return
         super().observe(transition)
         self._last_next_obs = transition.next_obs.copy()
 
     @property
     def ready_to_learn(self) -> bool:
-        """True when the rollout is complete and holds ``learning_starts`` steps."""
-        return self.buffer.full() and len(self.buffer) >= self.config.learning_starts
+        """True when the rollout is complete and ``learning_starts`` steps were seen."""
+        return self.buffer.full() and self._seen >= self.config.learning_starts
 
     def compute_advantages(self) -> tuple[np.ndarray, np.ndarray]:
         """GAE advantages and returns of the stored rollout (Schulman et al., 2016).

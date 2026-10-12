@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import enum
 from collections import defaultdict
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Final
@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from abmem.models import Agent, Market, Simulation
     from abmem.models import PolicyCheckpoint
     from abmem.models.models import Period, Plant
+    from abmem.services.algorithms.algorithm_config import AlgorithmConfig
     from abmem.services.algorithms.base import PolicySpec
     from abmem.services.algorithms.base import ActionResult, BaseAgentAlgorithm
     from abmem.services.market.clearing_algorithms.base import BaseClearingAlgorithm
@@ -144,6 +145,45 @@ def agent_params(
     if algorithm_overrides is not None:
         params.update(algorithm_overrides)
     return params
+
+
+def common_learning_starts(
+    explicit: int | None, learners: Sequence[tuple[str, AlgorithmConfig]]
+) -> int | None:
+    """Return the common learning start of a run's learning agents (PLAN 2.14).
+
+    Args:
+        explicit: ``Simulation.learning_starts``, None for automatic.
+        learners: ``(label, resolved config)`` of every learning agent, the
+            label being ``"<agent name> (<algorithm key>)"``.
+
+    Returns:
+        ``explicit``, or the largest ``first_update_transitions()`` of the
+        learners. None when the run has no learning agent.
+
+    Raises:
+        SimulationValidationError: ``explicit`` is below the requirement or
+            above the reachable limit of a learning agent.
+    """
+    if not learners:
+        return None
+    if explicit is None:
+        return max(config.first_update_transitions() for _, config in learners)
+    value = int(explicit)
+    for name, config in learners:
+        needed = config.first_update_transitions()
+        if value < needed:
+            raise SimulationValidationError(
+                f"learning start {value} is below the requirement of agent "
+                f"{name}: {needed} transitions"
+            )
+        limit = config.learning_starts_limit()
+        if limit is not None and value > limit:
+            raise SimulationValidationError(
+                f"learning start {value} exceeds the buffer size of agent "
+                f"{name}: {limit} transitions"
+            )
+    return value
 
 
 def policy_spec_for(
@@ -488,7 +528,9 @@ class SimulationContext:
             demand_mean=demand_mean,
             demand_std=demand_std,
         )
-        states: list[AgentRuntimeState] = []
+        # Pass 1: resolve every agent's algorithm and parameters. Pass 2 sets the
+        # common learning start (PLAN 2.14) and builds the policies.
+        resolved: list[tuple[Agent, np.random.Generator, tuple[Plant, ...], Decimal, str, dict[str, Any]]] = []
         for agent, rng in zip(agents, rngs):
             plants = tuple(plants_by_agent.get(agent.pk, ()))
             if not plants:
@@ -514,6 +556,25 @@ class SimulationContext:
                     f"{[info.key for info in registry.available_algorithms()]}"
                 )
             params = agent_params(agent, algorithm_type, defaults, algorithm_overrides)
+            resolved.append((agent, rng, plants, total_capacity, algorithm_type, params))
+
+        learners: list[tuple[str, AlgorithmConfig]] = []
+        for agent, _, _, _, algorithm_type, params in resolved:
+            if registry.is_baseline(algorithm_type):
+                continue
+            try:
+                config = registry.get_config_class(algorithm_type).from_dict(params)
+            except (KeyError, TypeError, ValueError) as error:
+                raise SimulationValidationError(
+                    f"agent {agent.name!r} ({algorithm_type}): {error}"
+                ) from error
+            learners.append((f"{agent.name!r} ({algorithm_type})", config))
+        learning_starts = common_learning_starts(simulation.learning_starts, learners)
+
+        states: list[AgentRuntimeState] = []
+        for agent, rng, plants, total_capacity, algorithm_type, params in resolved:
+            if learning_starts is not None and not registry.is_baseline(algorithm_type):
+                params = {**params, "learning_starts": learning_starts}
             spec = policy_spec_for(plants, lags, low, high)
             try:
                 policy = registry.build_policy(algorithm_type, spec, params, rng)

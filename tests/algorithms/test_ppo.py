@@ -86,9 +86,25 @@ def test_default_config_is_valid() -> None:
     assert policy.buffer.length == 64
 
 
-def test_learning_starts_above_rollout_length_rejected() -> None:
-    with pytest.raises(ValueError, match="rollout_length"):
-        make_policy(learning_starts=32, rollout_length=16)
+def test_learning_starts_above_rollout_length_delays_the_first_rollout() -> None:
+    # PLAN 2.14: the first 16 of 32 transitions are dropped, so the first
+    # rollout is complete after exactly learning_starts transitions.
+    policy = make_policy(learning_starts=32, rollout_length=16)
+    fill_rollout(policy, n=31)
+    assert len(policy.buffer) == 15
+    assert not policy.ready_to_learn
+    fill_rollout(policy, n=1, seed=2)
+    assert policy.buffer.full()
+    assert policy.ready_to_learn
+    assert policy.update() is not None
+
+
+def test_learning_starts_below_rollout_length_waits_for_the_rollout() -> None:
+    policy = make_policy(learning_starts=8, batch_size=8, rollout_length=16)
+    fill_rollout(policy, n=15)
+    assert not policy.ready_to_learn
+    fill_rollout(policy, n=1, seed=2)
+    assert policy.ready_to_learn
 
 
 def test_no_legacy_mechanisms() -> None:

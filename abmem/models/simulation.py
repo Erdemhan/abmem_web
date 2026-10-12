@@ -45,6 +45,10 @@ class Simulation(Base):
     ``demand_profile_source`` (PLAN 2.9) is the library profile the stored
     copy came from, for information only. Runs never read it, and editing
     the library profile does not change the scenario.
+
+    ``learning_starts`` (PLAN 2.14) is the common number of stored
+    transitions before the first gradient update of every learning agent.
+    NULL means the largest requirement of the run's learning agents.
     """
 
     name = models.CharField(max_length=20, null=False)
@@ -74,6 +78,7 @@ class Simulation(Base):
     )
     freeze_policies = models.BooleanField(default=False)
     demand_profile = models.JSONField(null=True, blank=True)
+    learning_starts = models.PositiveIntegerField(null=True, blank=True)
     demand_profile_source = models.ForeignKey(
         DemandProfileTemplate,
         on_delete=models.SET_NULL,
@@ -97,6 +102,10 @@ class Simulation(Base):
                 check=Q(evaluation_periods=0)
                 | Q(evaluation_periods__lt=F("periodNumber")),
                 name="simulation_evaluation_periods_lt_period_number",
+            ),
+            CheckConstraint(
+                check=Q(learning_starts__isnull=True) | Q(learning_starts__gte=1),
+                name="simulation_learning_starts_positive",
             ),
         ]
 

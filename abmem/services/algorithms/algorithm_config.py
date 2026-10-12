@@ -161,6 +161,24 @@ class AlgorithmConfig:
                 raise TypeError(f"unsupported field type for {f.name}: {hint!r}")
             object.__setattr__(self, f.name, coerced)
 
+    def first_update_transitions(self) -> int:
+        """Return the stored transitions needed before the first update (PLAN 2.14).
+
+        Returns:
+            ``learning_starts`` for replay-buffer algorithms. Subclasses with
+            further conditions (sequence windows, full rollouts) override it.
+        """
+        return int(self.learning_starts)
+
+    def learning_starts_limit(self) -> int | None:
+        """Return the largest reachable ``learning_starts`` (PLAN 2.14).
+
+        Returns:
+            ``buffer_size``, because a replay buffer never holds more
+            transitions. None when there is no such limit.
+        """
+        return int(self.buffer_size)
+
     def _validate(self) -> None:
         """Validate value ranges. Subclasses extend this and call super()."""
         _require(0.0 < self.gamma < 1.0, f"gamma must be in (0, 1), got {self.gamma}")
@@ -410,6 +428,19 @@ class PPOConfig(AlgorithmConfig):
     value_coef: float = 0.5
     initial_log_std: float = 0.0
 
+    def first_update_transitions(self) -> int:
+        """Return ``max(learning_starts, rollout_length)``.
+
+        The first update needs a complete rollout. With ``learning_starts``
+        above ``rollout_length`` the first rollout is collected so that it
+        completes after ``learning_starts`` transitions (PLAN 2.14).
+        """
+        return max(int(self.learning_starts), int(self.rollout_length))
+
+    def learning_starts_limit(self) -> int | None:
+        """Return None. PPO drops the oldest pre-learning transitions instead."""
+        return None
+
     def _validate(self) -> None:
         """Validate PPO ranges in addition to the common ranges."""
         super()._validate()
@@ -462,6 +493,10 @@ class RDPGConfig(AlgorithmConfig):
 
     seq_len: int = 24
     lstm_hidden: int = 64
+
+    def first_update_transitions(self) -> int:
+        """Return ``max(learning_starts, seq_len)``, a full window is needed too."""
+        return max(int(self.learning_starts), int(self.seq_len))
 
     def _validate(self) -> None:
         """Validate RDPG ranges in addition to the common ranges."""
