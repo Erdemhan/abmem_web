@@ -9,6 +9,7 @@ HTTP 400 ``{"errors": {...}}``.
 from __future__ import annotations
 
 import json
+import re
 from decimal import Decimal
 from typing import Any
 
@@ -745,3 +746,41 @@ def test_run_start_error_deletes_the_run(
     assert Simulation.objects.filter(proxy=False).count() == 0
     assert Agent.objects.filter(proxy=False).count() == 0
     assert simulation.market.agent_set.count() == 1
+
+
+def test_differs_from_source_flags_only_configuration_changes(
+    client: Client, fossil: Resource, coal: Resource
+) -> None:
+    from abmem.services.agent.library_service import differs_from_source
+
+    lib_a = _library_agent(coal)
+    simulation = _scenario(
+        client,
+        [
+            _library_entry(lib_a),
+            _edited_library_entry(lib_a, fossil),
+        ],
+    )
+    unedited, edited = simulation.market.agent_set.order_by("id")
+    assert differs_from_source(unedited) is False
+    assert differs_from_source(edited) is True
+    unedited.name = "Renamed"
+    unedited.save(update_fields=["name"])
+    assert differs_from_source(unedited) is False
+    standalone = Agent.objects.filter(market__isnull=True).first()
+    assert differs_from_source(standalone) is False
+
+
+def test_wizard_marks_saved_edited_copies(
+    client: Client, fossil: Resource, coal: Resource
+) -> None:
+    lib_a = _library_agent(coal)
+    simulation = _scenario(
+        client, [_library_entry(lib_a), _edited_library_entry(lib_a, fossil)]
+    )
+    html = client.get(reverse("update_simulation", args=[simulation.id])).content.decode()
+    match = re.search(r'<script id="wizard-config" type="application/json">(.*?)</script>', html, re.S)
+    assert match
+    agents = json.loads(match.group(1))["initial"]["agents"]
+    flags = {agent["name"]: agent["edited"] for agent in agents}
+    assert flags == {"LibA": False, "Edited": True}

@@ -2187,6 +2187,7 @@ def _scenario_agent_payload(agent: Agent) -> dict[str, Any]:
         agent_id=agent.id,
         source_id=agent.source_id,
         source_name=agent.source.name if agent.source is not None else "",
+        edited=library_service.differs_from_source(agent),
     )
     return payload
 

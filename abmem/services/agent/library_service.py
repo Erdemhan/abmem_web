@@ -31,6 +31,7 @@ HTTP 400.
 from __future__ import annotations
 
 import copy
+from collections import Counter
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, Final, Iterable, Mapping
@@ -620,6 +621,42 @@ def free_agent_name(base: str, taken: Iterable[str]) -> str:
 
 
 @transaction.atomic
+def differs_from_source(agent: Agent) -> bool:
+    """Return True when a copy's configuration differs from its library agent.
+
+    Compares every field of ``COPIED_AGENT_FIELDS`` except ``name`` and the
+    plants (resource and capacity, order ignored).
+
+    Args:
+        agent: Scenario or run agent.
+
+    Returns:
+        False when the agent has no library source or matches it.
+    """
+    source = agent.source
+    if source is None:
+        return False
+    for field in COPIED_AGENT_FIELDS:
+        if field == "name":
+            continue
+        mine, theirs = getattr(agent, field), getattr(source, field)
+        if field == "algorithm_params":
+            mine, theirs = dict(mine or {}), dict(theirs or {})
+        elif field in {"type", "algorithm_type"}:
+            mine, theirs = str(getattr(mine, "value", mine)), str(getattr(theirs, "value", theirs))
+        if mine != theirs:
+            return True
+
+    def plants(owner: Agent) -> Counter[tuple[int, int]]:
+        return Counter(
+            Plant.objects.filter(portfolio__agent=owner).values_list(
+                "resource_id", "capacity"
+            )
+        )
+
+    return plants(agent) != plants(source)
+
+
 def copy_agent(
     src: Agent, market: Market, *, proxy: bool, name: str | None = None
 ) -> Agent:

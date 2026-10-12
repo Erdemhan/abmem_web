@@ -688,6 +688,8 @@
                     agent_id: mode === 'scenario' ? agent.agent_id : null,
                     source_id: mode === 'library' ? agent.id : (agent.source_id || null),
                     source_name: mode === 'library' ? agent.name : (agent.source_name || ''),
+                    // Saved copy that differs from its library agent (server flag).
+                    edited: mode === 'scenario' ? Boolean(agent.edited) : false,
                     name: agent.name,
                     type: String(agent.type),
                     budget: String(agent.budget),
@@ -842,10 +844,10 @@
 
             function originText(row) {
                 if (row.mode === 'new') { return 'New, added to the library on save'; }
-                if (row.mode === 'library') {
-                    return row.edited ? 'Edited copy of library agent ' + row.source_name : 'From library';
+                if (row.source_id) {
+                    return (row.edited ? 'Edited copy of library agent ' : 'Copy of library agent ') + row.source_name;
                 }
-                return row.source_id ? 'Copy of library agent ' + row.source_name : 'Not linked to a library agent';
+                return 'Not linked to a library agent';
             }
 
             // Number of rows per library agent id (library rows and kept scenario copies).
@@ -1122,7 +1124,7 @@
                     row.algorithm_type = values.algorithm_type;
                     row.failstack = values.failstack;
                     row.plants = values.plants;
-                    if (row.mode === 'library') { row.edited = true; }
+                    if (row.mode === 'library' || row.mode === 'scenario') { row.edited = true; }
                     delete state.rowErrors[row.key];
                 } else {
                     state.agents.push({
