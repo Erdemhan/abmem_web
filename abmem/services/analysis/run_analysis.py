@@ -143,6 +143,12 @@ class RunSettings:
         effective_clearing_params: Parameters the clearing algorithm actually
             used (PLAN 2.12), None for runs started before the snapshot
             existed.
+        learning_starts: Common learning start of the learning agents in
+            stored transitions, read from the parameter snapshot of a
+            learning agent (PLAN 2.14). None when the run has no learning
+            agent or no snapshot records it.
+        learning_starts_automatic: True when the scenario left the learning
+            start automatic, False when it set the value.
     """
 
     simulation_id: int
@@ -162,6 +168,30 @@ class RunSettings:
     clearing_algorithm: str = ""
     clearing_algorithm_label: str = ""
     effective_clearing_params: dict[str, Any] | None = None
+    learning_starts: int | None = None
+    learning_starts_automatic: bool = True
+
+
+def _effective_learning_starts(agent_settings: list[AgentSetting]) -> int | None:
+    """Return the learning start recorded in a learning agent's snapshot.
+
+    Every learning agent of a run uses the same learning start (PLAN 2.14),
+    so the first learning agent whose snapshot records it gives the value.
+
+    Args:
+        agent_settings: Agent settings of the run.
+
+    Returns:
+        The learning start in stored transitions, or None when no learning
+        agent has a snapshot with ``learning_starts``.
+    """
+    for setting in agent_settings:
+        if setting.baseline or not setting.effective_params:
+            continue
+        value = setting.effective_params.get("learning_starts")
+        if isinstance(value, int) and not isinstance(value, bool):
+            return value
+    return None
 
 
 @dataclass(frozen=True)
@@ -741,6 +771,8 @@ def build_run_analysis(simulation: Simulation) -> RunAnalysis:
         agents=agent_settings,
         warm_start_from=simulation.warm_start_from_id,
         freeze_policies=bool(simulation.freeze_policies),
+        learning_starts=_effective_learning_starts(agent_settings),
+        learning_starts_automatic=simulation.learning_starts is None,
         checkpoints=[
             CheckpointSetting(
                 agent=checkpoint.agent.name if checkpoint.agent is not None else "",

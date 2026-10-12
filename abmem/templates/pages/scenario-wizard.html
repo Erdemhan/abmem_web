@@ -190,6 +190,17 @@
                                     <div class="invalid-feedback" id="evaluation_periods-feedback"></div>
                                 </div>
                                 <div class="col-12 col-md-6 col-lg-4 mb-3">
+                                    <label for="learning_starts" class="form-label">Learning start (transitions)
+                                        <button type="button" class="btn btn-link p-0 ms-1 mb-0 info-tip" data-bs-toggle="tooltip"
+                                            title="Every learning agent makes its first update after this many stored transitions. Empty: the largest requirement of the agents (64 with default settings)."
+                                            aria-label="Help: learning start"><i class="fas fa-circle-info" aria-hidden="true"></i></button>
+                                    </label>
+                                    <input type="number" id="learning_starts" class="form-control" min="1" step="1"
+                                        value="{{ run_learning_starts|default_if_none:'' }}" placeholder="Automatic"
+                                        aria-describedby="learning_starts-feedback">
+                                    <div class="invalid-feedback" id="learning_starts-feedback"></div>
+                                </div>
+                                <div class="col-12 col-md-6 col-lg-4 mb-3">
                                     <label for="observation_lags" class="form-label">Observation lags (hours)
                                         <button type="button" class="btn btn-link p-0 ms-1 mb-0 info-tip" data-bs-toggle="tooltip"
                                             title="Past market clearing prices an agent observes, in hours before the current period. 1, 24 = the previous hour and the same hour of the previous day; 168 adds the same hour of the previous week."
@@ -468,16 +479,16 @@
             var PRESETS = ['24', '168', '336'];
             var FIELD_STEP = {
                 simulation_name: 0, periodNumber: 0, periodType: 0, simulationMode: 0,
-                seed: 0, evaluation_periods: 0, observation_lags: 0,
+                seed: 0, evaluation_periods: 0, learning_starts: 0, observation_lags: 0,
                 strategy: 1, clearing_algorithm: 1, clearing_params: 1, lowerBound: 1, upperBound: 1
             };
             var STEP_FIELDS = [
-                ['simulation_name', 'periodNumber', 'simulationMode', 'seed', 'evaluation_periods', 'observation_lags'],
+                ['simulation_name', 'periodNumber', 'simulationMode', 'seed', 'evaluation_periods', 'learning_starts', 'observation_lags'],
                 ['strategy', 'clearing_algorithm', 'clearing_params', 'lowerBound', 'upperBound'],
                 ['agents'],
                 []
             ];
-            var ADVANCED_FIELDS = ['seed', 'evaluation_periods', 'observation_lags', 'demand_profile'];
+            var ADVANCED_FIELDS = ['seed', 'evaluation_periods', 'learning_starts', 'observation_lags', 'demand_profile'];
             // Demand-profile component (static assets/js/demand-profile.js, PLAN 2.8).
             var demandLibrary = (CONFIG.demand_library || []).slice();
             var demandForm = DemandProfileForm.init(document.getElementById('demand-component'), {
@@ -568,6 +579,7 @@
                     upperBound: byId('upperBound').value.trim(),
                     seed: byId('seed').value.trim(),
                     evaluation_periods: byId('evaluation_periods').value.trim(),
+                    learning_starts: byId('learning_starts').value.trim(),
                     observation_lags: byId('observation_lags').value.split(',').map(Number),
                     demand_profile: demandForm.getProfile(),
                     demand_profile_source: demandForm.getLibraryId()
@@ -586,6 +598,7 @@
                 byId('upperBound').value = values.upperBound;
                 byId('seed').value = values.seed;
                 byId('evaluation_periods').value = values.evaluation_periods;
+                byId('learning_starts').value = values.learning_starts == null ? '' : values.learning_starts;
                 var lags = (values.observation_lags || []).join(',');
                 if (Array.prototype.some.call(byId('observation_lags').options, function (o) { return o.value === lags; })) {
                     byId('observation_lags').value = lags;
@@ -1237,6 +1250,10 @@
                         errors.evaluation_periods = 'Evaluation periods must be less than the number of periods ('
                             + values.periodNumber + ').';
                     }
+                    if (values.learning_starts !== ''
+                        && (!isNonNegativeInt(values.learning_starts) || Number(values.learning_starts) < 1)) {
+                        errors.learning_starts = 'Learning start must be empty (automatic) or a positive integer.';
+                    }
                     var demandErrors = demandForm.validate();
                     if (Object.keys(demandErrors).length > 0) { errors.demand_profile = demandErrors; }
                 } else if (step === 1) {
@@ -1415,6 +1432,8 @@
                 addReviewItem(basics, 'Mode', MODE_LABELS[values.simulationMode] || '-');
                 addReviewItem(basics, 'Seed', values.seed);
                 addReviewItem(basics, 'Evaluation periods', values.evaluation_periods);
+                addReviewItem(basics, 'Learning start',
+                    values.learning_starts === '' ? 'Automatic' : values.learning_starts + ' transitions');
                 addReviewItem(basics, 'Observation lags', values.observation_lags.join(', ') + ' h');
                 addReviewItem(basics, 'Demand', demandText(values.demand_profile, values.demand_profile_source));
                 var market = byId('review-market');

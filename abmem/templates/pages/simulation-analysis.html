@@ -672,6 +672,14 @@
 
       // ---- Tables --------------------------------------------------------
 
+      function learningStartText(s) {
+        if (s.learning_starts === null || s.learning_starts === undefined) {
+          return s.agents.some(function (a) { return !a.baseline; }) ? 'Not recorded' : '- (no learning agents)';
+        }
+        return s.learning_starts + ' transitions ('
+          + (s.learning_starts_automatic ? 'automatic' : 'set on the scenario') + ')';
+      }
+
       function settingsTable() {
         var s = data.settings;
         var body = $('an-settings');
@@ -682,6 +690,7 @@
           ['Bid bounds (USD/MWh)', s.lower_bound + ' - ' + s.upper_bound],
           ['Observation lags', s.observation_lags.join(', ')],
           ['Evaluation periods', s.evaluation_periods ? String(s.evaluation_periods) : '0 (no evaluation window)'],
+          ['Learning start', learningStartText(s)],
           ['Initial policies', s.warm_start_from
             ? 'Run #' + s.warm_start_from + (s.freeze_policies ? ' (evaluate only, no learning)' : '')
             : 'Fresh (untrained)']

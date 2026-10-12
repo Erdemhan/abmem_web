@@ -4,7 +4,7 @@ File format, version 1 (exact keys)::
 
     format_version: 1
     scenario: {name, mode, period_type, periods, seed, evaluation_periods,
-               observation_lags, demand}
+               learning_starts, observation_lags, demand}
     market: {strategy, clearing_algorithm, clearing_params: {}, bid_bounds: [low, high]}
     resources: [{name, energy_type, fuel_cost, om_cost, investment_cost,
                  co2_cost, emission}]
@@ -38,6 +38,11 @@ writes it when the scenario is linked to a library profile. Import links the
 new scenario to the library profile of that name only when its settings
 equal ``scenario.demand``. An unknown name or different settings are
 ignored, ``scenario.demand`` is always the profile that is stored.
+
+``scenario.learning_starts`` is optional (PLAN 2.14): the common learning
+start of the learning agents in stored transitions, a positive integer.
+Absent or null means the automatic value. Export writes it only when the
+scenario sets it.
 
 Enum values are written as member names (``ONLYRESULT``, ``FOSSIL``, ...).
 Decimal values are written as plain YAML numbers when a float holds them
@@ -123,6 +128,7 @@ SCENARIO_KEYS: Final[tuple[str, ...]] = (
     "periods",
     "seed",
     "evaluation_periods",
+    "learning_starts",
     "observation_lags",
     "demand",
     "demand_profile",
@@ -171,6 +177,7 @@ _WIZARD_KEYS: Final[Mapping[str, str]] = {
     "periodNumber": "scenario.periods",
     "seed": "scenario.seed",
     "evaluation_periods": "scenario.evaluation_periods",
+    "learning_starts": "scenario.learning_starts",
     "observation_lags": "scenario.observation_lags",
     "strategy": "market.strategy",
     "clearing_algorithm": "market.clearing_algorithm",
@@ -343,6 +350,11 @@ def scenario_document(simulation: Simulation) -> dict[str, Any]:
             "periods": int(simulation.periodNumber),
             "seed": int(simulation.seed),
             "evaluation_periods": int(simulation.evaluation_periods),
+            **(
+                {"learning_starts": int(simulation.learning_starts)}
+                if simulation.learning_starts is not None
+                else {}
+            ),
             "observation_lags": [int(lag) for lag in simulation.observation_lags],
             **(
                 {"demand": copy.deepcopy(simulation.demand_profile)}
@@ -700,7 +712,7 @@ class ImportPlan:
     Attributes:
         header: Scenario name, mode, period type, strategy and bid bounds.
         period_number: Number of periods.
-        run_settings: Seed, evaluation periods, observation lags.
+        run_settings: Seed, evaluation periods, learning start, observation lags.
         resources: Resource specs in file order.
         agents: Agent specs in file order.
     """
@@ -726,6 +738,7 @@ class ImportPlan:
                 "periods": self.period_number,
                 "seed": self.run_settings.seed,
                 "evaluation_periods": self.run_settings.evaluation_periods,
+                "learning_starts": self.run_settings.learning_starts,
                 "observation_lags": list(self.run_settings.observation_lags),
                 "demand": self.run_settings.demand_profile,
                 "demand_profile": _library_profile_name(
@@ -857,7 +870,7 @@ def _parse_header(document: dict[str, Any], errors: _Errors) -> tuple[Any, int |
         "simulation_name": scenario.get("name"),
         "periodNumber": scenario.get("periods"),
     }
-    for key in ("seed", "evaluation_periods", "observation_lags"):
+    for key in ("seed", "evaluation_periods", "learning_starts", "observation_lags"):
         if key in scenario:
             payload[key] = scenario[key]
     if "demand" in scenario:

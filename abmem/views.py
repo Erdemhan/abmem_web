@@ -898,6 +898,8 @@ class RunSettings:
             (PLAN 2.8).
         demand_profile_source_id: Id of the library profile the stored copy
             came from (PLAN 2.9), None for the file or a generated profile.
+        learning_starts: Common learning start of the learning agents in
+            stored transitions (PLAN 2.14), None for the automatic value.
     """
 
     seed: int
@@ -905,6 +907,7 @@ class RunSettings:
     observation_lags: list[int]
     demand_profile: dict[str, Any] | None = None
     demand_profile_source_id: int | None = None
+    learning_starts: int | None = None
 
     def apply(self, simulation: Simulation) -> None:
         """Set the settings on a simulation (the caller saves it).
@@ -914,6 +917,7 @@ class RunSettings:
         """
         simulation.seed = self.seed
         simulation.evaluation_periods = self.evaluation_periods
+        simulation.learning_starts = self.learning_starts
         simulation.observation_lags = list(self.observation_lags)
         simulation.demand_profile = (
             None if self.demand_profile is None else dict(self.demand_profile)
@@ -975,8 +979,8 @@ DEMAND_SOURCE_KEY: Final[str] = "demand_profile_source"
 def _parse_run_settings(
     data: Mapping[str, Any], period_number: int, current: Simulation | None
 ) -> RunSettings:
-    """Validate ``seed``, ``evaluation_periods``, ``observation_lags`` (OQ-16)
-    and ``demand_profile`` (PLAN 2.8).
+    """Validate ``seed``, ``evaluation_periods``, ``observation_lags`` (OQ-16),
+    ``demand_profile`` (PLAN 2.8) and ``learning_starts`` (PLAN 2.14).
 
     A missing key takes the value of ``current`` (update page) or the model
     default (create page). The rules mirror the check constraints of
@@ -992,7 +996,8 @@ def _parse_run_settings(
 
     Raises:
         ValidationError: With field keys ``seed``, ``evaluation_periods``,
-            ``observation_lags`` and ``demand_profile[.<field>]``.
+            ``learning_starts``, ``observation_lags`` and
+            ``demand_profile[.<field>]``.
     """
     errors: dict[str, list[str]] = {}
 
@@ -1021,6 +1026,8 @@ def _parse_run_settings(
             f"({period_number})."
         ]
 
+    learning_starts = _parse_learning_starts(data, current, errors)
+
     if "observation_lags" in data:
         observation_lags = _coerce_observation_lags(data["observation_lags"])
         if observation_lags is None:
@@ -1042,8 +1049,45 @@ def _parse_run_settings(
     if errors:
         raise ValidationError(errors)
     return RunSettings(
-        seed, evaluation_periods, observation_lags, demand_profile, source_id
+        seed,
+        evaluation_periods,
+        observation_lags,
+        demand_profile,
+        source_id,
+        learning_starts,
     )
+
+
+def _parse_learning_starts(
+    data: Mapping[str, Any], current: Simulation | None, errors: dict[str, list[str]]
+) -> int | None:
+    """Validate the optional common learning start (PLAN 2.14).
+
+    An empty string or null means the automatic value (stored as NULL). A
+    missing key keeps the value of ``current`` (update page) or takes the
+    automatic value (create page). The rule mirrors the check constraint of
+    ``Simulation.learning_starts``.
+
+    Args:
+        data: Decoded scenario payload.
+        current: The edited scenario, or None on create.
+        errors: Error mapping, updated in place (key ``learning_starts``).
+
+    Returns:
+        The learning start in stored transitions, or None for automatic.
+    """
+    if "learning_starts" not in data:
+        return current.learning_starts if current is not None else None
+    raw_value = data["learning_starts"]
+    if raw_value is None or (isinstance(raw_value, str) and not raw_value.strip()):
+        return None
+    learning_starts = _coerce_payload_int(raw_value)
+    if learning_starts is None or learning_starts < 1:
+        errors["learning_starts"] = [
+            "Learning start must be empty (automatic) or a positive integer."
+        ]
+        return None
+    return learning_starts
 
 
 def _parse_demand(
@@ -1972,7 +2016,8 @@ def _wizard_context(simulation: Simulation | None = None) -> dict[str, Any]:
 
     Returns:
         Context with ``resources``, ``allowed_energy_types``, the run settings
-        ``run_seed``, ``run_evaluation_periods``, ``run_observation_lags``
+        ``run_seed``, ``run_evaluation_periods``, ``run_learning_starts``,
+        ``run_observation_lags``
         (option value), ``observation_lag_choices`` (value, label pairs),
         ``wizard_config`` (JSON for the page script) and ``simulation`` when
         editing.
@@ -1997,6 +2042,7 @@ def _wizard_context(simulation: Simulation | None = None) -> dict[str, Any]:
             "upperBound": market.upperBidBound,
             "seed": simulation.seed,
             "evaluation_periods": simulation.evaluation_periods,
+            "learning_starts": simulation.learning_starts,
             "observation_lags": list(simulation.observation_lags),
             "demand_profile": simulation.demand_profile,
             "demand_profile_source": _stored_demand_source_id(simulation),
@@ -2017,6 +2063,7 @@ def _wizard_context(simulation: Simulation | None = None) -> dict[str, Any]:
             "upperBound": WIZARD_DEFAULT_UPPER_BOUND,
             "seed": DEFAULT_SEED,
             "evaluation_periods": 0,
+            "learning_starts": None,
             "observation_lags": default_observation_lags(),
             "demand_profile": None,
             "demand_profile_source": None,
@@ -2073,6 +2120,7 @@ def _wizard_context(simulation: Simulation | None = None) -> dict[str, Any]:
         "allowed_energy_types": allowed_energy_types_by_agent_type(),
         "run_seed": initial["seed"],
         "run_evaluation_periods": initial["evaluation_periods"],
+        "run_learning_starts": initial["learning_starts"],
         "run_observation_lags": _lags_value(initial["observation_lags"]),
         "observation_lag_choices": [
             (_lags_value(allowed), ", ".join(str(lag) for lag in allowed))
