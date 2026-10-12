@@ -9,6 +9,18 @@ from .enums import HPOPhase, HPOStatus, HPOTrialStatus
 from .simulation import Simulation
 
 
+class HPOTarget(models.TextChoices):
+    """Agents of an evaluation run that receive the trial parameters (K7, PLAN 2.15).
+
+    ``ALL``: every agent runs the study algorithm with the trial parameters.
+    ``MATCHING``: only the agents whose own algorithm is the study algorithm
+    receive the trial parameters. The other agents run unchanged.
+    """
+
+    ALL = "ALL", "All agents"
+    MATCHING = "MATCHING", "Only matching agents"
+
+
 class HPOStudy(Base):
     """One ABC search for one algorithm on one proxy scenario (ADR-009).
 
@@ -20,6 +32,10 @@ class HPOStudy(Base):
     name = models.CharField(max_length=100)
     # Key of a registered agent algorithm (services/algorithms/registry.py).
     algorithm_type = models.CharField(max_length=64)
+    # Which agents of the evaluation runs are tuned (PLAN 2.15).
+    target = models.CharField(
+        max_length=16, choices=HPOTarget.choices, default=HPOTarget.ALL
+    )
     scenario = models.ForeignKey(
         Simulation,
         on_delete=models.PROTECT,

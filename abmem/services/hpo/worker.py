@@ -2,8 +2,9 @@
 
 ``evaluate_task`` is a top-level, picklable function. It clones the study
 scenario into an evaluation run, forces the study algorithm on every agent
-(K7), runs the simulation in-process, scores it from the database and updates
-the ``HPOTrial`` row. A failed evaluation marks the trial FAILED and returns
+(K7, target ALL) or tunes only the agents that already use it (target
+MATCHING, PLAN 2.15), runs the simulation in-process, scores it from the
+database and updates the ``HPOTrial`` row. A failed evaluation marks the trial FAILED and returns
 objectives ``(-inf, -inf)``, so the candidate is never selected.
 
 ORM-dependent modules are imported inside the functions so that spawned
@@ -110,6 +111,29 @@ def split_params(
     return overrides, agent_fields
 
 
+def target_algorithms(target: str, algorithm: str) -> tuple[str | None, str | None]:
+    """Return the algorithm arguments of an evaluation run for a study target.
+
+    Args:
+        target: ``HPOStudy.target`` (``"ALL"`` or ``"MATCHING"``).
+        algorithm: Study algorithm key.
+
+    Returns:
+        ``(forced_algorithm, override_algorithm)``. ALL forces the study
+        algorithm on every agent and applies the overrides to all of them
+        (``(algorithm, None)``). MATCHING forces nothing and restricts the
+        overrides to the agents of the study algorithm (``(None, algorithm)``).
+
+    Raises:
+        ValueError: If ``target`` is not a known target.
+    """
+    if str(target) == "ALL":
+        return str(algorithm), None
+    if str(target) == "MATCHING":
+        return None, str(algorithm)
+    raise ValueError(f"unknown HPO target {target!r}, expected 'ALL' or 'MATCHING'")
+
+
 def _touch_heartbeat(study_id: int) -> None:
     """Set ``heartbeat_at`` of the study to now (OQ-17)."""
     from django.utils import timezone
@@ -122,11 +146,16 @@ def _touch_heartbeat(study_id: int) -> None:
 def evaluate_task(task: EvaluationTask) -> TrialOutcome:
     """Run and score one evaluation and update its ``HPOTrial`` row.
 
-    The run agents get the study algorithm (K7), the candidate as algorithm
-    overrides and the fail-stack settings from ``split_params``. A scenario
-    agent's own ``algorithm_params`` belong to its own algorithm, so they are
-    dropped when that algorithm differs from the study algorithm (OQ-9:
-    agent parameters apply only to the agent's own algorithm type).
+    Target ALL: the run agents get the study algorithm (K7), the candidate
+    as algorithm overrides and the fail-stack settings from ``split_params``.
+    A scenario agent's own ``algorithm_params`` belong to its own algorithm,
+    so they are dropped when that algorithm differs from the study algorithm
+    (OQ-9: agent parameters apply only to the agent's own algorithm type).
+
+    Target MATCHING (PLAN 2.15): no algorithm is forced. Only the agents
+    whose algorithm is the study algorithm get the overrides and the
+    fail-stack settings, and the agent score is the mean over these agents.
+    The other agents run unchanged.
 
     Args:
         task: The evaluation.
@@ -145,12 +174,14 @@ def evaluate_task(task: EvaluationTask) -> TrialOutcome:
     try:
         study = HPOStudy.objects.select_related("scenario").get(pk=task.study_id)
         overrides, agent_fields = split_params(task.params, study.fixed_params or {})
+        forced, only = target_algorithms(study.target, study.algorithm_type)
         simulation = library_service.clone_scenario_for_run(
             study.scenario,
             seed=task.seed,
-            forced_algorithm=study.algorithm_type,
+            forced_algorithm=forced,
             algorithm_overrides=overrides,
             fixed_agent_fields=agent_fields,
+            override_algorithm=only,
         )
         HPOTrial.objects.filter(pk=task.trial_id).update(simulation=simulation)
         foreign = [
@@ -158,7 +189,7 @@ def evaluate_task(task: EvaluationTask) -> TrialOutcome:
             for name, algorithm in study.scenario.market.agent_set.values_list(
                 "name", "algorithm_type"
             )
-            if str(algorithm) != str(study.algorithm_type)
+            if only is None and str(algorithm) != str(study.algorithm_type)
         ]
         for agent in Agent.objects.filter(market=simulation.market, name__in=foreign):
             agent.algorithm_params = dict(overrides)
@@ -166,10 +197,17 @@ def evaluate_task(task: EvaluationTask) -> TrialOutcome:
         simulation_service.run(
             simulation,
             algorithm_overrides=overrides,
-            forced_algorithm=study.algorithm_type,
+            forced_algorithm=forced,
+            override_algorithm=only,
             export_json=False,
         )
-        scores = score_simulation(simulation)
+        if only is None:
+            scores = score_simulation(simulation)
+        else:
+            tuned = Agent.objects.filter(
+                market=simulation.market, algorithm_type=only
+            ).values_list("pk", flat=True)
+            scores = score_simulation(simulation, agent_ids=list(tuned))
         if not (
             math.isfinite(scores.agent_score) and math.isfinite(scores.market_score)
         ):

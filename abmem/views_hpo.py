@@ -36,7 +36,7 @@ from .forms_hpo import (
     searchable_algorithms,
     supports_failstack,
 )
-from .models import Agent, AlgorithmDefault, HPOStudy, HPOTrial, Simulation
+from .models import Agent, AlgorithmDefault, HPOStudy, HPOTarget, HPOTrial, Simulation
 from .models.enums import HPOPhase, HPOStatus, HPOTrialStatus
 from .services.algorithms import registry as algorithm_registry
 from .services.hpo import hpo_service
@@ -298,6 +298,7 @@ def _status_payload(study: HPOStudy) -> dict[str, Any]:
         "id": study.pk,
         "name": study.name,
         "algorithm": str(study.algorithm_type),
+        "target": str(study.target),
         "status": _status_name(study.status, HPOStatus),
         "cancel_requested": bool(study.cancel_requested),
         "created_at": _iso(study.created_at),
@@ -320,6 +321,49 @@ def _status_payload(study: HPOStudy) -> dict[str, Any]:
         "trials_truncated": len(rows) > TRIAL_TABLE_LIMIT,
         "error": study.error,
     }
+
+
+def scenario_algorithms(
+    scenarios: Iterable[Simulation], searchable: Iterable[str]
+) -> dict[str, dict[str, int]]:
+    """Return the searchable learning algorithms of each scenario with agent counts.
+
+    Embedded in the create page for target MATCHING (PLAN 2.15).
+
+    Args:
+        scenarios: Proxy simulations (scenario templates).
+        searchable: Algorithm keys offered by the create form.
+
+    Returns:
+        ``{str(scenario id): {algorithm key: number of agents}}`` with the
+        keys of ``hpo_service.scenario_algorithm_counts`` that are in
+        ``searchable``.
+    """
+    allowed = set(searchable)
+    return {
+        str(scenario.pk): {
+            key: count
+            for key, count in hpo_service.scenario_algorithm_counts(scenario).items()
+            if key in allowed
+        }
+        for scenario in scenarios
+    }
+
+
+def tuned_agent_names(study: HPOStudy) -> list[str]:
+    """Return the names of the scenario agents that the study tunes.
+
+    Args:
+        study: The study.
+
+    Returns:
+        Every scenario agent for target ALL, the agents whose algorithm is
+        the study algorithm for target MATCHING, ordered by id.
+    """
+    agents = Agent.objects.filter(market__simulation=study.scenario_id)
+    if study.target == HPOTarget.MATCHING:
+        agents = agents.filter(algorithm_type=study.algorithm_type)
+    return list(agents.order_by("id").values_list("name", flat=True))
 
 
 def _mark_start_failed(study: HPOStudy, error: Exception) -> None:
@@ -386,19 +430,30 @@ def study_create(request: HttpRequest) -> HttpResponse:
         could not be started.
     """
     if request.method == "GET":
-        scenarios = Simulation.objects.filter(proxy=True).order_by("name", "id")
+        scenarios = list(Simulation.objects.filter(proxy=True).order_by("name", "id"))
+        searchable = searchable_algorithms()
         algorithms = [
             {
                 "name": key,
                 "label": algorithm_registry.label_for(key),
                 "failstack": supports_failstack(key),
             }
-            for key in searchable_algorithms()
+            for key in searchable
         ]
         selected_scenario = request.GET.get("scenario", "")
+        selected_target = request.GET.get("target", "").strip().upper()
         context = {
             "scenarios": scenarios,
             "algorithms": algorithms,
+            "algorithm_options": [
+                {"name": a["name"], "label": a["label"]} for a in algorithms
+            ],
+            "scenario_algorithms": scenario_algorithms(scenarios, searchable),
+            "selected_target": (
+                selected_target
+                if selected_target in HPOTarget.values
+                else str(HPOTarget.ALL)
+            ),
             "initial": DEFAULT_FORM_VALUES,
             "selected_scenario": selected_scenario,
             "selected_algorithm": request.GET.get(
@@ -488,6 +543,8 @@ def study_watch(request: HttpRequest, study_id: int) -> HttpResponse:
         "study": study,
         "status": _status_name(study.status, HPOStatus),
         "algorithm": algorithm,
+        "matching": study.target == HPOTarget.MATCHING,
+        "tuned_agents": tuned_agent_names(study),
         "weights": _weights(study),
         "bounds": sorted(study.param_bounds.items()),
         "fixed_params": study.fixed_params or {},
@@ -601,8 +658,10 @@ def _apply_to_scenario(
     Agents that use the study algorithm get the parameters merged into their
     ``algorithm_params``. With ``switch_algorithm`` the other agents are set
     to the study algorithm with exactly these parameters, as in the
-    evaluation runs (K7). The fail-stack settings of the study (fixed and
-    searched) are written to every updated agent, as in the evaluation runs.
+    evaluation runs (K7). For a study with target MATCHING only the agents
+    of the study algorithm are updated and ``switch_algorithm`` is ignored
+    (PLAN 2.15). The fail-stack settings of the study (fixed and searched)
+    are written to every updated agent, as in the evaluation runs.
 
     Raises:
         ValueError: If no agent can be updated or parameters are invalid.
@@ -617,6 +676,9 @@ def _apply_to_scenario(
     if market is None:
         raise ValueError("The scenario has no market.")
     _, agent_fields = split_params(study.best_params or {}, study.fixed_params or {})
+    matching = study.target == HPOTarget.MATCHING
+    if matching:
+        switch_algorithm = False
     updated: list[str] = []
     for agent in Agent.objects.select_for_update().filter(market=market).order_by("id"):
         own = str(agent.algorithm_type)
@@ -633,6 +695,8 @@ def _apply_to_scenario(
             setattr(agent, key, value)
         agent.save()
         updated.append(agent.name)
+    if not updated and matching:
+        raise ValueError(f"No agent of the scenario uses {algorithm}.")
     if not updated:
         raise ValueError(
             f"No agent of the scenario uses {algorithm}. Enable 'switch all "

@@ -160,6 +160,7 @@ def run(
     *,
     algorithm_overrides: Mapping[str, Any] | None = None,
     forced_algorithm: str | None = None,
+    override_algorithm: str | None = None,
     export_json: bool = True,
 ) -> Simulation:
     """Run a simulation from period 1 to ``periodNumber``.
@@ -168,6 +169,8 @@ def run(
         simulation: The run or its primary key.
         algorithm_overrides: HPO parameter overrides for every agent.
         forced_algorithm: Algorithm key used for every agent (HPO, K7).
+        override_algorithm: When given, ``algorithm_overrides`` apply only to
+            the agents whose effective algorithm is this key (PLAN 2.15).
         export_json: Write the JSON offer export at the end.
 
     Returns:
@@ -196,6 +199,7 @@ def run(
             simulation,
             algorithm_overrides,
             forced_algorithm=forced_algorithm,
+            override_algorithm=override_algorithm,
             export_json=export_json,
         )
         try:

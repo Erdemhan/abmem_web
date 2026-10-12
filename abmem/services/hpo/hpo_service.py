@@ -37,7 +37,7 @@ from django.db import connections
 from django.utils import timezone
 
 from abmem import bootstrap
-from abmem.models import HPOStudy, HPOTrial, Simulation
+from abmem.models import HPOStudy, HPOTarget, HPOTrial, Simulation
 from abmem.models.enums import HPOPhase, HPOStatus, HPOTrialStatus
 from abmem.services.algorithms import registry as algorithm_registry
 from abmem.services.algorithms.algorithm_config import AlgorithmConfig
@@ -132,6 +132,49 @@ def _parse_positive_int(value: Any, name: str, minimum: int) -> int:
     if number < minimum:
         raise ValueError(f"{name} must be >= {minimum}")
     return number
+
+
+def _parse_target(value: Any) -> str:
+    """Parse an HPO target (case-insensitive, ``ALL`` when empty).
+
+    Raises:
+        ValueError: If the value is not a known target.
+    """
+    if value is None or value == "":
+        return str(HPOTarget.ALL)
+    key = value.strip().upper() if isinstance(value, str) else value
+    if key not in HPOTarget.values:
+        raise ValueError(f"unknown target {value!r}, expected one of {HPOTarget.values}")
+    return str(key)
+
+
+def scenario_algorithm_counts(scenario: Simulation) -> dict[str, int]:
+    """Count the scenario agents per learning algorithm (HPO target MATCHING).
+
+    Args:
+        scenario: Proxy simulation (scenario template).
+
+    Returns:
+        ``{algorithm key: number of agents}`` for the registered learning
+        algorithms used by the scenario agents, in the order of
+        ``registry.available_algorithms``. Baselines and unknown keys are
+        left out. Empty when the scenario has no market.
+    """
+    from collections import Counter
+
+    from abmem.models import Agent
+
+    counts = Counter(
+        str(key)
+        for key in Agent.objects.filter(market__simulation=scenario).values_list(
+            "algorithm_type", flat=True
+        )
+    )
+    return {
+        info.key: counts[info.key]
+        for info in algorithm_registry.available_algorithms()
+        if info.is_learning and counts[info.key] > 0
+    }
 
 
 def _parse_seeds(value: Any, name: str) -> list[int]:
@@ -323,8 +366,11 @@ def validate_study_input(data: Mapping[str, Any]) -> dict[str, Any]:
             optional ``fixed_params`` (``failstack_enabled``,
             ``failstack_limit``, ``failstack_delta``), ``colony_size``,
             ``max_iter``, ``limit``, ``search_seeds``, ``evaluation_seeds``
-            (lists or comma-separated strings) and optional ``objective``
-            (``{"mode": "weighted", "weights": [w_agent, w_market]}``).
+            (lists or comma-separated strings), optional ``objective``
+            (``{"mode": "weighted", "weights": [w_agent, w_market]}``) and
+            optional ``target`` (``ALL``, the default, or ``MATCHING``).
+            MATCHING needs a learning study algorithm used by at least one
+            scenario agent (error on ``algorithm_type``).
 
     Returns:
         The keyword arguments of ``HPOStudy`` (``scenario`` as instance,
@@ -370,6 +416,24 @@ def validate_study_input(data: Mapping[str, Any]) -> dict[str, Any]:
     except ValueError as error:
         errors["algorithm_type"] = [str(error)]
     out["algorithm_type"] = algorithm
+
+    try:
+        out["target"] = _parse_target(data.get("target"))
+    except ValueError as error:
+        errors["target"] = [str(error)]
+    if out.get("target") == HPOTarget.MATCHING and algorithm is not None:
+        if algorithm_registry.is_baseline(algorithm):
+            errors["algorithm_type"] = [
+                f"Tuning only the matching agents needs a learning algorithm, "
+                f"{algorithm} is not one."
+            ]
+        elif scenario is not None and algorithm not in scenario_algorithm_counts(
+            scenario
+        ):
+            errors["algorithm_type"] = [
+                f"No agent of the scenario uses {algorithm}. Choose an algorithm "
+                f"of the scenario or tune all agents."
+            ]
 
     fixed, fixed_errors = _validate_fixed_params(data.get("fixed_params"))
     errors.update(fixed_errors)

@@ -835,6 +835,7 @@ def clone_scenario_for_run(
     forced_algorithm: str | None = None,
     algorithm_overrides: Mapping[str, Any] | None = None,
     fixed_agent_fields: Mapping[str, Any] | None = None,
+    override_algorithm: str | None = None,
     warm_start_from: Simulation | None = None,
     freeze_policies: bool = False,
 ) -> Simulation:
@@ -854,6 +855,10 @@ def clone_scenario_for_run(
         fixed_agent_fields: Values set on every copied agent (HPO fixed
             fail-stack settings). Keys must be in ``COPIED_AGENT_FIELDS``
             and must not be ``name``.
+        override_algorithm: When given, ``algorithm_overrides`` and
+            ``fixed_agent_fields`` apply only to the copied agents whose
+            algorithm (after ``forced_algorithm``) is this key (HPO target
+            MATCHING, PLAN 2.15). The other agents are plain copies.
         warm_start_from: Finished run of this scenario whose saved policies
             initialise the run. Only matched against the scenario here; the
             files are checked by ``checkpoints.check_warm_start`` and loaded
@@ -875,6 +880,8 @@ def clone_scenario_for_run(
         LibraryValidationError: A forced algorithm or fixed fail-stack value
             is invalid.
     """
+    from ..simulation.context import overrides_apply
+
     if not proxy_sim.proxy:
         raise ValueError(f"Simulation {proxy_sim.pk} is not a proxy simulation.")
     fixed = dict(fixed_agent_fields or {})
@@ -885,6 +892,10 @@ def clone_scenario_for_run(
         raise ValueError(f"fixed_agent_fields keys not allowed: {invalid_keys}.")
     if forced_algorithm is not None:
         forced_algorithm = validate_algorithm_key(forced_algorithm)
+    if override_algorithm is not None:
+        override_algorithm = validate_algorithm_key(
+            override_algorithm, "override_algorithm"
+        )
     if freeze_policies and warm_start_from is None:
         raise ValueError("freeze_policies requires warm_start_from.")
     if warm_start_from is not None:
@@ -918,13 +929,14 @@ def clone_scenario_for_run(
         if forced_algorithm is not None:
             new_agent.algorithm_type = forced_algorithm
             changed = True
-        if algorithm_overrides:
+        tuned = overrides_apply(new_agent.algorithm_type, override_algorithm)
+        if tuned and algorithm_overrides:
             new_agent.algorithm_params = {
                 **new_agent.algorithm_params,
                 **copy.deepcopy(dict(algorithm_overrides)),
             }
             changed = True
-        for key, value in fixed.items():
+        for key, value in fixed.items() if tuned else ():
             setattr(new_agent, key, value)
             changed = True
         if changed:

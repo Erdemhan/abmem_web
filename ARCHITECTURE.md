@@ -261,6 +261,7 @@ erDiagram
 | `ClearingDefault` | new model (`algorithm_key` unique, `params` JSON), global default parameters of a clearing algorithm | 2.12 | `0018_clearing_params_and_parameter_snapshots` |
 | `Market.clearing_params` | `JSONField(default=dict)`, per-scenario overrides of the clearing parameters | 2.12 | same |
 | `Agent.effective_params`, `Market.effective_clearing_params` | `JSONField(null=True)`, parameter snapshot written once when a run starts, NULL on library and scenario rows and on older runs | 2.12 | same |
+| `HPOStudy.target` | `CharField(16, choices ALL / MATCHING, default 'ALL')`, existing studies are ALL | 2.15, K7 | `0020_hpostudy_target` |
 
 ### 4.2 Agent roles (K4 = A)
 
@@ -460,7 +461,7 @@ class SimulationContext:
     def phase_for(self, t: int) -> RunPhase: ...   # EVALUATE iff t >= evaluation_start
 ```
 
-`build` validates the run before period 1 (A8, B6, OQ-12): demand covers `periodNumber` with finite, strictly positive values, `upperBidBound > lowerBidBound`, the lag set is allowed, `0 <= evaluation_periods < periodNumber`, every agent has at least one plant with positive capacity, and every agent's parameters pass `AlgorithmConfig.from_dict`. It seeds all generators (`seeding.seed_everything(seed)`), spawns one `np.random.Generator` per agent with `np.random.SeedSequence(seed).spawn(n_agents)` in `Agent.id` order, resolves parameters (section 5.1) and builds each policy through `registry.build_policy(...)`. `agent.runtime_policy` references the same policy object. The context owns it. No module-level list of agents exists (B10). `forced_algorithm` and `algorithm_overrides` are used by HPO evaluations (K7). When `t` enters the evaluation window every policy is frozen (`set_frozen(True)`) and acts with `explore=False` (OQ-5).
+`build` validates the run before period 1 (A8, B6, OQ-12): demand covers `periodNumber` with finite, strictly positive values, `upperBidBound > lowerBidBound`, the lag set is allowed, `0 <= evaluation_periods < periodNumber`, every agent has at least one plant with positive capacity, and every agent's parameters pass `AlgorithmConfig.from_dict`. It seeds all generators (`seeding.seed_everything(seed)`), spawns one `np.random.Generator` per agent with `np.random.SeedSequence(seed).spawn(n_agents)` in `Agent.id` order, resolves parameters (section 5.1) and builds each policy through `registry.build_policy(...)`. `agent.runtime_policy` references the same policy object. The context owns it. No module-level list of agents exists (B10). `forced_algorithm`, `algorithm_overrides` and `override_algorithm` are used by HPO evaluations (K7, PLAN 2.15). With `override_algorithm` set, the overrides reach only the agents whose effective algorithm is that key (`context.overrides_apply`). When `t` enters the evaluation window every policy is frozen (`set_frozen(True)`) and acts with `explore=False` (OQ-5).
 
 ### 5.5 Fail-stack rule (`services/agent/failstack.py`, K3, item 1.5)
 
@@ -637,7 +638,7 @@ sequenceDiagram
     loop ABC phases (INIT, EMPLOYED, ONLOOKER, SCOUT), then FINAL_EVAL
         P->>DB: check cancel_requested, update heartbeat_at (between batches)
         P->>W: Pool.map(evaluate_task, [(study_id, candidate, seed), ...])
-        W->>DB: clone scenario (all agents -> study algorithm, K7), run in-process, score from DB
+        W->>DB: clone scenario (target ALL: all agents -> study algorithm, K7. Target MATCHING: only agents of the study algorithm tuned), run in-process, score from DB
         W->>DB: HPOTrial row (scores, duration, simulation)
         W-->>P: TrialOutcome
         P->>DB: retention: purge periods/offers/step logs of non-best evaluations (K9)
@@ -646,6 +647,7 @@ sequenceDiagram
     U->>V: GET /dev/hpo/<id>/status/ (polling)
 ```
 
+- Target (K7, PLAN 2.15, `HPOStudy.target`, migration `0020_hpostudy_target`): `ALL` (default, the original K7 behaviour) runs every agent of an evaluation run with the study algorithm (`forced_algorithm`) and the candidate parameters. `MATCHING` forces no algorithm and passes `override_algorithm = study algorithm` to `clone_scenario_for_run` and `simulation_service.run`, so the candidate's algorithm overrides and agent fields (fail-stack) reach only the agents that already use the study algorithm, in every search trial and in the final evaluation. All other agents run unchanged with their own algorithm and parameters. `worker.target_algorithms` maps the target to `(forced_algorithm, override_algorithm)`. MATCHING needs a learning study algorithm used by at least one scenario agent (validated by `HPOStudyForm` and `hpo_service.validate_study_input`, error on `algorithm_type`). In MATCHING the agent score is the mean over the tuned agents only (`score_simulation(..., agent_ids=...)`), the market score always covers the whole market. The create page offers a switch for the mode. With the switch on, the algorithm select is disabled until a scenario is chosen and then lists only the learning algorithms of that scenario with their agent counts (`hpo_service.scenario_algorithm_counts`, embedded in the page). The study list and the watch page show the mode, and the watch page lists the tuned agents.
 - Objective (OQ-11): weighted single objective `w1 · agent_score + w2 · market_score` with weights stored per study. The watch screen additionally shows the Pareto front of (agent_score, market_score) over all trials as information only. It does not influence the search.
 - ABC variant (OQ-19): batch-synchronous parallel ABC. All candidates of one phase are generated from the same snapshot of food sources, evaluated as one `Pool` batch, and greedy selection is applied afterwards in source order. `FORMULATION.md` describes this as a variant of Karaboga (2005), not as the classic ABC.
 - Pool workers use `initializer=bootstrap.init_hpo_worker` (Django setup, `torch.set_num_threads(1)`, connection reset) and `maxtasksperchild=1`, so each evaluation runs in a fresh interpreter and no state can leak between evaluations (B10).
@@ -654,7 +656,7 @@ sequenceDiagram
 - Retention (K9): `HPOTrial` rows are always kept. The full data of the current best candidate's evaluation simulations is kept. When the best changes, the previous best's periods, offers and step logs are deleted. All other evaluation simulations lose their periods, offers and step logs right after scoring. The `Simulation` row stays so `HPOTrial.simulation` remains valid.
 - Cancel: the view sets `cancel_requested=True`. The HPO process checks it before every batch, terminates the pool and sets `CANCELED`. Failure sets `FAILED` with the traceback tail in `error`.
 - Stale studies (OQ-17): `heartbeat_at` is updated before every batch and after every finished trial. A RUNNING study whose heartbeat is older than `settings.ABMEM_HPO_HEARTBEAT_TIMEOUT` (default 30 minutes) is set to `FAILED` with an explanatory `error` when the list, watch or status view loads it.
-- Apply best parameters (OQ-9): to the scenario agents (`Agent.algorithm_params` of every agent of the study scenario) or as the algorithm default (`AlgorithmDefault`).
+- Apply best parameters (OQ-9): to the scenario agents (`Agent.algorithm_params` of every agent of the study scenario) or as the algorithm default (`AlgorithmDefault`). For a MATCHING study only the scenario agents of the study algorithm are updated and the "switch every agent" option is ignored.
 - Each study builds its parameter space from its own `HPOStudy.param_bounds`. Nothing is merged into a module-level dict (B10).
 - HPO evaluation simulations are excluded from the run list with `Simulation.objects.filter(proxy=False, hpo_trial__isnull=True)`.
 

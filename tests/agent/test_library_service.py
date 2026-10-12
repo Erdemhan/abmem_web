@@ -585,6 +585,33 @@ def test_clone_scenario_forced_algorithm_and_overrides(fossil: Resource) -> None
         assert agent.failstack_limit == 4
 
 
+def test_clone_scenario_override_algorithm_tunes_only_matching_agents(
+    fossil: Resource,
+) -> None:
+    proxy_sim = _scenario_with_agents(fossil)
+    run = ls.clone_scenario_for_run(
+        proxy_sim,
+        algorithm_overrides={"gamma": 0.9},
+        fixed_agent_fields={"failstack_enabled": False, "failstack_limit": 2},
+        override_algorithm="DDPG",
+    )
+    a, b = Agent.objects.filter(market=run.market).order_by("name")
+    # A (TD3) is a plain copy of its scenario agent.
+    assert a.algorithm_type == "TD3"
+    assert a.algorithm_params == {"actor_lr": 0.001}
+    assert a.failstack_enabled is True and a.failstack_limit == 4
+    # B (DDPG) gets the overrides and the fixed agent fields.
+    assert b.algorithm_type == "DDPG"
+    assert b.algorithm_params == {"actor_lr": 0.001, "gamma": 0.9}
+    assert b.failstack_enabled is False and b.failstack_limit == 2
+
+
+def test_clone_scenario_rejects_unknown_override_algorithm(fossil: Resource) -> None:
+    proxy_sim = _scenario_with_agents(fossil)
+    with pytest.raises(LibraryValidationError):
+        ls.clone_scenario_for_run(proxy_sim, override_algorithm="NOPE")
+
+
 def test_clone_scenario_rejects_invalid_fixed_fields(fossil: Resource) -> None:
     proxy_sim = _scenario_with_agents(fossil)
     with pytest.raises(ValueError):

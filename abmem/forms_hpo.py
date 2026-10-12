@@ -17,9 +17,9 @@ from typing import Any, Final
 
 from django import forms
 
-from abmem.models import Simulation
+from abmem.models import HPOTarget, Simulation
 from abmem.services.algorithms import registry as algorithm_registry
-from abmem.services.hpo.hpo_service import SEED_UPPER
+from abmem.services.hpo.hpo_service import SEED_UPPER, scenario_algorithm_counts
 from abmem.services.hpo.worker import FAILSTACK_SEARCH_KEYS
 
 SCALES: Final[tuple[str, ...]] = ("linear", "log", "int")
@@ -198,6 +198,7 @@ class HPOStudyForm(forms.Form):
         },
     )
     algorithm_type = forms.ChoiceField(choices=())
+    target = forms.ChoiceField(choices=HPOTarget.choices, required=False)
     failstack_enabled = forms.BooleanField(required=False)
     failstack_limit = forms.IntegerField(required=False, min_value=1)
     failstack_delta = forms.FloatField(required=False, min_value=0.0)
@@ -227,6 +228,10 @@ class HPOStudyForm(forms.Form):
     def clean_algorithm_type(self) -> str:
         """Return the selected algorithm key."""
         return str(self.cleaned_data["algorithm_type"])
+
+    def clean_target(self) -> str:
+        """Return the target, ``ALL`` when not submitted."""
+        return str(self.cleaned_data.get("target") or HPOTarget.ALL)
 
     def clean_search_seeds(self) -> list[int]:
         """Parse the search seeds."""
@@ -276,6 +281,8 @@ class HPOStudyForm(forms.Form):
                 failstack = False
         if isinstance(algorithm, str) and "param_bounds" in data:
             self._clean_bounds(data, algorithm, failstack)
+        if data.get("target") == HPOTarget.MATCHING and isinstance(algorithm, str):
+            self._clean_matching(algorithm, data.get("scenario"))
         weights = (data.get("weight_agent"), data.get("weight_market"))
         if all(isinstance(w, float) for w in weights) and not any(weights):
             self.add_error("weight_market", "At least one weight must be non-zero.")
@@ -289,6 +296,28 @@ class HPOStudyForm(forms.Form):
                     f"Search and evaluation seeds must be disjoint, shared: {shared}.",
                 )
         return data
+
+    def _clean_matching(self, algorithm: str, scenario: Simulation | None) -> None:
+        """Check that target MATCHING has scenario agents to tune (PLAN 2.15).
+
+        Args:
+            algorithm: Selected algorithm key.
+            scenario: Selected scenario, None when it is invalid.
+        """
+        if algorithm_registry.is_baseline(algorithm):
+            self.add_error(
+                "algorithm_type",
+                f"Tuning only the matching agents needs a learning algorithm, "
+                f"{algorithm} is not one.",
+            )
+        elif scenario is not None and algorithm not in scenario_algorithm_counts(
+            scenario
+        ):
+            self.add_error(
+                "algorithm_type",
+                f"No agent of the scenario uses {algorithm}. Choose an algorithm "
+                f"of the scenario or tune all agents.",
+            )
 
     def _clean_bounds(
         self, data: dict[str, Any], algorithm: str, failstack: bool
@@ -346,6 +375,7 @@ class HPOStudyForm(forms.Form):
             "name": data["name"],
             "scenario": data["scenario"],
             "algorithm_type": data["algorithm_type"],
+            "target": data["target"],
             "param_bounds": data["param_bounds"],
             "fixed_params": fixed,
             "colony_size": data["colony_size"],
@@ -367,7 +397,8 @@ class HPOApplyForm(forms.Form):
     ``scenario`` (agents of the study scenario). With ``switch_algorithm``
     every scenario agent is set to the study algorithm, as in the evaluation
     runs (K7). Without it only the agents that already use the study
-    algorithm are updated.
+    algorithm are updated. For a study with target MATCHING only these
+    agents are updated and ``switch_algorithm`` is ignored (PLAN 2.15).
     """
 
     TARGET_DEFAULT: Final[str] = "default"

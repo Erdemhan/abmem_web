@@ -97,6 +97,29 @@ def test_explicit_periods_argument() -> None:
     )
 
 
+def test_agent_filter_scores_only_the_selected_agents() -> None:
+    sim = _build()
+    a, b = sim.market.agent_set.order_by("name")
+    whole = score_simulation(sim)
+    a_budget = 3500 / (50 * 2 * 100)
+    a_profit = (3500 / 80) / 100
+    a_sim = 1 - math.sqrt((100 + 400 + 0) / 3) / 100
+    only_a = score_simulation(sim, agent_ids=[a.pk])
+    assert only_a.agent_score == pytest.approx(0.4 * a_budget + 0.4 * a_profit + 0.2 * a_sim)
+    # The market score always covers the whole market.
+    assert only_a.market_score == whole.market_score
+    assert score_simulation(sim, agent_ids=[a.pk, b.pk]) == whole
+    assert score_simulation(sim, agent_ids=(b.pk, a.pk, 10**9)) == whole
+
+
+def test_agent_filter_without_scored_agent_raises() -> None:
+    sim = _build()
+    with pytest.raises(ValueError, match="none of the agents"):
+        score_simulation(sim, agent_ids=[])
+    with pytest.raises(ValueError, match="none of the agents"):
+        score_simulation(sim, agent_ids=[10**9])
+
+
 def test_agent_score_is_clipped_at_zero() -> None:
     sim = make_simulation(period_number=1)
     market = make_market(simulation=sim, upper_bid_bound=100)

@@ -30,6 +30,10 @@ in the legacy metric) and mean offer price ``o``:
 
     market_score = 0.6 * (1 - m / P_max) + 0.4 * (m / o)   (second term 0 if o <= 0)
 
+With an agent filter (HPO target MATCHING, PLAN 2.15) ``agent_score`` is the
+mean over the filtered agents only. ``market_score`` always uses the whole
+market.
+
 The study objective combines both with per-study weights (OQ-11), see
 :func:`abmem.services.hpo.abc_optimizer.weighted_score`.
 """
@@ -38,6 +42,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
+from collections.abc import Collection
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import TYPE_CHECKING
@@ -87,7 +92,10 @@ def scored_periods(simulation: Simulation) -> range:
 
 
 def score_simulation(
-    simulation: Simulation, periods: range | None = None
+    simulation: Simulation,
+    periods: range | None = None,
+    *,
+    agent_ids: Collection[int] | None = None,
 ) -> TrialScores:
     """Compute agent score and market score of a finished run from the database.
 
@@ -95,14 +103,18 @@ def score_simulation(
         simulation: Finished run with its market, agents, plants, periods and
             cleared offers.
         periods: Period numbers to score, :func:`scored_periods` when None.
+        agent_ids: Primary keys of the agents whose scores enter
+            ``agent_score``. All agents with cleared offers when None. The
+            market score is not affected.
 
     Returns:
         The scores.
 
     Raises:
         ValueError: If ``upperBidBound <= 0``, no cleared offer exists in the
-            scored periods, a scored period has no PTF or an agent with
-            offers has no positive capacity.
+            scored periods, a scored period has no PTF, a scored agent with
+            offers has no positive capacity or no agent of ``agent_ids`` has
+            a cleared offer in the scored periods.
     """
     from abmem.models.models import Offer, Period, Plant
     from abmem.services.market.accounting import offer_profit, outcome_from_offer
@@ -159,8 +171,17 @@ def score_simulation(
         price_sum += price
 
     w_budget, w_profit, w_similarity = AGENT_WEIGHTS
+    scored_agents = sorted(count)
+    if agent_ids is not None:
+        selected = {int(i) for i in agent_ids}
+        scored_agents = [i for i in scored_agents if i in selected]
+        if not scored_agents:
+            raise ValueError(
+                f"simulation {simulation.pk}: none of the agents {sorted(selected)} "
+                f"has a cleared offer in periods {periods.start}..{periods.stop - 1}"
+            )
     agent_scores: list[float] = []
-    for agent_id in sorted(count):
+    for agent_id in scored_agents:
         cap = float(capacity.get(agent_id, Decimal(0)))
         if not cap > 0.0:
             raise ValueError(f"agent {agent_id} has no positive plant capacity")

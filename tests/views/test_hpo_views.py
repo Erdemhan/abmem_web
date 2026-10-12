@@ -7,6 +7,10 @@ test, and tests that create studies assert on the replacement.
 from __future__ import annotations
 
 import json
+import pathlib
+import re
+import shutil
+import subprocess
 from datetime import timedelta
 from decimal import Decimal
 from typing import Any
@@ -16,7 +20,15 @@ from django.test import Client
 from django.urls import reverse
 from django.utils import timezone
 
-from abmem.models import Agent, AlgorithmDefault, HPOStudy, HPOTrial, Market, Simulation
+from abmem.models import (
+    Agent,
+    AlgorithmDefault,
+    HPOStudy,
+    HPOTarget,
+    HPOTrial,
+    Market,
+    Simulation,
+)
 from abmem.models.enums import (
     AgentType,
     HPOPhase,
@@ -777,3 +789,200 @@ def test_simulation_list_and_dashboard_hide_hpo_runs(scenario: Simulation) -> No
     response = Client().get(reverse("dashboard"))
     assert response.context["num_simulations"] == 1
     assert [s.name for s in response.context["latest_simulations"]] == ["user-run-1"]
+
+
+# ------------------------------------------------- target mode (PLAN 2.15)
+NODE = shutil.which("node")
+
+
+def _json_script(content: str, element_id: str) -> Any:
+    match = re.search(
+        rf'<script id="{element_id}" type="application/json">(.*?)</script>',
+        content,
+        flags=re.S,
+    )
+    assert match, element_id
+    return json.loads(match.group(1))
+
+
+def test_create_page_embeds_scenario_algorithms(scenario: Simulation) -> None:
+    content = Client().get(reverse("hpo_create")).content.decode()
+    assert 'id="hpo-target-matching"' in content
+    assert 'id="hpo-target-matching" checked' not in content
+    assert _json_script(content, "hpo-scenario-algorithms") == {
+        str(scenario.pk): {"DDPG": 1}
+    }
+    options = _json_script(content, "hpo-algorithm-options")
+    names = [option["name"] for option in options]
+    assert "DDPG" in names and "TD3" in names and "RANDOM" not in names
+    checked = Client().get(reverse("hpo_create") + "?target=matching")
+    assert 'id="hpo-target-matching" checked' in checked.content.decode()
+
+
+def test_scenario_algorithms_helper_filters_searchable(scenario: Simulation) -> None:
+    from abmem.views_hpo import scenario_algorithms
+
+    assert scenario_algorithms([scenario], ["DDPG", "TD3"]) == {
+        str(scenario.pk): {"DDPG": 1}
+    }
+    assert scenario_algorithms([scenario], ["TD3"]) == {str(scenario.pk): {}}
+
+
+def test_create_matching_study(scenario: Simulation, started: list[int]) -> None:
+    response = post_json(
+        Client(), reverse("hpo_create"), payload(scenario, target="MATCHING")
+    )
+    assert response.status_code == 201, response.content
+    study = HPOStudy.objects.get(pk=response.json()["id"])
+    assert study.target == HPOTarget.MATCHING
+    assert started == [study.pk]
+
+
+def test_create_without_target_is_all(scenario: Simulation) -> None:
+    response = post_json(Client(), reverse("hpo_create"), payload(scenario))
+    assert response.status_code == 201, response.content
+    assert HPOStudy.objects.get().target == HPOTarget.ALL
+
+
+@pytest.mark.parametrize(
+    ("changes", "text"),
+    [
+        (
+            {
+                "algorithm_type": "TD3",
+                "param_bounds": {"gamma": {"low": "0.9", "high": "0.99"}},
+            },
+            "No agent of the scenario uses TD3",
+        ),
+        (
+            {
+                "algorithm_type": "FIXED_MARKUP",
+                "param_bounds": {"markup": {"low": "0.0", "high": "0.5"}},
+            },
+            "learning algorithm",
+        ),
+    ],
+)
+def test_create_matching_rejects(
+    scenario: Simulation, changes: dict[str, Any], text: str
+) -> None:
+    errors = _errors(
+        post_json(
+            Client(),
+            reverse("hpo_create"),
+            payload(scenario, target="MATCHING", **changes),
+        )
+    )
+    assert text in errors["algorithm_type"][0]
+    assert not HPOStudy.objects.exists()
+
+
+def test_form_matching_validation(scenario: Simulation) -> None:
+    from abmem.forms_hpo import HPOStudyForm
+
+    data = payload(scenario, target="MATCHING", algorithm_type="TD3")
+    data["param_bounds"] = {"gamma": {"low": "0.9", "high": "0.99"}}
+    form = HPOStudyForm(data)
+    assert not form.is_valid()
+    assert "TD3" in form.errors["algorithm_type"][0]
+    data["target"] = "ALL"
+    form = HPOStudyForm(data)
+    assert form.is_valid(), form.errors
+    assert form.to_service_input()["target"] == "ALL"
+    form = HPOStudyForm(payload(scenario, target="MATCHING"))
+    assert form.is_valid(), form.errors
+    assert form.to_service_input()["target"] == "MATCHING"
+
+
+def test_list_watch_and_status_show_target(scenario: Simulation) -> None:
+    matching = make_study(scenario, name="m-study", target=HPOTarget.MATCHING)
+    all_study = make_study(scenario, name="a-study")
+    content = Client().get(reverse("hpo_list")).content.decode()
+    assert "Only matching agents" in content and "All agents" in content
+
+    watch = Client().get(reverse("hpo_watch", args=[matching.pk]))
+    assert watch.context["tuned_agents"] == ["a0"]
+    assert watch.context["matching"] is True
+    text = watch.content.decode()
+    assert "<strong>Mode:</strong> Only matching agents" in text
+    assert 'id="hpo-switch-algorithm" checked' not in text
+
+    watch = Client().get(reverse("hpo_watch", args=[all_study.pk]))
+    assert watch.context["tuned_agents"] == ["a0", "a1"]
+    assert 'id="hpo-switch-algorithm" checked' in watch.content.decode()
+
+    status = Client().get(reverse("hpo_status", args=[matching.pk])).json()
+    assert status["target"] == "MATCHING"
+
+
+def test_apply_to_scenario_matching_ignores_switch(scenario: Simulation) -> None:
+    study = finished_study(
+        scenario,
+        target=HPOTarget.MATCHING,
+        fixed_params={"failstack_enabled": True, "failstack_limit": 3},
+    )
+    before = Agent.objects.get(market=scenario.market, name="a1")
+    response = post_json(
+        Client(),
+        reverse("hpo_apply", args=[study.pk]),
+        {"target": "scenario", "switch_algorithm": True},
+    )
+    assert response.status_code == 200, response.content
+    assert response.json()["agents_updated"] == ["a0"]
+    a0, a1 = Agent.objects.filter(market=scenario.market).order_by("id")
+    assert a0.algorithm_params == {"batch_size": 8, "gamma": 0.95, "gradient_steps": 3}
+    assert a0.failstack_enabled is True and a0.failstack_limit == 3
+    assert (a1.algorithm_type, a1.algorithm_params) == ("FIXED_MARKUP", {"markup": 0.2})
+    assert (a1.failstack_enabled, a1.failstack_limit) == (
+        before.failstack_enabled,
+        before.failstack_limit,
+    )
+
+
+def test_apply_to_scenario_matching_without_agent_is_rejected(
+    scenario: Simulation,
+) -> None:
+    study = finished_study(
+        scenario,
+        target=HPOTarget.MATCHING,
+        algorithm_type="TD3",
+        best_params={"gamma": 0.95},
+    )
+    errors = _errors(
+        post_json(
+            Client(),
+            reverse("hpo_apply", args=[study.pk]),
+            {"target": "scenario", "switch_algorithm": True},
+        )
+    )
+    assert errors["target"] == ["No agent of the scenario uses TD3."]
+    assert not Agent.objects.filter(algorithm_type="TD3").exists()
+
+
+@pytest.mark.skipif(NODE is None, reason="node is not installed")
+def test_hpo_inline_scripts_pass_node_check(
+    scenario: Simulation, tmp_path: pathlib.Path
+) -> None:
+    study = make_study(scenario, target=HPOTarget.MATCHING)
+    pages = {
+        "create": reverse("hpo_create"),
+        "create_matching": reverse("hpo_create") + "?target=MATCHING",
+        "watch": reverse("hpo_watch", args=[study.pk]),
+    }
+    for name, url in pages.items():
+        html = Client().get(url).content.decode()
+        scripts = [
+            body
+            for attrs, body in re.findall(
+                r"<script([^>]*)>(.*?)</script>", html, flags=re.S
+            )
+            if "src=" not in attrs and "application/json" not in attrs and body.strip()
+        ]
+        assert scripts, name
+        for index, body in enumerate(scripts):
+            path = tmp_path / f"{name}_{index}.js"
+            path.write_text(body, encoding="utf-8")
+            result = subprocess.run(
+                [NODE, "--check", str(path)], capture_output=True, text=True, check=False
+            )
+            assert result.returncode == 0, f"{name} script {index}: {result.stderr}"

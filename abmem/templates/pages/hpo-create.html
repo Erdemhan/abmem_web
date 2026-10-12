@@ -47,6 +47,15 @@
                   <input class="form-control" id="hpo-name" name="name" maxlength="100" required>
                 </div>
                 <div class="mb-3">
+                  <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="hpo-target-matching" {% if selected_target == "MATCHING" %}checked{% endif %}>
+                    <label class="form-check-label" for="hpo-target-matching">Tune only the agents that already use the algorithm</label>
+                  </div>
+                  <small class="text-secondary d-block">Off: every agent of the scenario runs the selected algorithm with the
+                    candidate parameters. On: only the agents that already use the algorithm get the candidate parameters,
+                    all other agents run unchanged, and the agent score is the mean over the tuned agents.</small>
+                </div>
+                <div class="mb-3">
                   <label class="form-label" for="hpo-scenario">Scenario template</label>
                   <select class="form-select" id="hpo-scenario" name="scenario" required>
                     <option value="">Select a scenario</option>
@@ -57,8 +66,8 @@
                   {% if not scenarios %}
                   <small class="text-danger">No scenario template exists. Create one under "Create Simulation" first.</small>
                   {% endif %}
-                  <small class="text-secondary d-block">Every agent of the scenario uses the selected algorithm during
-                    the search.</small>
+                  <small class="text-secondary d-block" id="hpo-scenario-help">Every agent of the scenario uses the selected
+                    algorithm during the search.</small>
                 </div>
                 <div class="mb-3">
                   <label class="form-label" for="hpo-algorithm">Algorithm</label>
@@ -67,6 +76,7 @@
                     <option value="{{ algorithm.name }}" {% if algorithm.name == selected_algorithm %}selected{% endif %}>{{ algorithm.label }}</option>
                     {% endfor %}
                   </select>
+                  <small class="text-secondary d-block" id="hpo-algorithm-help"></small>
                 </div>
               </div>
             </div>
@@ -211,13 +221,21 @@
   <script src="{% static 'assets/js/plugins/smooth-scrollbar.min.js' %}"></script>
   <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/7.2.0/mdb.umd.min.js"></script>
 
+  {{ algorithm_options|json_script:"hpo-algorithm-options" }}
+  {{ scenario_algorithms|json_script:"hpo-scenario-algorithms" }}
   <script>
     (function () {
       'use strict';
+      var ALGORITHM_OPTIONS = JSON.parse(document.getElementById('hpo-algorithm-options').textContent);
+      var SCENARIO_ALGORITHMS = JSON.parse(document.getElementById('hpo-scenario-algorithms').textContent);
       var PARAM_SPACE_URL = "{% url 'hpo_param_space' %}";
       var CREATE_URL = "{% url 'hpo_create' %}";
       var form = document.getElementById('hpo-form');
       var algorithmSelect = document.getElementById('hpo-algorithm');
+      var scenarioSelect = document.getElementById('hpo-scenario');
+      var matchingToggle = document.getElementById('hpo-target-matching');
+      var scenarioHelp = document.getElementById('hpo-scenario-help');
+      var algorithmHelp = document.getElementById('hpo-algorithm-help');
       var paramRows = document.getElementById('hpo-param-rows');
       var failstackRows = document.getElementById('hpo-failstack-rows');
       var failstackToggle = document.getElementById('hpo-failstack');
@@ -322,6 +340,59 @@
         updateEstimate();
       }
 
+      // Target MATCHING: the algorithm select lists only the learning algorithms
+      // of the selected scenario (with agent counts) and is disabled until a
+      // scenario is chosen. Target ALL: every searchable algorithm.
+      function syncAlgorithms(skipLoad) {
+        var previous = algorithmSelect.value;
+        var matching = matchingToggle.checked;
+        var counts = SCENARIO_ALGORITHMS[scenarioSelect.value] || {};
+        algorithmSelect.innerHTML = '';
+        var options = ALGORITHM_OPTIONS.filter(function (option) {
+          return !matching || counts[option.name] > 0;
+        });
+        options.forEach(function (option) {
+          var label = option.label;
+          if (matching) {
+            var n = counts[option.name];
+            label += ' (' + n + (n === 1 ? ' agent' : ' agents') + ')';
+          }
+          algorithmSelect.appendChild(el('option', { value: option.name }, label));
+        });
+        var names = options.map(function (option) { return option.name; });
+        if (names.indexOf(previous) >= 0) {
+          algorithmSelect.value = previous;
+        } else if (names.length) {
+          algorithmSelect.value = names[0];
+        }
+        algorithmSelect.disabled = matching && !names.length;
+        if (matching && !scenarioSelect.value) {
+          algorithmSelect.appendChild(el('option', { value: '' }, 'Select a scenario first'));
+          algorithmSelect.value = '';
+          algorithmSelect.disabled = true;
+          algorithmHelp.textContent = '';
+        } else if (matching && !names.length) {
+          algorithmSelect.appendChild(el('option', { value: '' }, 'No agent of this scenario uses a learning algorithm'));
+          algorithmSelect.value = '';
+          algorithmHelp.textContent = 'Choose another scenario or switch off "Tune only the agents that already use the algorithm".';
+        } else {
+          algorithmHelp.textContent = matching ? 'Learning algorithms used by agents of the selected scenario.' : '';
+        }
+        scenarioHelp.textContent = matching
+          ? 'Only the agents that use the selected algorithm are tuned. The other agents keep their algorithm and parameters.'
+          : 'Every agent of the scenario uses the selected algorithm during the search.';
+        if (!skipLoad && algorithmSelect.value !== previous) {
+          if (algorithmSelect.value) { loadSpace(); } else { clearSpace(); }
+        }
+      }
+
+      function clearSpace() {
+        currentSpace = null;
+        paramRows.innerHTML = '<tr><td colspan="6" class="text-sm text-secondary">Select an algorithm.</td></tr>';
+        failstackRows.innerHTML = '';
+        updateEstimate();
+      }
+
       function loadSpace() {
         var algorithm = algorithmSelect.value;
         paramRows.innerHTML = '<tr><td colspan="6" class="text-sm text-secondary">Loading ...</td></tr>';
@@ -395,6 +466,7 @@
           name: value('hpo-name'),
           scenario: value('hpo-scenario'),
           algorithm_type: algorithmSelect.value,
+          target: matchingToggle.checked ? 'MATCHING' : 'ALL',
           failstack_enabled: failstack,
           colony_size: value('hpo-colony'),
           max_iter: value('hpo-iter'),
@@ -445,11 +517,14 @@
       });
 
       algorithmSelect.addEventListener('change', loadSpace);
+      matchingToggle.addEventListener('change', function () { syncAlgorithms(false); });
+      scenarioSelect.addEventListener('change', function () { syncAlgorithms(false); });
       failstackToggle.addEventListener('change', syncFailstack);
       ['hpo-colony', 'hpo-iter', 'hpo-search-seeds', 'hpo-eval-seeds'].forEach(function (id) {
         document.getElementById(id).addEventListener('input', updateEstimate);
       });
-      if (algorithmSelect.value) { loadSpace(); }
+      if (matchingToggle.checked) { syncAlgorithms(true); }
+      if (algorithmSelect.value) { loadSpace(); } else { clearSpace(); }
     })();
   </script>
 </body>

@@ -67,6 +67,7 @@
                       <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ps-3">Name</th>
                       <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Status</th>
                       <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Algorithm</th>
+                      <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Tuned agents</th>
                       <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Scenario</th>
                       <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Trials</th>
                       <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Best score</th>
@@ -92,6 +93,7 @@
                         {% endif %}
                       </td>
                       <td><span class="text-sm">{{ row.algorithm }}</span></td>
+                      <td><span class="text-sm hpo-target">{{ row.study.get_target_display }}</span></td>
                       <td><span class="text-sm">{{ row.study.scenario.name }}</span></td>
                       <td><span class="text-sm">{{ row.n_done }} / {{ row.study.n_trials }}</span></td>
                       <td>
@@ -106,7 +108,7 @@
                     </tr>
                     {% empty %}
                     <tr>
-                      <td colspan="8" class="text-sm text-secondary ps-3">No study yet. Start one with "New Search".</td>
+                      <td colspan="9" class="text-sm text-secondary ps-3">No study yet. Start one with "New Search".</td>
                     </tr>
                     {% endfor %}
                   </tbody>

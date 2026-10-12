@@ -45,6 +45,7 @@
                 <span class="badge bg-gradient-secondary me-3" id="hpo-status">{{ status }}</span>
                 <span class="text-sm me-3"><strong>Algorithm:</strong> {{ algorithm }}</span>
                 <span class="text-sm me-3"><strong>Scenario:</strong> {{ study.scenario.name }} (#{{ study.scenario.id }})</span>
+                <span class="text-sm me-3" id="hpo-target"><strong>Mode:</strong> {{ study.get_target_display }}</span>
                 <div class="ms-auto">
                   <a class="btn btn-sm bg-gradient-secondary mb-0 me-2" href="{% url 'hpo_list' %}">Back</a>
                   <button class="btn btn-sm bg-gradient-danger mb-0 d-none" id="hpo-cancel" type="button">Cancel search</button>
@@ -65,6 +66,11 @@
                 search seeds [{{ search_seeds }}], evaluation seeds [{{ evaluation_seeds }}] -
                 objective {{ weights.0 }} x agent score + {{ weights.1 }} x market score
                 {% if fixed_params.failstack_enabled %}- fail-stack on{% if fixed_params.failstack_limit %}, limit {{ fixed_params.failstack_limit }}{% endif %}{% if fixed_params.failstack_delta is not None %}, delta {{ fixed_params.failstack_delta }}{% endif %}{% else %}- fail-stack off{% endif %}
+              </div>
+              <div class="text-xs text-secondary" id="hpo-tuned-agents">
+                Tuned agents{% if matching %} (agents that use {{ algorithm }}){% else %} (all agents run {{ algorithm }}){% endif %}:
+                {% for name in tuned_agents %}{{ name }}{% if not forloop.last %}, {% endif %}{% empty %}none{% endfor %}
+                {% if matching %}- the agent score is the mean over these agents, the market score covers the whole market{% endif %}
               </div>
               <div class="text-xs text-secondary">
                 Bounds:
@@ -101,8 +107,11 @@
               <p class="text-sm" id="hpo-apply-hint">Available when the study has FINISHED.</p>
               <button class="btn btn-sm bg-gradient-primary mb-2 me-2" id="hpo-apply-default" type="button" disabled>As {{ algorithm }} default</button>
               <button class="btn btn-sm bg-gradient-info mb-2" id="hpo-apply-scenario" type="button" disabled>To scenario agents</button>
-              <div class="form-check">
-                <input class="form-check-input" type="checkbox" id="hpo-switch-algorithm" checked>
+              {% if matching %}
+              <p class="text-xs text-secondary mb-1">The search tuned only the agents that use {{ algorithm }}, so only these agents are updated.</p>
+              {% endif %}
+              <div class="form-check{% if matching %} d-none{% endif %}">
+                <input class="form-check-input" type="checkbox" id="hpo-switch-algorithm"{% if not matching %} checked{% endif %}>
                 <label class="form-check-label text-sm" for="hpo-switch-algorithm">Switch every scenario agent to {{ algorithm }}
                   (as in the search). Unchecked: only agents that already use {{ algorithm }} are updated.</label>
               </div>

@@ -120,11 +120,27 @@ def write_parameter_snapshot(
     )
 
 
+def overrides_apply(algorithm_type: object, override_algorithm: object | None) -> bool:
+    """Return True if HPO overrides apply to an agent with this algorithm (PLAN 2.15).
+
+    Args:
+        algorithm_type: Key of the effective algorithm of the agent.
+        override_algorithm: Algorithm key the overrides are restricted to, or
+            None when they apply to every agent.
+
+    Returns:
+        True when ``override_algorithm`` is None or equals ``algorithm_type``.
+    """
+    return override_algorithm is None or str(algorithm_type) == str(override_algorithm)
+
+
 def agent_params(
     agent: Agent,
     algorithm_type: str,
     defaults: Mapping[str, Mapping[str, Any]],
     algorithm_overrides: Mapping[str, Any] | None = None,
+    *,
+    override_algorithm: str | None = None,
 ) -> dict[str, Any]:
     """Return the effective parameters of an agent's policy (OQ-9).
 
@@ -133,16 +149,20 @@ def agent_params(
         algorithm_type: Key of the effective algorithm of the agent in this run.
         defaults: Output of :func:`algorithm_defaults`.
         algorithm_overrides: HPO overrides applied last.
+        override_algorithm: When given, ``algorithm_overrides`` apply only if
+            ``algorithm_type`` equals this key (:func:`overrides_apply`).
 
     Returns:
         ``defaults[algorithm_type]``, overridden by ``Agent.algorithm_params``
         (only when ``algorithm_type`` is the agent's own), overridden by
-        ``algorithm_overrides``.
+        ``algorithm_overrides`` (only when they apply to ``algorithm_type``).
     """
     params: dict[str, Any] = dict(defaults.get(algorithm_type, {}))
     if str(algorithm_type) == str(agent.algorithm_type):
         params.update(agent.algorithm_params or {})
-    if algorithm_overrides is not None:
+    if algorithm_overrides is not None and overrides_apply(
+        algorithm_type, override_algorithm
+    ):
         params.update(algorithm_overrides)
     return params
 
@@ -574,6 +594,7 @@ class SimulationContext:
         algorithm_overrides: Mapping[str, Any] | None = None,
         *,
         forced_algorithm: str | None = None,
+        override_algorithm: str | None = None,
         export_json: bool = True,
         demand: DemandSeries | None = None,
     ) -> SimulationContext:
@@ -594,6 +615,9 @@ class SimulationContext:
             algorithm_overrides: HPO parameter overrides applied to every agent.
             forced_algorithm: Algorithm key used for every agent instead of
                 ``Agent.algorithm_type`` (HPO, K7).
+            override_algorithm: When given, ``algorithm_overrides`` apply only
+                to the agents whose effective algorithm is this key (HPO
+                target MATCHING, PLAN 2.15).
             export_json: Stored on the context for the run loop.
             demand: Demand series to use. When None, generated from
                 ``simulation.demand_profile`` or read from ``marketData.xlsx``
@@ -718,7 +742,13 @@ class SimulationContext:
                     f"available, known keys: "
                     f"{[info.key for info in registry.available_algorithms()]}"
                 )
-            params = agent_params(agent, algorithm_type, defaults, algorithm_overrides)
+            params = agent_params(
+                agent,
+                algorithm_type,
+                defaults,
+                algorithm_overrides,
+                override_algorithm=override_algorithm,
+            )
             resolved.append((agent, rng, plants, total_capacity, algorithm_type, params))
 
         learners: list[tuple[str, AlgorithmConfig]] = []
