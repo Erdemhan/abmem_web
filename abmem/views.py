@@ -22,6 +22,7 @@ from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
+from django.views.decorators.http import require_POST
 
 from .forms import AgentForm, PlantForm, ResourceForm
 from .models import Agent, DemandProfileTemplate, Simulation, enums
@@ -84,6 +85,34 @@ SEED_UPPER_BOUND: Final[int] = 2**31
 WIZARD_DEFAULT_PERIODS: Final[int] = 168
 WIZARD_DEFAULT_LOWER_BOUND: Final[int] = 0
 WIZARD_DEFAULT_UPPER_BOUND: Final[int] = 200
+
+# Duration units of the wizard: (key, label, hours). periodNumber is always
+# stored in hours. A month is 30 days and a year 365 days.
+PERIOD_UNITS: Final[tuple[tuple[str, str, int], ...]] = (
+    ("hour", "Hour", 1),
+    ("day", "Day", 24),
+    ("week", "Week", 168),
+    ("month", "Month", 720),
+    ("year", "Year", 8760),
+)
+
+
+def period_unit_for(period_number: int) -> tuple[str, int]:
+    """Return the largest duration unit that divides a period count exactly.
+
+    Args:
+        period_number: Number of hourly periods.
+
+    Returns:
+        ``(unit key, count)`` with ``count * hours(unit) == period_number``.
+        The unit is ``hour`` when no larger unit divides ``period_number``
+        or when it is not positive.
+    """
+    if period_number > 0:
+        for key, _, hours in sorted(PERIOD_UNITS, key=lambda unit: -unit[2]):
+            if period_number % hours == 0:
+                return key, period_number // hours
+    return PERIOD_UNITS[0][0], period_number
 
 
 def _add_errors(
@@ -868,6 +897,122 @@ def _check_learning_start(simulation: Simulation) -> None:
         raise ValidationError({"learning_starts": [str(exc)]}) from exc
 
 
+def _entry_learning_agent(
+    entry: ScenarioAgentEntry,
+) -> tuple[str, str, Mapping[str, Any]]:
+    """Return the learning-start description of one validated payload agent.
+
+    The parameters are those the saved agent will have: the library agent's
+    for a ``library`` entry, the kept agent's for a ``scenario`` entry (they
+    are not changed by an edit) and none for a ``new`` entry.
+
+    Args:
+        entry: Output of ``_parse_scenario_agents``.
+
+    Returns:
+        ``(label, algorithm_key, params)`` for ``resolve_learning_start``.
+    """
+    if entry.library_agent is not None:
+        key = str(entry.library_agent.algorithm_type)
+        params: Mapping[str, Any] = entry.library_agent.algorithm_params or {}
+    else:
+        key = str(entry.data.algorithm_type)
+        if entry.scenario_agent is not None:
+            params = entry.scenario_agent.algorithm_params or {}
+        else:
+            params = entry.data.algorithm_params or {}
+    return f"{entry.name!r} ({key})", key, params
+
+
+@require_POST
+def learning_start_preview(request: HttpRequest) -> JsonResponse:
+    """Return the common learning start of unsaved wizard settings (PLAN 2.14).
+
+    Nothing is written. The body is a JSON object with ``learning_starts``
+    (empty or null for automatic), ``observation_lags``, ``agents`` (entries
+    of the scenario payload, see ``_parse_scenario_agents``) and, on the
+    update page, ``simulation_id`` of the edited scenario (needed by
+    ``scenario`` entries). The values are validated by the parsers of the
+    scenario save, and the range check is the one of the save.
+
+    Args:
+        request: POST request with a JSON body.
+
+    Returns:
+        ``{"automatic", "value", "first_period", "minimum", "limit"}``.
+        ``value``, ``first_period``, ``minimum`` and ``limit`` are null
+        without learning agents (``limit`` also when no agent has a replay
+        buffer). HTTP 400 ``{"errors": {...}}`` for an invalid body, an
+        invalid agent entry or a learning start out of range
+        (key ``learning_starts``).
+    """
+    from .services.simulation.context import (
+        SimulationValidationError,
+        first_learning_period,
+        resolve_learning_start,
+    )
+
+    try:
+        data = json.loads(request.body)
+    except json.JSONDecodeError:
+        data = None
+    if not isinstance(data, dict):
+        return JsonResponse({"errors": {"body": ["Invalid JSON."]}}, status=400)
+
+    errors: dict[str, list[str]] = {}
+    learning_starts = _parse_learning_starts(data, None, errors)
+    observation_lags = default_observation_lags()
+    if "observation_lags" in data:
+        lags = _coerce_observation_lags(data["observation_lags"])
+        if lags is None:
+            errors["observation_lags"] = [_observation_lags_message()]
+        else:
+            observation_lags = lags
+    market = None
+    if data.get("simulation_id") not in (None, ""):
+        scenario = Simulation.objects.filter(
+            id=_coerce_id(data["simulation_id"]), proxy=True
+        ).first()
+        if scenario is None:
+            errors["simulation_id"] = [
+                f"Scenario {data['simulation_id']!r} does not exist."
+            ]
+        else:
+            market = scenario.market
+    if errors:
+        return JsonResponse({"errors": errors}, status=400)
+
+    try:
+        entries = _parse_scenario_agents(data.get("agents", []), market)
+    except ValidationError as exc:
+        return _validation_error_response(exc)
+    try:
+        resolved = resolve_learning_start(
+            learning_starts, [_entry_learning_agent(entry) for entry in entries]
+        )
+    except SimulationValidationError as exc:
+        return JsonResponse({"errors": {"learning_starts": [str(exc)]}}, status=400)
+    if resolved is None:
+        return JsonResponse(
+            {
+                "automatic": learning_starts is None,
+                "value": None,
+                "first_period": None,
+                "minimum": None,
+                "limit": None,
+            }
+        )
+    return JsonResponse(
+        {
+            "automatic": resolved.automatic,
+            "value": resolved.value,
+            "first_period": first_learning_period(observation_lags, resolved.value),
+            "minimum": resolved.minimum,
+            "limit": resolved.limit,
+        }
+    )
+
+
 def _save_scenario(
     write: Callable[[], None], entries: list[ScenarioAgentEntry]
 ) -> JsonResponse | None:
@@ -992,6 +1137,19 @@ def _coerce_observation_lags(raw_value: Any) -> list[int] | None:
     return None
 
 
+def _observation_lags_message() -> str:
+    """Return the error message of an observation lag set that is not allowed.
+
+    Returns:
+        The message listing ``ALLOWED_OBSERVATION_LAGS``.
+    """
+    return (
+        "Observation lags must be one of: "
+        + " or ".join(", ".join(map(str, lags)) for lags in ALLOWED_OBSERVATION_LAGS)
+        + "."
+    )
+
+
 DEMAND_PROFILE_KEY: Final[str] = PAYLOAD_KEY
 DEMAND_SOURCE_KEY: Final[str] = "demand_profile_source"
 
@@ -1051,13 +1209,7 @@ def _parse_run_settings(
     if "observation_lags" in data:
         observation_lags = _coerce_observation_lags(data["observation_lags"])
         if observation_lags is None:
-            errors["observation_lags"] = [
-                "Observation lags must be one of: "
-                + " or ".join(
-                    ", ".join(map(str, lags)) for lags in ALLOWED_OBSERVATION_LAGS
-                )
-                + "."
-            ]
+            errors["observation_lags"] = [_observation_lags_message()]
             observation_lags = default_observation_lags()
     elif current is not None:
         observation_lags = list(current.observation_lags)
@@ -2042,7 +2194,8 @@ def _wizard_context(simulation: Simulation | None = None) -> dict[str, Any]:
         Context with ``resources``, ``allowed_energy_types``, the run settings
         ``run_seed``, ``run_evaluation_periods``, ``run_learning_starts``,
         ``run_observation_lags``
-        (option value), ``observation_lag_choices`` (value, label pairs),
+        (option value), ``period_units``, ``run_period_unit`` and
+        ``run_period_count`` (duration selector), ``observation_lag_choices`` (value, label pairs),
         ``wizard_config`` (JSON for the page script) and ``simulation`` when
         editing.
     """
@@ -2104,6 +2257,11 @@ def _wizard_context(simulation: Simulation | None = None) -> dict[str, Any]:
         "check_name_url": reverse("agent_check_name"),
         "demand_stats_url": reverse("demand_stats"),
         "demand_preview_url": reverse("demand_preview"),
+        "learning_start_preview_url": reverse("learning_start_preview"),
+        "period_units": [
+            {"key": key, "label": label, "hours": hours}
+            for key, label, hours in PERIOD_UNITS
+        ],
         "demand_library": _demand_library_options(),
         # The page replaces the id 0 by the selected profile id.
         "demand_profile_detail_url": reverse("demand_profile_detail_json", args=[0]),
@@ -2139,9 +2297,13 @@ def _wizard_context(simulation: Simulation | None = None) -> dict[str, Any]:
             for info in available_clearing_algorithms()
         ],
     }
+    period_unit, period_count = period_unit_for(int(initial["periodNumber"]))
     context: dict[str, Any] = {
         "resources": resources,
         "allowed_energy_types": allowed_energy_types_by_agent_type(),
+        "period_units": PERIOD_UNITS,
+        "run_period_unit": period_unit,
+        "run_period_count": period_count,
         "run_seed": initial["seed"],
         "run_evaluation_periods": initial["evaluation_periods"],
         "run_learning_starts": initial["learning_starts"],

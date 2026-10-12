@@ -29,6 +29,7 @@ urlpatterns = [
     path('simulation/import/confirm', views_scenario.import_scenario_confirm, name='import_scenario_confirm'),
     path('simulation/demand-stats/', views_scenario.demand_stats, name='demand_stats'),
     path('simulation/demand-preview/', views_scenario.demand_preview, name='demand_preview'),
+    path('simulation/learning-start-preview/', views.learning_start_preview, name='learning_start_preview'),
     path('simulation/watch/<str:simulation_id>/', views.watch_simulation, name='watch_simulation'),
     path('simulation/status/', views.get_simulation_status, name='get_simulation_status'),
     path('simulation/next/', views.nextPeriod, name='nextPeriod'),

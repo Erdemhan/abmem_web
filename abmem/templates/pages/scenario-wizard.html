@@ -122,12 +122,24 @@
                                 <label class="btn btn-outline-primary btn-sm mb-0" for="duration-custom">Custom</label>
                             </div>
                             <div class="row">
-                                <div class="col-12 col-sm-6 col-lg-3">
-                                    <label for="periodNumber" class="form-label">Number of periods (hours)</label>
-                                    <input type="number" id="periodNumber" class="form-control" min="1" step="1"
-                                        value="{{ wizard_config.initial.periodNumber }}" aria-describedby="periodNumber-hint periodNumber-feedback" required>
+                                <div class="col-12 col-sm-6 col-lg-4">
+                                    <label for="periodCount" class="form-label">Number of periods</label>
+                                    <!-- periodNumber holds the stored value in hours: count x hours of the unit. -->
+                                    <div class="input-group">
+                                        <input type="number" id="periodCount" class="form-control" min="1" step="1"
+                                            value="{{ run_period_count }}" aria-describedby="periodNumber-hint periodNumber-feedback" required>
+                                        <select class="form-control" id="periodUnit" aria-label="Duration unit">
+                                            {% for key, label, hours in period_units %}
+                                            <option value="{{ key }}" data-hours="{{ hours }}" {% if key == run_period_unit %}selected{% endif %}>{{ label }}</option>
+                                            {% endfor %}
+                                        </select>
+                                    </div>
+                                    <input type="hidden" id="periodNumber" value="{{ wizard_config.initial.periodNumber }}">
                                     <small id="periodNumber-hint" class="form-text text-muted"></small>
                                     <div class="invalid-feedback" id="periodNumber-feedback"></div>
+                                </div>
+                                <div class="col-12 col-sm-6 col-lg-8 d-flex align-items-end">
+                                    <p class="text-sm mb-2" id="learning-start-info" role="status" aria-live="polite"></p>
                                 </div>
                             </div>
                             <input type="hidden" id="periodType" value="{{ wizard_config.initial.periodType }}">
@@ -476,6 +488,7 @@
 
             var CONFIG = JSON.parse(document.getElementById('wizard-config').textContent);
             var STEP_COUNT = 4;
+            var AGENTS_STEP = 2;
             var PRESETS = ['24', '168', '336'];
             var FIELD_STEP = {
                 simulation_name: 0, periodNumber: 0, periodType: 0, simulationMode: 0,
@@ -522,11 +535,22 @@
                 editingKey: null,
                 saving: false,
                 saved: false,
-                draftPending: false
+                draftPending: false,
+                // Learning start preview (PLAN 2.14): request key, reply and pending callbacks.
+                learningFor: null,
+                learningLoading: false,
+                learningResult: null,
+                learningErrors: null,
+                learningWaiters: []
             };
             var nextKey = 1;
             var demandTimer = null;
             var draftTimer = null;
+            var learningTimer = null;
+            var learningSeq = 0;
+            var PERIOD_UNITS = CONFIG.period_units || [];
+            // A form field whose visible input has another id than its error key.
+            var FIELD_INPUTS = { periodNumber: 'periodCount' };
 
             function byId(id) { return document.getElementById(id); }
 
@@ -572,6 +596,7 @@
                     simulationMode: radioValue('simulationMode'),
                     periodType: byId('periodType').value,
                     periodNumber: byId('periodNumber').value.trim(),
+                    periodUnit: byId('periodUnit').value,
                     strategy: radioValue('strategy'),
                     clearing_algorithm: byId('clearing_algorithm').value,
                     clearing_params: readClearingParams(),
@@ -590,7 +615,7 @@
                 byId('simulation_name').value = values.simulation_name || '';
                 setRadio('simulationMode', values.simulationMode);
                 byId('periodType').value = values.periodType;
-                byId('periodNumber').value = values.periodNumber;
+                setPeriodFromHours(values.periodNumber, values.periodUnit);
                 setRadio('strategy', values.strategy);
                 setClearingAlgorithm(values.clearing_algorithm);
                 renderClearingParams(values.clearing_params || {});
@@ -635,6 +660,7 @@
 
             function buildPayload() {
                 var payload = readForm();
+                delete payload.periodUnit;
                 payload.agents = state.agents.map(agentPayload);
                 return payload;
             }
@@ -854,6 +880,7 @@
             }
 
             function agentsChanged() {
+                scheduleLearningPreview();
                 setFieldError('agents', '');
                 renderAgents();
                 renderLibrary();
@@ -1216,7 +1243,7 @@
             // ---------------------------------------------------------------- validation
 
             function setFieldError(field, message) {
-                var input = byId(field);
+                var input = byId(FIELD_INPUTS[field] || field);
                 var feedback = byId(field + '-feedback');
                 if (input && input.tagName !== 'FIELDSET') { input.classList.toggle('is-invalid', Boolean(message)); }
                 if (feedback) {
@@ -1359,18 +1386,92 @@
                     goTo(target);
                     return;
                 }
+                var checksLearningStart = false;
                 for (var step = state.step; step < target; step++) {
                     if (!validateAndShow(step)) {
                         goTo(step);
                         focusFirstError();
                         return;
                     }
+                    if (step === FIELD_STEP.learning_starts || step === AGENTS_STEP) { checksLearningStart = true; }
                 }
+                if (!checksLearningStart) {
+                    enterStep(target);
+                    return;
+                }
+                // The server checks the learning start against the agents (the same check as the save).
+                var from = state.step;
+                byId('wizard-next').disabled = true;
+                fetchLearningPreview(function (errors) {
+                    byId('wizard-next').disabled = false;
+                    if (state.step !== from) { return; }
+                    if (errors && errors.learning_starts) {
+                        goTo(FIELD_STEP.learning_starts);
+                        setFieldError('learning_starts', [].concat(errors.learning_starts).join(' '));
+                        openAdvanced();
+                        focusFirstError();
+                        return;
+                    }
+                    enterStep(target);
+                });
+            }
+
+            function enterStep(target) {
                 goTo(target);
                 byId('scenario-wizard').scrollIntoView({ block: 'start' });
             }
 
             // ---------------------------------------------------------------- duration
+
+            function unitByKey(key) {
+                return PERIOD_UNITS.filter(function (unit) { return unit.key === key; })[0] || PERIOD_UNITS[0];
+            }
+
+            // Largest unit that divides the hours exactly, else Hour (same rule as views.period_unit_for).
+            function unitForHours(hours) {
+                var units = PERIOD_UNITS.slice().sort(function (a, b) { return b.hours - a.hours; });
+                for (var i = 0; i < units.length; i++) {
+                    if (hours > 0 && hours % units[i].hours === 0) { return units[i]; }
+                }
+                return PERIOD_UNITS[0];
+            }
+
+            // Shows a stored hour value as count and unit. The preferred unit is kept when it divides the hours.
+            function setPeriodFromHours(hours, preferredKey) {
+                var text = hours === undefined || hours === null ? '' : String(hours).trim();
+                var unit = PERIOD_UNITS[0];
+                if (/^\d+$/.test(text) && Number(text) > 0) {
+                    var preferred = preferredKey ? unitByKey(preferredKey) : null;
+                    unit = preferred && preferred.key === preferredKey && Number(text) % preferred.hours === 0
+                        ? preferred : unitForHours(Number(text));
+                    byId('periodCount').value = String(Number(text) / unit.hours);
+                } else {
+                    byId('periodCount').value = text;
+                }
+                byId('periodUnit').value = unit.key;
+                byId('periodNumber').value = text;
+            }
+
+            // periodNumber (hours) = count x hours of the unit. An invalid count is kept as typed so validation reports it.
+            function syncPeriodHours() {
+                var count = byId('periodCount').value.trim();
+                var unit = unitByKey(byId('periodUnit').value);
+                byId('periodNumber').value = /^\d+$/.test(count) && unit ? String(Number(count) * unit.hours) : count;
+            }
+
+            function unitText(count, unit) {
+                return count + ' ' + unit.label.toLowerCase() + (Number(count) === 1 ? '' : 's');
+            }
+
+            // Review text of the duration, for example "1 year (8760 hours)".
+            function durationText(values) {
+                var hours = values.periodNumber;
+                var unit = unitByKey(values.periodUnit);
+                if (!/^\d+$/.test(hours) || !unit) { return hours; }
+                var hoursText = unitText(hours, PERIOD_UNITS[0]);
+                if (unit.hours === 1 || Number(hours) % unit.hours !== 0) { return hoursText; }
+                return unitText(Number(hours) / unit.hours, unit) + ' (' + hoursText + ')';
+            }
 
             function syncDurationPreset() {
                 var periods = byId('periodNumber').value.trim();
@@ -1378,11 +1479,127 @@
                 setRadio('durationPreset', preset);
                 var hint = '';
                 if (/^\d+$/.test(periods) && Number(periods) > 0) {
-                    var days = Number(periods) / 24;
-                    hint = 'Hourly periods, ' + (Number.isInteger(days) ? days : days.toFixed(1)) + (days === 1 ? ' day.' : ' days.');
+                    hint = '= ' + unitText(periods, PERIOD_UNITS[0]);
                 }
                 byId('periodNumber-hint').textContent = hint;
                 syncDemandHorizon();
+                renderLearningInfo();
+            }
+
+            // ---------------------------------------------------------------- learning start (PLAN 2.14)
+
+            function learningRequest() {
+                var learningStarts = byId('learning_starts').value.trim();
+                if (state.agents.length === 0) { return { key: null, message: 'none' }; }
+                if (learningStarts !== '' && (!/^\d+$/.test(learningStarts) || Number(learningStarts) < 1)) {
+                    return { key: null, message: 'format' };
+                }
+                var body = {
+                    learning_starts: learningStarts,
+                    observation_lags: byId('observation_lags').value.split(',').map(Number),
+                    agents: state.agents.map(agentPayload)
+                };
+                if (CONFIG.simulation_id) { body.simulation_id = CONFIG.simulation_id; }
+                return { key: JSON.stringify(body), body: body };
+            }
+
+            function scheduleLearningPreview() {
+                clearTimeout(learningTimer);
+                learningTimer = setTimeout(function () { fetchLearningPreview(null); }, 400);
+            }
+
+            // Requests the preview of the current inputs unless it is known. done(errors) runs when the reply is in.
+            function fetchLearningPreview(done) {
+                clearTimeout(learningTimer);
+                var request = learningRequest();
+                if (request.key === null) {
+                    learningSeq++;
+                    state.learningFor = null;
+                    state.learningLoading = false;
+                    state.learningResult = null;
+                    state.learningErrors = null;
+                    renderLearningInfo();
+                    flushLearningWaiters();
+                    if (done) { done(null); }
+                    return;
+                }
+                if (done) { state.learningWaiters.push(done); }
+                if (request.key === state.learningFor) {
+                    if (!state.learningLoading) { flushLearningWaiters(); }
+                    return;
+                }
+                var seq = ++learningSeq;
+                state.learningFor = request.key;
+                state.learningLoading = true;
+                state.learningResult = null;
+                state.learningErrors = null;
+                renderLearningInfo();
+                postJson(CONFIG.learning_start_preview_url, request.body).then(function (result) {
+                    if (seq !== learningSeq) { return; }
+                    state.learningLoading = false;
+                    if (result.ok) {
+                        state.learningResult = result.body;
+                    } else {
+                        state.learningErrors = result.body.errors || { body: ['HTTP ' + result.status] };
+                    }
+                    renderLearningInfo();
+                    flushLearningWaiters();
+                }).catch(function () {
+                    if (seq !== learningSeq) { return; }
+                    // The save checks the value again, so a failed preview does not block.
+                    state.learningLoading = false;
+                    state.learningFor = null;
+                    renderLearningInfo();
+                    flushLearningWaiters();
+                });
+            }
+
+            function flushLearningWaiters() {
+                var waiters = state.learningWaiters;
+                state.learningWaiters = [];
+                waiters.forEach(function (callback) { callback(state.learningErrors); });
+            }
+
+            // Text and style of the learning start info next to the number of periods.
+            function learningInfo() {
+                var request = learningRequest();
+                if (request.message === 'none') {
+                    return { text: 'The period in which learning starts depends on the agents (none chosen yet).', tone: 'muted' };
+                }
+                if (request.message === 'format') { return { text: '', tone: 'muted' }; }
+                if (state.learningLoading) { return { text: 'Computing the learning start...', tone: 'muted' }; }
+                if (state.learningErrors) {
+                    var own = state.learningErrors.learning_starts;
+                    return {
+                        text: own ? [].concat(own).join(' ') : 'The learning start is shown when the agents are valid.',
+                        tone: own ? 'danger' : 'muted'
+                    };
+                }
+                var result = state.learningResult;
+                if (!result) { return { text: '', tone: 'muted' }; }
+                if (result.value === null) { return { text: 'No learning agents.', tone: 'muted' }; }
+                var text = 'Learning starts in period ' + result.first_period + ' ('
+                    + (result.automatic ? 'automatic' : 'set') + ': ' + result.value + ' transitions).';
+                var warning = learningWarning(result);
+                return warning ? { text: text + ' ' + warning, tone: 'warning' } : { text: text, tone: 'muted' };
+            }
+
+            // Warning when the first learning period is after the last period of the run, else ''.
+            function learningWarning(result) {
+                var periods = byId('periodNumber').value.trim();
+                if (!result || result.first_period === null || result.first_period === undefined
+                    || !/^\d+$/.test(periods)) { return ''; }
+                if (result.first_period <= Number(periods)) { return ''; }
+                return 'This is after the last period (' + periods + '), so the agents do not learn in this run.';
+            }
+
+            function renderLearningInfo() {
+                var box = byId('learning-start-info');
+                var info = learningInfo();
+                box.textContent = info.text;
+                box.classList.toggle('text-secondary', info.tone === 'muted');
+                box.classList.toggle('text-warning', info.tone === 'warning');
+                box.classList.toggle('text-danger', info.tone === 'danger');
             }
 
             // The season text of the demand editor counts the winter periods up to the run length.
@@ -1415,6 +1632,10 @@
                     warnings.push('The whole run is summer: the last summer period (' + summerEnd
                         + ') is not before the end of the run (' + values.periodNumber + ' periods), so the winter settings are not used.');
                 }
+                var learningWarningText = learningWarning(state.learningErrors ? null : state.learningResult);
+                if (learningWarningText) {
+                    warnings.push('Learning starts in period ' + state.learningResult.first_period + '. ' + learningWarningText);
+                }
                 state.agents.forEach(function (row) {
                     if (row.plants.length === 0) {
                         warnings.push('Agent ' + row.name + ' has no plants and cannot make offers.');
@@ -1428,7 +1649,7 @@
                 var basics = byId('review-basics');
                 basics.textContent = '';
                 addReviewItem(basics, 'Name', values.simulation_name);
-                addReviewItem(basics, 'Duration', values.periodNumber + ' hourly periods');
+                addReviewItem(basics, 'Duration', durationText(values));
                 addReviewItem(basics, 'Mode', MODE_LABELS[values.simulationMode] || '-');
                 addReviewItem(basics, 'Seed', values.seed);
                 addReviewItem(basics, 'Evaluation periods', values.evaluation_periods);
@@ -1707,6 +1928,7 @@
                 state.rowErrors = {};
                 state.demandFor = null;
                 fetchDemand(true);
+                fetchLearningPreview(null);
                 renderAgents();
                 goTo(0);
             }
@@ -1771,7 +1993,7 @@
                     if (radio.value === 'custom') {
                         byId('periodNumber').focus();
                     } else {
-                        byId('periodNumber').value = radio.value;
+                        setPeriodFromHours(radio.value, null);
                         setFieldError('periodNumber', '');
                     }
                     syncDurationPreset();
@@ -1779,10 +2001,21 @@
                     scheduleDraft();
                 });
             });
-            byId('periodNumber').addEventListener('input', function () {
+            ['input', 'change'].forEach(function (type) {
+                byId('periodCount').addEventListener(type, function () {
+                    syncPeriodHours();
+                    syncDurationPreset();
+                    scheduleDemand();
+                });
+            });
+            byId('periodUnit').addEventListener('change', function () {
+                syncPeriodHours();
+                setFieldError('periodNumber', '');
                 syncDurationPreset();
                 scheduleDemand();
             });
+            byId('learning_starts').addEventListener('input', scheduleLearningPreview);
+            byId('observation_lags').addEventListener('change', scheduleLearningPreview);
             byId('clearing_algorithm').addEventListener('change', function () {
                 updateClearingHelp();
                 renderClearingParams({});
@@ -1807,6 +2040,7 @@
                     if (target.id && Object.prototype.hasOwnProperty.call(FIELD_STEP, target.id)) {
                         setFieldError(target.id, '');
                     }
+                    if (target.id === 'periodCount') { setFieldError('periodNumber', ''); }
                     if (target.name === 'simulationMode' || target.name === 'strategy') {
                         setFieldError(target.name, '');
                     }
@@ -1970,6 +2204,7 @@
             syncDemandHorizon();
             goTo(0);
             fetchDemand(true);
+            fetchLearningPreview(null);
             offerDraft();
         })();
     </script>

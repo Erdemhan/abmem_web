@@ -227,13 +227,106 @@ def common_learning_starts(
     return value
 
 
+@dataclass(frozen=True)
+class LearningStart:
+    """Common learning start of a set of learning agents (PLAN 2.14).
+
+    Attributes:
+        value: The common learning start ``L`` in stored transitions.
+        automatic: True when ``value`` is the automatic value (no scenario
+            value is set).
+        minimum: Largest technical minimum (``min_learning_starts()``) of the
+            learning agents, the smallest value a scenario may set.
+        limit: Smallest replay buffer size of the learning agents, the
+            largest value a scenario may set. None when no agent has a limit.
+    """
+
+    value: int
+    automatic: bool
+    minimum: int
+    limit: int | None
+
+
+def resolve_learning_start(
+    explicit: int | None,
+    agents: Sequence[tuple[str, str, Mapping[str, Any]]],
+    defaults: Mapping[str, Mapping[str, Any]] | None = None,
+) -> LearningStart | None:
+    """Return the common learning start of agents that need not be saved (PLAN 2.14).
+
+    Each agent's parameters are resolved as :func:`agent_params` does for an
+    agent whose effective algorithm is its own: ``defaults[algorithm_key]``
+    overridden by the agent's own parameters. Baselines and unknown
+    algorithm keys are ignored. Agents with invalid parameters are skipped,
+    because :meth:`SimulationContext.build` reports those with their own
+    message.
+
+    Args:
+        explicit: ``Simulation.learning_starts``, None for automatic.
+        agents: ``(label, algorithm_key, params)`` per agent, ``params``
+            being the agent's own ``algorithm_params``.
+        defaults: Output of :func:`algorithm_defaults`, read from the
+            database when None.
+
+    Returns:
+        The resolved learning start, None without learning agents.
+
+    Raises:
+        SimulationValidationError: ``explicit`` is out of range for an agent
+            (message of :func:`common_learning_starts`).
+    """
+    from abmem.services.algorithms import registry
+
+    if defaults is None:
+        defaults = algorithm_defaults()
+    learners: list[tuple[str, AlgorithmConfig]] = []
+    for label, key, own_params in agents:
+        key = str(key)
+        if not registry.is_known(key) or registry.is_baseline(key):
+            continue
+        params: dict[str, Any] = dict(defaults.get(key, {}))
+        params.update(own_params or {})
+        try:
+            config = learner_config(key, params)
+        except (KeyError, TypeError, ValueError):
+            continue
+        learners.append((label, config))
+    value = common_learning_starts(explicit, learners)
+    if value is None:
+        return None
+    limits = [
+        limit
+        for limit in (config.learning_starts_limit() for _, config in learners)
+        if limit is not None
+    ]
+    return LearningStart(
+        value=value,
+        automatic=explicit is None,
+        minimum=max(config.min_learning_starts() for _, config in learners),
+        limit=min(limits) if limits else None,
+    )
+
+
+def first_learning_period(observation_lags: Sequence[int], learning_start: int) -> int:
+    """Return the period of the first gradient update of a run (EQ-09a).
+
+    Args:
+        observation_lags: Observation lag set of the run.
+        learning_start: Common learning start ``L`` in stored transitions.
+
+    Returns:
+        ``t0 + L`` with ``t0 = max(observation_lags) + 1``, the first period
+        with a complete observation (periods are numbered from 1).
+    """
+    return max(observation_lags) + 1 + int(learning_start)
+
+
 def scenario_learning_start(simulation: Simulation) -> int | None:
     """Check the learning start of a scenario or run before it starts (PLAN 2.14).
 
     Resolves every agent of ``simulation.market`` with the stored defaults
     and agent parameters, as :meth:`SimulationContext.build` does without
-    HPO overrides. Agents with invalid parameters are skipped here, because
-    :meth:`SimulationContext.build` reports those with their own message.
+    HPO overrides (:func:`resolve_learning_start`).
 
     Args:
         simulation: Scenario or run with a market.
@@ -244,21 +337,16 @@ def scenario_learning_start(simulation: Simulation) -> int | None:
     Raises:
         SimulationValidationError: The value is out of range for an agent.
     """
-    from abmem.services.algorithms import registry
-
-    defaults = algorithm_defaults()
-    learners: list[tuple[str, AlgorithmConfig]] = []
-    for agent in simulation.market.agent_set.order_by("id"):
-        key = str(agent.algorithm_type)
-        if not registry.is_known(key) or registry.is_baseline(key):
-            continue
-        label = f"{agent.name!r} ({key})"
-        try:
-            config = learner_config(key, agent_params(agent, key, defaults))
-        except (KeyError, TypeError, ValueError):
-            continue
-        learners.append((label, config))
-    return common_learning_starts(simulation.learning_starts, learners)
+    agents = [
+        (
+            f"{agent.name!r} ({agent.algorithm_type})",
+            str(agent.algorithm_type),
+            agent.algorithm_params or {},
+        )
+        for agent in simulation.market.agent_set.order_by("id")
+    ]
+    resolved = resolve_learning_start(simulation.learning_starts, agents)
+    return None if resolved is None else resolved.value
 
 
 def policy_spec_for(
