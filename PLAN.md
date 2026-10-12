@@ -277,7 +277,7 @@ Spec: `specs/algorithms_tab.json`.
 Guide: `docs/docker.md`.
 - [x] `docker compose up --build -d` starts PostgreSQL 16 and the web app (gunicorn, WhiteNoise, PyTorch CPU) on a computer without Python or PostgreSQL. The start script waits for the database, creates a secret key in a volume, applies the migrations and loads the starter data into an empty database (`manage.py load_starter_data`, files in `abmem/starter_data/`).
 - [x] Volumes for the database, checkpoints, JSON offer exports and the secret key. `/` redirects to `/dev/`.
-- [ ] End-to-end run inside the container after the JSON export fix (blocked: Docker Desktop disk full on the host).
+- [x] Clean-checkout test (2026-10-12): fresh git clone without .env, `build --no-cache --pull`, empty volumes. `docker/smoke_test.sh` passed: pages, static files, starter data, Only Renewable (336 periods, 10 s) and Mixed (1440 periods, 31 s) runs FINISHED, analysis and exports, JSON offer export. Data kept after restart, starter data not loaded twice.
 
 ## 4b. Uygulama sırasında çıkan takip işleri
 
