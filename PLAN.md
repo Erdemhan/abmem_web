@@ -281,13 +281,13 @@ Guide: `docs/docker.md`.
 
 ### 2.14 Common learning start (request 14, approved 2026-10-12)
 Spec: `specs/common_learning_start.json`. Closes the deferred fairness note in section 4b.
-- [ ] Every learning agent of a run makes its first gradient update after the same number of stored transitions. Optional scenario value `learning_starts`, empty = the largest requirement of the run's learning agents. PPO collects its first rollout so that it completes at the same point.
-- [ ] Wizard field, YAML key, analysis display.
+- [x] Every learning agent of a run makes its first gradient update after the same number of stored transitions. Optional scenario value `learning_starts`, empty = the largest requirement of the run's learning agents. PPO collects its first rollout so that it completes at the same point.
+- [x] Wizard field, YAML key, analysis display.
 
 ## 4b. Uygulama sırasında çıkan takip işleri
 
 - [x] **B13 (sonradan bulundu, `3b653d9` ile düzeltildi): `Agent.budget` taşabilir.** `max_digits=12` (en fazla ~9.99e9). Büyük kapasiteli uzun çalıştırmalarda periyot yazımı hata verir ve çalıştırma FAILED olarak biter. Alan genişletilmeli (migration). runtime_core worker'ı bildirdi.
-- [ ] **Ertelendi (kullanıcı 2026-10-07: şu an aktif deney yok). Adil karşılaştırma notu (Faz 3):** RDPG, 24 adımlık bir pencere dolmadan öğrenemediği için duman testlerinde t = 49'da, diğer off-policy algoritmalar t = 33'te öğrenmeye başlıyor. PPO ise rollout dolduğunda güncelleniyor. Faz 3 deneylerinde tüm algoritmalar için eğitimin başladığı periyot eşitlenmeli (örn. ortak bir `learning_starts ≥ seq_len + lag`) ya da fark raporlanmalı (`fair-comparison`).
+- [x] **Çözüldü (2026-10-12, PLAN 2.14): ortak öğrenme başlangıcı.** **Adil karşılaştırma notu (Faz 3):** RDPG, 24 adımlık bir pencere dolmadan öğrenemediği için duman testlerinde t = 49'da, diğer off-policy algoritmalar t = 33'te öğrenmeye başlıyor. PPO ise rollout dolduğunda güncelleniyor. Faz 3 deneylerinde tüm algoritmalar için eğitimin başladığı periyot eşitlenmeli (örn. ortak bir `learning_starts ≥ seq_len + lag`) ya da fark raporlanmalı (`fair-comparison`).
 - [x] **Tarayıcı testinde bulundu (2026-10-07): senaryo formunda seed, `evaluation_periods` ve gecikme seti alanları yok.** OQ-16 seed'in arayüzde düzenlenebilir olmasını istiyordu. Şu an arayüzden oluşturulan her senaryo varsayılan değerleri (seed 17081999, değerlendirme penceresi 0, gecikmeler [1, 24]) kullanıyor.
 - [x] **Tarayıcı testinde bulundu: engelleyici `alert()`/`confirm()` kullanımı.** Senaryo kaydı sonrası `alert(successMessage)` sayfayı kilitliyor (`simulation-create.html:633`, `simulation-update.html:689`). Doğrulama uyarıları da `alert` kullanıyor. Sayfa içi bildirimle değiştirilmeli.
 - [x] Ajan sayfasındaki modal formun `submitForm()` fonksiyonu sunucuya POST yapmıyor, sadece localStorage'a yazıyor (önceden var olan hata). Kütüphane arayüzü (5. dalga) bu akışı yeniden yazarken düzeltecek.
