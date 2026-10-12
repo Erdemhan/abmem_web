@@ -17,7 +17,7 @@ On a computer without Python or PostgreSQL, install Docker Desktop and run
 docker compose up --build -d
 ```
 
-then open http://localhost:8000/. The first start sets up the database and loads the starter scenarios. Step-by-step installation (Docker and development install, troubleshooting): `INSTALL.md`.
+then open http://localhost:8000/. The first start sets up the database and loads the starter scenarios. Step-by-step installation (Docker and development install, troubleshooting): `INSTALL.md` (English), `KURULUM.md` (Turkish).
 
 ## Installation (development)
 

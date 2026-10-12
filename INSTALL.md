@@ -9,7 +9,7 @@ There are two ways to install ABMEM.
 | Database | Created automatically in a container | You create it |
 | Time | About 10 minutes on the first start | About 20 minutes |
 
-Both give the same web interface at the end.
+Both give the same web interface at the end. A Turkish version of this guide: `KURULUM.md`.
 
 ---
 
