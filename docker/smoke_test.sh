@@ -62,7 +62,7 @@ while :; do
     state=$(echo "$json" | sed -n 's/.*"status": *"\([A-Z]*\)".*/\1/p')
     case "$state" in
         FINISHED) break ;;
-        FAILED|CANCELED|CANCELLED) fail "run $run_id ended as $state: $(echo "$json" | sed -n 's/.*"error": *\("[^"]*"\).*/\1/p')" ;;
+        FAILED|CANCELED|STOPPED) fail "run $run_id ended as $state: $(echo "$json" | sed -n 's/.*"error": *\("[^"]*"\).*/\1/p')" ;;
     esac
     [ $(( $(date +%s) - start )) -ge "$RUN_TIMEOUT" ] && fail "run $run_id not finished after $RUN_TIMEOUT s (state $state)"
     sleep 5
