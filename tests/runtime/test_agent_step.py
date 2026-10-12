@@ -297,6 +297,19 @@ def test_failstack_intervenes_after_limit_only() -> None:
         assert ptf_prev - Decimal("5") <= offer.offerPrice < ptf_prev
 
 
+def test_failstack_is_off_in_the_evaluation_window() -> None:
+    # Limit 1 and permanent failure: every training decision from t = 2 on is
+    # intervened, the evaluation window from t = 6 on is never intervened.
+    policy = StubPolicy(2, 3)
+    params = FailStackParams(limit=1, delta=Decimal("5"), min_margin=Decimal("0"))
+    ctx, rt = _ctx(policy, 2, failstack=params, evaluation_start=6)
+    _run(ctx, rt, 10, accepted=False)
+    rows = ctx.step_logger.rows  # type: ignore[attr-defined]
+    flags = {row["period"].periodNumber: row["intervened"] for row in rows}
+    assert all(flags[t] == [True, True] for t in range(2, 6))
+    assert all(flags[t] == [False, False] for t in range(6, 11))
+
+
 def test_failstack_disabled_never_intervenes() -> None:
     policy = StubPolicy(2, 3)
     ctx, rt = _ctx(policy, 2, failstack=None)

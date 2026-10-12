@@ -67,7 +67,9 @@ def step(ctx: SimulationContext, rt: AgentRuntimeState, t: int) -> list[Offer]:
 
     if t > 1:
         reward = compute_reward(rt.last_outcomes, rt.total_capacity, ctx.price_high)
-        if rt.failstack_params is not None:
+        # The fail-stack rule acts only in training. In the evaluation window
+        # the counters stay as they are and no price is replaced.
+        if rt.failstack_params is not None and phase is RunPhase.TRAIN:
             min_margin = rt.failstack_params.min_margin
             update_counters(
                 rt.failstack,
@@ -108,7 +110,7 @@ def step(ctx: SimulationContext, rt: AgentRuntimeState, t: int) -> list[Offer]:
         action = ActionResult(u=u)
 
     prices = to_price(action.u, ctx.price_low, ctx.price_high)
-    if rt.failstack_params is not None:
+    if rt.failstack_params is not None and phase is RunPhase.TRAIN:
         prices, intervened = apply_interventions(
             rt.failstack,
             rt.failstack_params,
