@@ -1,0 +1,47 @@
+{
+  "spec_id": "common_learning_start",
+  "title": "Common learning start: every learning agent makes its first gradient update after the same number of stored transitions",
+  "status": "approved",
+  "approval_note": "Approved by the user on 2026-10-12 (PLAN.md 2.14, closes the deferred fairness note of section 4b): an optional scenario value; when empty, the largest requirement of the run's learning agents is used.",
+  "plan_items": ["2.14"],
+  "evidence": "Measured on master 7376871 with default configs: DDPG, TD3, SAC, PPO and RDPG all make their first update at period 89 with lags (1, 24) and at period 233 with lags (1, 24, 168). They diverge only when learning_starts is changed (Algorithms page, agent params, HPO): RDPG still waits for seq_len and PPO for a full rollout.",
+  "definition": "L = number of stored transitions before the first gradient update. A transition is stored once per period from the second period with a complete observation, so the first update happens in period first_complete_period + L for every learning agent.",
+  "model": {
+    "field": "Simulation.learning_starts = PositiveIntegerField(null=True, blank=True). NULL = automatic. Migration 0019. Copied by duplicate_scenario and clone_scenario_for_run.",
+    "check": "learning_starts IS NULL OR learning_starts >= 1"
+  },
+  "config_api": {
+    "AlgorithmConfig.first_update_transitions() -> int": "learning_starts (off-policy default)",
+    "RDPGConfig.first_update_transitions() -> int": "max(learning_starts, seq_len)",
+    "PPOConfig.first_update_transitions() -> int": "max(learning_starts, rollout_length)",
+    "AlgorithmConfig.learning_starts_limit() -> int | None": "buffer_size for replay-buffer algorithms (a larger learning_starts could never be reached)",
+    "PPOConfig.learning_starts_limit() -> int | None": "None"
+  },
+  "resolution": {
+    "where": "SimulationContext.build, after agent_params and before build_policy, for learning algorithms only (registry.is_baseline is False).",
+    "automatic": "L = max over learning agents of config.first_update_transitions().",
+    "explicit": "L = Simulation.learning_starts. SimulationValidationError naming the agent when L < first_update_transitions() or L > learning_starts_limit() of any learning agent.",
+    "apply": "params['learning_starts'] = L for every learning agent. The parameter snapshot (Agent.effective_params) therefore records L. An explicit scenario value overrides HPO overrides of learning_starts."
+  },
+  "ppo": {
+    "remove": "The ValueError for learning_starts > rollout_length.",
+    "behaviour": "PPO counts the transitions passed to observe (seen). It does not store a transition while seen < learning_starts - rollout_length, so its first rollout is complete exactly when seen == max(learning_starts, rollout_length). ready_to_learn = buffer full and seen >= learning_starts. Later updates happen every rollout_length transitions as before.",
+    "justification": "Transitions before the first update come from the initial policy, so dropping the oldest ones keeps the first rollout on-policy and of the configured length."
+  },
+  "invariants": [
+    "Default configs: L = 64 for every algorithm, first update periods and all results unchanged (result fingerprint test unchanged).",
+    "Baselines are not affected."
+  ],
+  "ui_yaml": {
+    "wizard": "Advanced: optional integer field 'Learning start (transitions)', empty = automatic, help text. Review line. Server validation >= 1.",
+    "yaml": "scenario.learning_starts optional (null or missing = automatic), exported only when set.",
+    "analysis": "Show the effective learning start of the run (from the snapshot) in the run settings."
+  },
+  "tests": [
+    "Default configs: all five learning algorithms first update in the same period (lags (1, 24) and (1, 24, 168)), unchanged from before.",
+    "Automatic L with one agent using learning_starts 8 and RDPG seq_len 24: all first updates at L = 64 (max).",
+    "Explicit L = 100: all five first update in the same period, PPO included.",
+    "Explicit L below an agent's requirement or above its buffer size: SimulationValidationError naming the agent.",
+    "Snapshot records L. Baselines unaffected. Result fingerprint unchanged."
+  ]
+}

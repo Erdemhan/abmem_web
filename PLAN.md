@@ -279,6 +279,11 @@ Guide: `docs/docker.md`.
 - [x] Volumes for the database, checkpoints, JSON offer exports and the secret key. `/` redirects to `/dev/`.
 - [x] Clean-checkout test (2026-10-12): fresh git clone without .env, `build --no-cache --pull`, empty volumes. `docker/smoke_test.sh` passed: pages, static files, starter data, Only Renewable (336 periods, 10 s) and Mixed (1440 periods, 31 s) runs FINISHED, analysis and exports, JSON offer export. Data kept after restart, starter data not loaded twice.
 
+### 2.14 Common learning start (request 14, approved 2026-10-12)
+Spec: `specs/common_learning_start.json`. Closes the deferred fairness note in section 4b.
+- [ ] Every learning agent of a run makes its first gradient update after the same number of stored transitions. Optional scenario value `learning_starts`, empty = the largest requirement of the run's learning agents. PPO collects its first rollout so that it completes at the same point.
+- [ ] Wizard field, YAML key, analysis display.
+
 ## 4b. Uygulama sırasında çıkan takip işleri
 
 - [x] **B13 (sonradan bulundu, `3b653d9` ile düzeltildi): `Agent.budget` taşabilir.** `max_digits=12` (en fazla ~9.99e9). Büyük kapasiteli uzun çalıştırmalarda periyot yazımı hata verir ve çalıştırma FAILED olarak biter. Alan genişletilmeli (migration). runtime_core worker'ı bildirdi.
