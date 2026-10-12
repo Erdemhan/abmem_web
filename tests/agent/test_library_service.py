@@ -21,6 +21,7 @@ from abmem.models.models import Plant, Portfolio, Resource
 from abmem.services.agent import library_service as ls
 from abmem.services.agent.library_service import (
     COPIED_AGENT_FIELDS,
+    NAME_MAX_LENGTH,
     NOT_COPIED_AGENT_FIELDS,
     AgentInput,
     LibraryValidationError,
@@ -419,14 +420,35 @@ def test_library_deletion_keeps_copies(fossil: Resource) -> None:
     assert _plants(copy) == [(fossil.id, 150), (fossil.id, 300)]
 
 
-def test_same_library_agent_twice_in_scenario_rejected(fossil: Resource) -> None:
+@pytest.mark.parametrize("times", [2, 3])
+def test_same_library_agent_copied_several_times(fossil: Resource, times: int) -> None:
+    """OQ-14 (2026-10-12): every copy is a scenario agent with its own name."""
+    library = ls.create_library_agent(_input(fossil))
+    market = _scenario_market()
+    copies = [ls.copy_agent(library, market, proxy=True) for _ in range(times)]
+    assert [copy.name for copy in copies] == ["Coal", "Coal_2", "Coal_3"][:times]
+    assert {copy.source_id for copy in copies} == {library.id}
+    for copy in copies:
+        assert _plants(copy) == _plants(library)
+    assert Agent.objects.filter(market=market, source=library).count() == times
+
+
+def test_copy_with_given_name_next_to_an_earlier_copy(fossil: Resource) -> None:
     library = ls.create_library_agent(_input(fossil))
     market = _scenario_market()
     ls.copy_agent(library, market, proxy=True)
-    with pytest.raises(LibraryValidationError) as info:
-        ls.copy_agent(library, market, proxy=True, name="Other")
-    assert _codes(info.value, "library_agent_id") == ["duplicate_library_agent"]
-    assert Agent.objects.filter(market=market).count() == 1
+    other = ls.copy_agent(library, market, proxy=True, name="Other")
+    assert other.name == "Other"
+    assert other.source_id == library.id
+
+
+def test_copy_without_name_takes_free_name_case_insensitively(fossil: Resource) -> None:
+    library = ls.create_library_agent(_input(fossil))
+    market = _scenario_market()
+    make_agent_with_plants(market, [(fossil, 1)], name="coal")
+    make_agent_with_plants(market, [(fossil, 1)], name="COAL_2")
+    copy = ls.copy_agent(library, market, proxy=True)
+    assert copy.name == "Coal_3"
 
 
 def test_copy_name_conflict_in_market_rejected(fossil: Resource) -> None:
@@ -434,9 +456,39 @@ def test_copy_name_conflict_in_market_rejected(fossil: Resource) -> None:
     market = _scenario_market()
     make_agent_with_plants(market, [(fossil, 1)], name="Coal")
     with pytest.raises(LibraryValidationError) as info:
-        ls.copy_agent(library, market, proxy=True)
+        ls.copy_agent(library, market, proxy=True, name="Coal")
     assert _codes(info.value, "name") == ["name_taken"]
     assert Agent.objects.filter(market=market).count() == 1
+
+
+def test_copy_name_shortened_at_length_limit(fossil: Resource) -> None:
+    long_name = "L" * NAME_MAX_LENGTH
+    library = ls.create_library_agent(_input(fossil, name=long_name))
+    market = _scenario_market()
+    names = [ls.copy_agent(library, market, proxy=True).name for _ in range(3)]
+    assert names == [
+        long_name,
+        "L" * (NAME_MAX_LENGTH - 2) + "_2",
+        "L" * (NAME_MAX_LENGTH - 2) + "_3",
+    ]
+    assert all(len(name) <= NAME_MAX_LENGTH for name in names)
+
+
+@pytest.mark.parametrize(
+    ("base", "taken", "expected"),
+    [
+        ("Gas", [], "Gas"),
+        ("Gas", ["gas"], "Gas_2"),
+        ("Gas", ["Gas", "GAS_2", "gas_3"], "Gas_4"),
+        (" Gas ", ["Gas "], "Gas_2"),
+        ("A" * 19 + " ", ["A" * 19], "A" * 18 + "_2"),
+        ("B" * 20, ["B" * 20] + [f"{'B' * 18}_{n}" for n in range(2, 10)], "B" * 17 + "_10"),
+        ("Ab c", ["ab c"], "Ab c_2"),
+    ],
+)
+def test_free_agent_name(base: str, taken: list[str], expected: str) -> None:
+    assert ls.free_agent_name(base, taken) == expected
+    assert len(ls.free_agent_name(base, taken)) <= NAME_MAX_LENGTH
 
 
 def test_copy_name_too_long_rejected(fossil: Resource) -> None:

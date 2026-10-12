@@ -1244,23 +1244,28 @@ def build_import_plan(document: Any) -> ImportPlan:
         seen[key] = index
         agents.append(spec)
 
-    # A library agent may appear at most once in a scenario (OQ-14). When
-    # several file agents name the same library agent (e.g. CCGT and CCGT2 of
-    # an older scenario, both copied from library agent CCGT), the first one
-    # uses it and every later one is matched under its own scenario name.
-    used_library_names: set[str] = set()
+    # A library agent can be copied into a scenario several times (OQ-14).
+    # File agents that name the same library agent share it when their
+    # configurations are equal. A later agent with another configuration (a
+    # copy edited in the scenario) is matched under its own scenario name.
+    first_config: dict[str, tuple[Any, ...]] = {}
     for spec in agents:
         key = spec.library_name.lower()
-        if key in used_library_names:
+        if key in first_config and first_config[key] != spec.config_key():
             spec.library_name = spec.name
             key = spec.name.lower()
-        used_library_names.add(key)
+        first_config.setdefault(key, spec.config_key())
     for spec in agents:
-        if sum(1 for other in agents if other.library_name.lower() == spec.library_name.lower()) > 1:
+        configs = {
+            other.config_key()
+            for other in agents
+            if other.library_name.lower() == spec.library_name.lower()
+        }
+        if len(configs) > 1:
             errors.add(
                 f"agents[{spec.index}].library_agent",
                 f"Agent {spec.index + 1} ({spec.name}): library agent '{spec.library_name}' "
-                "would be used twice in this scenario.",
+                "would be used with different configurations in this scenario.",
             )
 
     conflicts: list[str] = []
@@ -1274,7 +1279,8 @@ def build_import_plan(document: Any) -> ImportPlan:
             continue
         differences = _library_differences(spec, library)
         if differences:
-            conflicts.append(spec.library_name)
+            if spec.library_name not in conflicts:
+                conflicts.append(spec.library_name)
             errors.add(
                 f"agents[{spec.index}]",
                 f"Library agent '{library.name}' already exists with a different "

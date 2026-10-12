@@ -155,14 +155,161 @@ def test_legacy_payload_without_mode_is_new(client: Client, fossil: Resource) ->
     assert simulation.market.agent_set.get().source.name == "Legacy"
 
 
-def test_same_library_agent_twice_is_rejected(client: Client, fossil: Resource) -> None:
+def test_same_library_agent_twice_gets_free_names(
+    client: Client, fossil: Resource
+) -> None:
+    """OQ-14 (2026-10-12): repeated library entries without a name are saved
+    as separate copies named NAME, NAME_2, ..."""
     lib_a = _library_agent(fossil)
-    response = _create(client, [_library_entry(lib_a), _library_entry(lib_a)])
+    simulation = _scenario(
+        client, [_library_entry(lib_a), _library_entry(lib_a), _library_entry(lib_a)]
+    )
+    copies = list(simulation.market.agent_set.order_by("id"))
+    assert [agent.name for agent in copies] == ["LibA", "LibA_2", "LibA_3"]
+    for agent in copies:
+        assert agent.source_id == lib_a.id
+        for field in COPIED_AGENT_FIELDS:
+            if field != "name":
+                assert getattr(agent, field) == getattr(lib_a, field), field
+        assert _plants(agent) == _plants(lib_a)
+    assert Agent.objects.filter(market__isnull=True).count() == 1
+
+
+def test_auto_name_skips_names_given_in_the_payload(
+    client: Client, fossil: Resource
+) -> None:
+    lib_a = _library_agent(fossil)
+    simulation = _scenario(
+        client,
+        [
+            _library_entry(lib_a),
+            {**_library_entry(lib_a), "name": "liba_2"},
+            _library_entry(lib_a),
+        ],
+    )
+    names = [agent.name for agent in simulation.market.agent_set.order_by("id")]
+    assert names == ["LibA", "liba_2", "LibA_3"]
+
+
+def test_same_library_agent_twice_with_wizard_names(
+    client: Client, fossil: Resource
+) -> None:
+    lib_a = _library_agent(fossil)
+    simulation = _scenario(
+        client,
+        [
+            {**_library_entry(lib_a), "name": "LibA"},
+            {**_library_entry(lib_a), "name": "LibA_2"},
+        ],
+    )
+    copies = list(simulation.market.agent_set.order_by("id"))
+    assert [agent.name for agent in copies] == ["LibA", "LibA_2"]
+    assert [agent.source_id for agent in copies] == [lib_a.id, lib_a.id]
+
+
+def test_explicit_duplicate_library_copy_names_are_rejected(
+    client: Client, fossil: Resource
+) -> None:
+    lib_a = _library_agent(fossil)
+    response = _create(
+        client,
+        [
+            {**_library_entry(lib_a), "name": "Twin"},
+            {**_library_entry(lib_a), "name": "Twin"},
+        ],
+    )
     assert response.status_code == 400
-    errors = response.json()["errors"]
-    assert "agents[1].library_agent_id" in errors
-    assert "only once" in errors["agents[1].library_agent_id"][0]
+    assert "agents[1].name" in response.json()["errors"]
     assert not Simulation.objects.exists()
+
+
+@pytest.mark.parametrize("name", ["", "   ", "x" * 21, 5])
+def test_invalid_library_copy_name_is_rejected(
+    client: Client, fossil: Resource, name: Any
+) -> None:
+    lib_a = _library_agent(fossil)
+    response = _create(client, [{**_library_entry(lib_a), "name": name}])
+    assert response.status_code == 400
+    assert "agents[0].name" in response.json()["errors"]
+    assert not Simulation.objects.exists()
+
+
+def _edited_library_entry(agent: Agent, resource: Resource, **extra: Any) -> dict[str, Any]:
+    entry = _new_agent(resource, name="Edited", mode="library", budget="999")
+    entry["library_agent_id"] = agent.id
+    entry.update(extra)
+    return entry
+
+
+def test_edited_library_entry_is_saved_with_the_edited_values(
+    client: Client, fossil: Resource, coal: Resource
+) -> None:
+    lib_a = _library_agent(coal)
+    library_before = (
+        {field: getattr(lib_a, field) for field in COPIED_AGENT_FIELDS},
+        _plants(lib_a),
+    )
+    simulation = _scenario(
+        client, [_library_entry(lib_a), _edited_library_entry(lib_a, fossil)]
+    )
+    unedited, edited = simulation.market.agent_set.order_by("id")
+    _assert_copy(unedited, lib_a)
+    assert edited.name == "Edited"
+    assert edited.source_id == lib_a.id
+    assert edited.proxy is True
+    assert edited.budget == Decimal("999")
+    assert edited.algorithm_type == "TD3"
+    assert (edited.failstack_limit, edited.failstack_delta) == (5, Decimal("2.5"))
+    assert _plants(edited) == [(fossil.id, 200)]
+    assert edited.algorithm_params == lib_a.algorithm_params
+    lib_a.refresh_from_db()
+    assert (
+        {field: getattr(lib_a, field) for field in COPIED_AGENT_FIELDS},
+        _plants(lib_a),
+    ) == library_before
+    assert Agent.objects.filter(market__isnull=True).count() == 1
+
+
+@pytest.mark.parametrize(
+    ("extra", "key"),
+    [
+        ({"budget": "abc"}, "budget"),
+        ({"plants": []}, "plants"),
+        ({"algorithm_type": "NOPE"}, "algorithm_type"),
+        ({"type": None}, "type"),
+    ],
+)
+def test_invalid_edited_library_entry_is_rejected(
+    client: Client, fossil: Resource, extra: dict[str, Any], key: str
+) -> None:
+    lib_a = _library_agent(fossil)
+    response = _create(client, [_edited_library_entry(lib_a, fossil, **extra)])
+    assert response.status_code == 400, response.content
+    assert key in response.json()["errors"]
+    assert not Simulation.objects.exists()
+
+
+def test_run_of_scenario_with_two_copies_builds(
+    client: Client, fossil: Resource
+) -> None:
+    from abmem.services.simulation.context import SimulationContext
+    from tests.runtime.conftest import constant_demand
+
+    lib_a = _library_agent(fossil, algorithm_params={})
+    simulation = _scenario(
+        client,
+        [
+            _library_entry(lib_a),
+            _library_entry(lib_a),
+            _edited_library_entry(lib_a, fossil),
+        ],
+    )
+    run = library_service.clone_scenario_for_run(simulation)
+    names = sorted(agent.name for agent in run.market.agent_set.all())
+    assert names == ["Edited", "LibA", "LibA_2"]
+    assert {agent.source_id for agent in run.market.agent_set.all()} == {lib_a.id}
+    ctx = SimulationContext.build(run, demand=constant_demand(), export_json=False)
+    assert len(ctx.agents) == 3
 
 
 @pytest.mark.parametrize("raw_id", [999999, "abc", None, True, 0])
@@ -374,7 +521,7 @@ def test_update_keeps_edits_adds_and_removes(
     assert _plants(lib_a) == [(fossil.id, 120), (fossil.id, 300)]
 
 
-def test_update_rejects_library_pick_whose_copy_is_kept(
+def test_update_adds_a_second_copy_next_to_a_kept_one(
     client: Client, fossil: Resource
 ) -> None:
     lib_a = _library_agent(fossil)
@@ -388,9 +535,28 @@ def test_update_rejects_library_pick_whose_copy_is_kept(
             _library_entry(lib_a),
         ],
     )
-    assert response.status_code == 400
-    assert "agents[1].library_agent_id" in response.json()["errors"]
-    assert simulation.market.agent_set.count() == 1
+    assert response.status_code == 200, response.content
+    agents = list(simulation.market.agent_set.order_by("id"))
+    assert [agent.name for agent in agents] == ["LibA", "LibA_2"]
+    assert agents[0].id == kept.id
+    assert [agent.source_id for agent in agents] == [lib_a.id, lib_a.id]
+
+
+def test_update_with_same_library_agent_twice(client: Client, fossil: Resource) -> None:
+    lib_a = _library_agent(fossil)
+    simulation = _scenario(client, [_new_agent(fossil)])
+    response = _post(
+        client,
+        reverse("update_simulation", args=[simulation.id]),
+        [
+            {**_library_entry(lib_a), "name": "LibA"},
+            {**_library_entry(lib_a), "name": "LibA_2"},
+        ],
+    )
+    assert response.status_code == 200, response.content
+    agents = list(simulation.market.agent_set.order_by("id"))
+    assert [agent.name for agent in agents] == ["LibA", "LibA_2"]
+    assert [agent.source_id for agent in agents] == [lib_a.id, lib_a.id]
 
 
 def test_update_can_replace_a_copy_by_a_fresh_library_copy(

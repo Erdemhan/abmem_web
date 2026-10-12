@@ -3,7 +3,7 @@ import logging
 import math
 import re
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from decimal import Decimal
 from typing import Any, Final
 
@@ -74,6 +74,12 @@ MODE_NEW: Final[str] = "new"
 MODE_LIBRARY: Final[str] = "library"
 MODE_SCENARIO: Final[str] = "scenario"
 SCENARIO_AGENT_MODES: Final[tuple[str, ...]] = (MODE_NEW, MODE_LIBRARY, MODE_SCENARIO)
+
+# Content keys of an agent entry. A "library" entry that carries any of them
+# is an edited copy and is validated like a "new" entry.
+AGENT_CONTENT_KEYS: Final[tuple[str, ...]] = (
+    "type", "budget", "algorithm_type", "failstack", "plants",
+)
 
 # Exclusive upper bound of Simulation.seed. The column is a signed 32-bit
 # IntegerField, so values >= 2**31 raise "integer out of range" before the
@@ -554,9 +560,13 @@ class ScenarioAgentEntry:
         index: 0-based position in the payload.
         mode: ``MODE_NEW``, ``MODE_LIBRARY`` or ``MODE_SCENARIO``.
         name: Name the scenario agent will have.
-        data: Agent input for the ``new`` and ``scenario`` modes.
+        data: Agent input for the ``new`` and ``scenario`` modes and for an
+            edited ``library`` entry (None for an unedited one).
         library_agent: Selected library agent (``library`` mode).
         scenario_agent: Kept agent of the edited scenario (``scenario`` mode).
+        auto_name: True for a ``library`` entry without a ``name`` key. Its
+            name is the first free one of ``NAME``, ``NAME_2``, ... (see
+            ``library_service.free_agent_name``).
     """
 
     index: int
@@ -565,6 +575,7 @@ class ScenarioAgentEntry:
     data: AgentInput | None = None
     library_agent: Agent | None = None
     scenario_agent: Agent | None = None
+    auto_name: bool = False
 
 
 def _coerce_id(raw_value: Any) -> int | None:
@@ -596,7 +607,13 @@ def _parse_scenario_agents(
       agent. It is added to the library and copied into the scenario, so
       its name must be free in the library (case-insensitive).
     * ``library``: ``library_agent_id`` of a library agent to copy. The same
-      library agent may appear only once (OQ-14).
+      library agent may appear several times (OQ-14). An optional ``name``
+      sets the name of the copy. Without it the copy gets the first free
+      name of ``NAME``, ``NAME_2``, ... among the names of the payload. An
+      entry that also carries content fields (``AGENT_CONTENT_KEYS``) is
+      an edited copy: the fields are validated like those of a ``new``
+      entry and replace the library values in the copy. The library agent
+      itself is not changed.
     * ``scenario`` (update only): ``agent_id`` of an agent of ``market`` plus
       its edited fields. The agent is kept and updated in place, the
       library is not changed.
@@ -622,7 +639,6 @@ def _parse_scenario_agents(
     market_agents = (
         {agent.id: agent for agent in market.agent_set.all()} if market else {}
     )
-    seen_library_ids: set[int] = set()
     seen_agent_ids: set[int] = set()
 
     def add(key: str, message: str) -> None:
@@ -657,18 +673,34 @@ def _parse_scenario_agents(
                     f"{label}: library agent "
                     f"{agent_data.get('library_agent_id')!r} does not exist.",
                 )
-            elif library_agent.id in seen_library_ids:
-                add(
-                    _entry_key(index, "library_agent_id"),
-                    f"{label} ({library_agent.name}): this library agent is "
-                    "already part of the scenario. A library agent can be "
-                    "added to a scenario only once.",
-                )
-            else:
-                seen_library_ids.add(library_agent.id)
+                continue
+            prefix = f"{label} ({agent_data.get('name') or library_agent.name}): "
+            auto_name = agent_data.get("name") is None
+            name = library_agent.name
+            entry_ok = True
+            if not auto_name:
+                try:
+                    name = _validate_entry_name(agent_data.get("name"))
+                except ValidationError as exc:
+                    entry_ok = False
+                    add(_entry_key(index, "name"), prefix + exc.messages[0])
+            data = None
+            if any(key in agent_data for key in AGENT_CONTENT_KEYS):
+                try:
+                    fields, plants = _parse_agent_fields(agent_data, prefix)
+                except ValidationError as exc:
+                    _add_errors(errors, exc, "agents", "")
+                    continue
+                data = AgentInput(name=name, plants=plants, **fields)
+            if entry_ok:
                 entries.append(
                     ScenarioAgentEntry(
-                        index, mode, library_agent.name, library_agent=library_agent
+                        index,
+                        mode,
+                        name,
+                        data=data,
+                        library_agent=library_agent,
+                        auto_name=auto_name,
                     )
                 )
             continue
@@ -722,6 +754,20 @@ def _parse_scenario_agents(
             )
         )
 
+    # Library copies without a given name take the first free name of NAME,
+    # NAME_2, ... (case-insensitive) after every given name.
+    taken = [entry.name for entry in entries if not entry.auto_name]
+    for position, entry in enumerate(entries):
+        if not entry.auto_name:
+            continue
+        name = library_service.free_agent_name(entry.name, taken)
+        taken.append(name)
+        entries[position] = replace(
+            entry,
+            name=name,
+            data=None if entry.data is None else replace(entry.data, name=name),
+        )
+
     # Names must be unique inside the scenario (case-sensitive, per-market
     # constraint) and new agents must not collide with each other in the
     # library (case-insensitive). The database constraints stay the final guard.
@@ -746,20 +792,6 @@ def _parse_scenario_agents(
         used_names.add(entry.name)
         if entry.mode == MODE_NEW:
             new_names.add(entry.name.lower())
-    # OQ-14 also covers a library agent whose copy is kept in the scenario.
-    kept_sources = {
-        entry.scenario_agent.source_id
-        for entry in entries
-        if entry.scenario_agent is not None and entry.scenario_agent.source_id
-    }
-    for entry in entries:
-        if entry.library_agent is not None and entry.library_agent.id in kept_sources:
-            add(
-                _entry_key(entry.index, "library_agent_id"),
-                f"Agent {entry.index + 1} ({entry.name}): this library agent is "
-                "already part of the scenario. A library agent can be added to "
-                "a scenario only once.",
-            )
     if errors:
         raise ValidationError(errors)
     return entries
@@ -872,8 +904,12 @@ def _write_scenario_agents(market: Market, entries: list[ScenarioAgentEntry]) ->
             if entry.mode == MODE_NEW:
                 library_service.add_new_agent_to_scenario(entry.data, market)
             elif entry.mode == MODE_LIBRARY:
-                library_service.copy_agent(entry.library_agent, market, proxy=True)
-        except LibraryValidationError as exc:
+                scenario_copy = library_service.copy_agent(
+                    entry.library_agent, market, proxy=True, name=entry.name
+                )
+                if entry.data is not None:
+                    _update_scenario_agent(scenario_copy, entry.data)
+        except ValidationError as exc:
             raise _entry_error(entry, exc) from exc
 
 
@@ -904,7 +940,8 @@ def _entry_learning_agent(
 
     The parameters are those the saved agent will have: the library agent's
     for a ``library`` entry, the kept agent's for a ``scenario`` entry (they
-    are not changed by an edit) and none for a ``new`` entry.
+    are not changed by an edit) and none for a ``new`` entry. The algorithm
+    is the edited one when the entry carries agent fields.
 
     Args:
         entry: Output of ``_parse_scenario_agents``.
@@ -912,12 +949,15 @@ def _entry_learning_agent(
     Returns:
         ``(label, algorithm_key, params)`` for ``resolve_learning_start``.
     """
-    if entry.library_agent is not None:
+    params: Mapping[str, Any]
+    if entry.data is None:
         key = str(entry.library_agent.algorithm_type)
-        params: Mapping[str, Any] = entry.library_agent.algorithm_params or {}
+        params = entry.library_agent.algorithm_params or {}
     else:
         key = str(entry.data.algorithm_type)
-        if entry.scenario_agent is not None:
+        if entry.library_agent is not None:
+            params = entry.library_agent.algorithm_params or {}
+        elif entry.scenario_agent is not None:
             params = entry.scenario_agent.algorithm_params or {}
         else:
             params = entry.data.algorithm_params or {}

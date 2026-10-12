@@ -323,11 +323,74 @@ def test_without_library_agent_key_the_name_is_the_library_name(
     assert Agent.objects.filter(market__isnull=True, name="Thermal A").exists()
 
 
+def test_round_trip_with_copies_of_one_library_agent(
+    client: Client, scenario: Simulation
+) -> None:
+    """OQ-14 (2026-10-12): equal copies of one library agent share it on import."""
+    thermal = Agent.objects.get(market__isnull=True, name="Thermal")
+    market = scenario.market
+    library_service.copy_agent(thermal, market, proxy=True)
+    library_service.copy_agent(thermal, market, proxy=True)
+    names = [a.name for a in market.agent_set.order_by("id")]
+    assert names == ["Thermal A", "Green", "Thermal", "Thermal_2"]
+    text = _export(client, scenario)
+    document = _document(text)
+    assert [a.get("library_agent") for a in document["agents"]] == [
+        "Thermal", None, None, "Thermal",
+    ]
+    plan = _preview(client, text).json()
+    assert plan["agents"] == {"reuse": ["Green", "Thermal"], "create": []}
+    library_before = Agent.objects.filter(market__isnull=True).count()
+    response = _confirm(client, text)
+    assert response.status_code == 200, response.content
+    imported = Simulation.objects.get(id=response.json()["simulation_id"])
+    agents = list(imported.market.agent_set.order_by("id"))
+    assert [a.name for a in agents] == names
+    assert [a.source.name for a in agents] == ["Thermal", "Green", "Thermal", "Thermal"]
+    assert Agent.objects.filter(market__isnull=True).count() == library_before
+    assert _document(_export(client, imported))["agents"] == document["agents"]
+
+
+def test_copies_of_a_new_library_agent_create_it_once(
+    client: Client, scenario: Simulation
+) -> None:
+    document = _document(_export(client, scenario))
+    thermal = document["agents"][0]
+    document["agents"] = [
+        dict(thermal, name="Fresh", library_agent="Fresh"),
+        dict(thermal, name="Fresh_2", library_agent="Fresh"),
+    ]
+    plan = _preview(client, _dump(document)).json()
+    assert plan["agents"] == {"reuse": [], "create": ["Fresh"]}
+    response = _confirm(client, _dump(document))
+    assert response.status_code == 200, response.content
+    imported = Simulation.objects.get(id=response.json()["simulation_id"])
+    fresh = Agent.objects.get(market__isnull=True, name="Fresh")
+    assert [(a.name, a.source_id) for a in imported.market.agent_set.order_by("id")] == [
+        ("Fresh", fresh.id),
+        ("Fresh_2", fresh.id),
+    ]
+
+
+def test_one_library_agent_with_two_configurations_is_rejected(
+    client: Client, scenario: Simulation
+) -> None:
+    document = _document(_export(client, scenario))
+    thermal = document["agents"][0]
+    document["agents"] = [
+        dict(thermal, name="Pair", library_agent="Solo"),
+        dict(thermal, name="Solo", library_agent="Solo", budget=1.0),
+    ]
+    _assert_rejected(
+        client, _dump(document), "agents[1].library_agent", "different configurations"
+    )
+
+
 def test_second_agent_of_a_shared_library_agent_gets_its_own(
     client: Client, scenario: Simulation
 ) -> None:
-    """A library agent may appear once per scenario (OQ-14): later file agents
-    naming the same library agent are matched under their own scenario name."""
+    """A file agent that names the same library agent as an earlier one but
+    has another configuration is matched under its own scenario name."""
     document = _document(_export(client, scenario))
     thermal = document["agents"][0]
     twin = dict(thermal, name="Thermal B", budget=1.0)

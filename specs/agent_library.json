@@ -101,7 +101,7 @@
     {
       "module": "abmem/services/agent/library_service.py",
       "signature": "@transaction.atomic\ndef copy_agent(src: Agent, market: Market, *, proxy: bool, name: str | None = None) -> Agent",
-      "description": "Deep copy of COPIED_AGENT_FIELDS, Portfolio and Plants into market. source = src if src.is_library else src.source. state reset to CREATED, budget copied. name defaults to src.name, uniqueness inside market enforced (ValidationError on conflict, OQ-14)."
+      "description": "Deep copy of COPIED_AGENT_FIELDS, Portfolio and Plants into market. source = src if src.is_library else src.source. state reset to CREATED, budget copied. Without a name the copy gets the first free name of src.name, src.name_2, ... in market (case-insensitive, free_agent_name), so one library agent can be copied into a market several times (OQ-14, revised 2026-10-12). A given name that is taken in market raises ValidationError."
     },
     {
       "module": "abmem/services/agent/library_service.py",
@@ -138,7 +138,7 @@
     "Name longer than 20 characters: rejected by form validation.",
     "check-name with empty name: available False with message.",
     "Library agent deleted while referenced: copies keep working with source NULL.",
-    "Selecting the same library agent twice for one scenario: per OQ-14 (proposal: 400 and UI prevents it).",
+    "Selecting the same library agent twice for one scenario: allowed (OQ-14, revised 2026-10-12), the copies get unique names NAME, NAME_2, ...",
     "library_agent_id that does not exist or is not a library agent: 400.",
     "Race between check-name and submit: DB constraint raises IntegrityError, converted to 400 with the same message."
   ],
@@ -161,6 +161,6 @@
   "blocked_by_open_questions": [],
   "approval_note": "Approved by the user on 2026-10-06. Open questions OQ-1..OQ-19 are resolved in ARCHITECTURE.md section 11. The entries in resolved_open_questions are binding and override any wording below that says \"proposal\", \"per OQ-x\" or \"if approved\".",
   "resolved_open_questions": {
-    "OQ-14": "Adding the same library agent twice to one scenario returns HTTP 400, the UI also prevents it."
+    "OQ-14": "Revised 2026-10-12: a library agent can be added to one scenario several times. Copies get unique names NAME, NAME_2, ... and can be edited in the wizard before saving. Two payload entries with the same explicit name return HTTP 400."
   }
 }

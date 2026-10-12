@@ -785,7 +785,7 @@ Location: `FORMULATION.md` at the repository root (OQ-10). Agents create only th
 | OQ-11 | HPO objective | Weighted single objective with per-study weights. Pareto front shown on the watch screen as information only. |
 | OQ-12 | Zero demand | Rejected by demand validation. |
 | OQ-13 | Zero accepted revenue | Failure only if profit < 0. |
-| OQ-14 | Same library agent twice in a scenario | HTTP 400. |
+| OQ-14 | Same library agent twice in a scenario | Revised 2026-10-12: allowed. Every copy is a scenario agent with `source` = the library agent. Names stay unique per market, so a copy without a given name gets the first free name of `NAME`, `NAME_2`, `NAME_3`, ... (case-insensitive, the base is shortened to fit the 20-character limit). A library copy can be edited in the wizard before saving, the library agent is not changed. Two entries with the same explicit name stay HTTP 400. |
 | OQ-15 | K5 import | Deduplicated: agents with identical configuration (type, budget, plants as resource and capacity, algorithm) map to one library agent. A name suffix (`_2`, ...) only when the name is the same but the configuration differs. |
 | OQ-16 | Seed in the UI | Editable field with a default value. |
 | OQ-17 | Stale RUNNING studies | Heartbeat field, stale RUNNING studies become FAILED after a timeout. |

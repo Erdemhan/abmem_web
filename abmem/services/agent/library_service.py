@@ -33,7 +33,7 @@ from __future__ import annotations
 import copy
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Any, Final, Mapping
+from typing import Any, Final, Iterable, Mapping
 
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
@@ -589,6 +589,36 @@ def update_library_agent(agent: Agent, data: AgentInput) -> Agent:
     return agent
 
 
+def free_agent_name(base: str, taken: Iterable[str]) -> str:
+    """Return the first of ``base``, ``base_2``, ``base_3``, ... not in ``taken``.
+
+    Names are compared case-insensitively after ``normalize_name``. When a
+    suffixed name would be longer than ``NAME_MAX_LENGTH``, the base is
+    shortened (and trailing whitespace removed) so that the suffix fits.
+
+    Args:
+        base: Preferred name, usually the name of the copied agent.
+        taken: Names already in use, for example those of a market.
+
+    Returns:
+        The normalised ``base`` when it is free (also when it is empty or too
+        long, so that the caller's validation reports it), else the first
+        free suffixed name, which has at most ``NAME_MAX_LENGTH`` characters.
+    """
+    used = {normalize_name(item).lower() for item in taken}
+    normalized = normalize_name(base)
+    if normalized.lower() not in used:
+        return normalized
+    number = 2
+    while True:
+        suffix = f"_{number}"
+        stem = normalized[: max(NAME_MAX_LENGTH - len(suffix), 0)].rstrip()
+        candidate = f"{stem}{suffix}"
+        if candidate.lower() not in used:
+            return candidate
+        number += 1
+
+
 @transaction.atomic
 def copy_agent(
     src: Agent, market: Market, *, proxy: bool, name: str | None = None
@@ -600,24 +630,26 @@ def copy_agent(
         market: Target market.
         proxy: ``proxy`` flag of the copy (True for scenario agents, False
             for run agents). Portfolio and plants get the same flag.
-        name: Name of the copy, defaults to ``src.name``.
+        name: Name of the copy. When None, the first of ``src.name``,
+            ``<src.name>_2``, ``<src.name>_3``, ... that is free in
+            ``market`` is used (case-insensitive, see ``free_agent_name``).
+            A library agent can therefore be copied into one market several
+            times (OQ-14).
 
     Returns:
         The saved copy. ``source`` is ``src`` when ``src`` is a library agent,
         else ``src.source``. ``state`` is ``CREATED``.
 
     Raises:
-        LibraryValidationError: ``src`` is a library agent already copied
-            into ``market`` (OQ-14, code ``duplicate_library_agent``), or the
-            name is empty, too long or already used in ``market``.
+        LibraryValidationError: The name is empty, too long or already used
+            in ``market``.
     """
-    if src.is_library and Agent.objects.filter(market=market, source=src).exists():
-        raise _error(
-            "library_agent_id",
-            f"Library agent '{src.name}' is already part of this scenario.",
-            "duplicate_library_agent",
+    if name is None:
+        new_name = free_agent_name(
+            src.name, market.agent_set.values_list("name", flat=True)
         )
-    new_name = normalize_name(src.name if name is None else name)
+    else:
+        new_name = normalize_name(name)
     if not new_name:
         raise _error("name", "Agent name is required.", "required")
     if len(new_name) > NAME_MAX_LENGTH:
@@ -672,7 +704,7 @@ def add_new_agent_to_scenario(data: AgentInput, market: Market) -> Agent:
             ``copy_agent``. Nothing is saved in that case.
     """
     library_agent = create_library_agent(data)
-    return copy_agent(library_agent, market, proxy=True)
+    return copy_agent(library_agent, market, proxy=True, name=library_agent.name)
 
 
 def _copy_row_values(instance: Any, exclude: frozenset[str]) -> dict[str, Any]:

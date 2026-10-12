@@ -37,7 +37,7 @@
         .info-tip:hover, .info-tip:focus { color: #cb0c9f; }
         .library-card { cursor: pointer; transition: border-color .15s; border: 1px solid #e9ecef; }
         .library-card:hover { border-color: #cb0c9f; }
-        .library-card.is-added { cursor: default; border-color: #82d616; background: #f8fdf2; }
+        .library-card.is-added { border-color: #82d616; background: #f8fdf2; }
         .agent-row .agent-row-name { word-break: break-word; }
         .agent-row.has-error { border-left: 3px solid #ea0606; }
         .review-list dt { font-weight: 600; color: #344767; }
@@ -632,9 +632,14 @@
                 syncDurationPreset();
             }
 
+            // A library row sends its name (copies of one library agent get NAME, NAME_2, ...). Once edited it
+            // also sends every agent field and the server stores a copy with these values (the library agent
+            // itself is not changed). Rows of older drafts without a name fall back to the server's free name.
             function agentPayload(row) {
-                if (row.mode === 'library') {
-                    return { mode: 'library', library_agent_id: row.library_agent_id };
+                if (row.mode === 'library' && !row.edited) {
+                    var copy = { mode: 'library', library_agent_id: row.library_agent_id };
+                    if (row.name) { copy.name = row.name; }
+                    return copy;
                 }
                 var entry = {
                     mode: row.mode,
@@ -654,6 +659,9 @@
                 };
                 if (row.mode === 'scenario') {
                     entry.agent_id = row.agent_id;
+                }
+                if (row.mode === 'library') {
+                    entry.library_agent_id = row.library_agent_id;
                 }
                 return entry;
             }
@@ -834,17 +842,34 @@
 
             function originText(row) {
                 if (row.mode === 'new') { return 'New, added to the library on save'; }
-                if (row.mode === 'library') { return 'From library'; }
+                if (row.mode === 'library') {
+                    return row.edited ? 'Edited copy of library agent ' + row.source_name : 'From library';
+                }
                 return row.source_id ? 'Copy of library agent ' + row.source_name : 'Not linked to a library agent';
             }
 
-            function usedLibraryIds() {
-                var ids = {};
+            // Number of rows per library agent id (library rows and kept scenario copies).
+            function libraryCopyCounts() {
+                var counts = {};
                 state.agents.forEach(function (row) {
-                    if (row.mode === 'library' && row.library_agent_id) { ids[String(row.library_agent_id)] = true; }
-                    if (row.mode === 'scenario' && row.source_id) { ids[String(row.source_id)] = true; }
+                    var id = row.mode === 'library' ? row.library_agent_id : (row.mode === 'scenario' ? row.source_id : null);
+                    if (id) { counts[String(id)] = (counts[String(id)] || 0) + 1; }
                 });
-                return ids;
+                return counts;
+            }
+
+            // First of NAME, NAME_2, NAME_3, ... not used by a row (case-insensitive), shortened so that the
+            // suffix fits the name length limit. Same rule as library_service.free_agent_name.
+            function freeAgentName(base) {
+                var used = {};
+                state.agents.forEach(function (row) { used[String(row.name).trim().toLowerCase()] = true; });
+                var name = String(base).trim();
+                if (!used[name.toLowerCase()]) { return name; }
+                for (var number = 2; ; number++) {
+                    var suffix = '_' + number;
+                    var stem = name.slice(0, Math.max(CONFIG.agent_name_max_length - suffix.length, 0)).replace(/\s+$/, '');
+                    if (!used[(stem + suffix).toLowerCase()]) { return stem + suffix; }
+                }
             }
 
             // Same rules as the server: names unique in the scenario (case-sensitive), new agents also
@@ -915,13 +940,11 @@
                     item.appendChild(body);
 
                     var actions = el('div', 'd-flex gap-1');
-                    if (row.mode !== 'library') {
-                        var edit = el('button', 'btn btn-sm btn-outline-primary mb-0', 'Edit');
-                        edit.type = 'button';
-                        edit.setAttribute('aria-label', 'Edit agent ' + row.name);
-                        edit.addEventListener('click', function () { openAgentForm(row); });
-                        actions.appendChild(edit);
-                    }
+                    var edit = el('button', 'btn btn-sm btn-outline-primary mb-0', 'Edit');
+                    edit.type = 'button';
+                    edit.setAttribute('aria-label', 'Edit agent ' + row.name);
+                    edit.addEventListener('click', function () { openAgentForm(row); });
+                    actions.appendChild(edit);
                     var remove = el('button', 'btn btn-sm btn-outline-danger mb-0', 'Remove');
                     remove.type = 'button';
                     remove.setAttribute('aria-label', 'Remove agent ' + row.name);
@@ -958,14 +981,17 @@
                     });
             }
 
+            // A library agent can be added several times (OQ-14). Every click adds a copy with the next free
+            // name, which the user can change with "Edit".
             function addLibraryAgent(agent) {
-                if (usedLibraryIds()[String(agent.id)]) { return; }
-                var clash = duplicateNameMessage(agent.name, 'library', null);
+                var row = rowFromServerAgent(agent, 'library');
+                row.name = freeAgentName(agent.name);
+                var clash = duplicateNameMessage(row.name, 'library', null);
                 if (clash) {
                     setFieldError('agents', agent.name + ': ' + clash);
                     return;
                 }
-                state.agents.push(rowFromServerAgent(agent, 'library'));
+                state.agents.push(row);
                 agentsChanged();
             }
 
@@ -978,13 +1004,14 @@
                 if (state.library === null) { status.textContent = ''; return; }
                 var search = byId('library-search').value.trim().toLowerCase();
                 var type = byId('library-type-filter').value;
-                var used = usedLibraryIds();
+                var counts = libraryCopyCounts();
                 var shown = 0;
                 state.library.forEach(function (agent) {
                     if (search && agent.name.toLowerCase().indexOf(search) === -1) { return; }
                     if (type !== '' && String(agent.type) !== type) { return; }
                     shown += 1;
-                    var added = Boolean(used[String(agent.id)]);
+                    var copies = counts[String(agent.id)] || 0;
+                    var added = copies > 0;
                     var row = rowFromServerAgent(agent, 'library');
                     var col = el('div', 'col-12 col-md-6 col-xxl-4');
                     var card = el('div', 'card library-card h-100' + (added ? ' is-added' : ''));
@@ -994,6 +1021,12 @@
                     head.appendChild(el('h6', 'mb-1 text-sm text-break', agent.name));
                     head.appendChild(el('span', 'badge bg-gradient-dark', typeName(agent.type)));
                     body.appendChild(head);
+                    if (added) {
+                        var countBadge = el('span', 'badge bg-gradient-success align-self-start mb-1 library-copy-count',
+                            'Added ×' + copies);
+                        countBadge.setAttribute('title', copies + (copies === 1 ? ' copy' : ' copies') + ' in this scenario');
+                        body.appendChild(countBadge);
+                    }
                     body.appendChild(el('p', 'text-xs mb-1', 'Algorithm: ' + algorithmName(agent.algorithm_type)));
                     body.appendChild(el('p', 'text-xs mb-1', 'Fail-stack: ' + failstackText(row)));
                     var plants = el('ul', 'list-unstyled text-xs mb-1');
@@ -1004,15 +1037,13 @@
                     body.appendChild(el('p', 'text-xs text-secondary mb-2',
                         'Capacity ' + formatNumber(rowCapacity(row)) + ' MW · Budget ' + agent.budget + ' USD'));
                     var button = el('button', 'btn btn-sm mb-0 mt-auto ' + (added ? 'btn-success' : 'btn-outline-primary'),
-                        added ? 'Added' : 'Add');
+                        added ? 'Add another copy' : 'Add');
                     button.type = 'button';
-                    button.disabled = added;
-                    button.setAttribute('aria-label', (added ? 'Already added: ' : 'Add to the scenario: ') + agent.name);
+                    button.setAttribute('aria-label', (added ? 'Add another copy to the scenario: ' : 'Add to the scenario: ')
+                        + agent.name);
                     body.appendChild(button);
                     card.appendChild(body);
-                    if (!added) {
-                        card.addEventListener('click', function () { addLibraryAgent(agent); });
-                    }
+                    card.addEventListener('click', function () { addLibraryAgent(agent); });
                     col.appendChild(card);
                     container.appendChild(col);
                 });
@@ -1091,6 +1122,7 @@
                     row.algorithm_type = values.algorithm_type;
                     row.failstack = values.failstack;
                     row.plants = values.plants;
+                    if (row.mode === 'library') { row.edited = true; }
                     delete state.rowErrors[row.key];
                 } else {
                     state.agents.push({
