@@ -848,6 +848,26 @@ def _write_scenario_agents(market: Market, entries: list[ScenarioAgentEntry]) ->
             raise _entry_error(entry, exc) from exc
 
 
+def _check_learning_start(simulation: Simulation) -> None:
+    """Reject a scenario whose learning start no agent configuration allows (PLAN 2.14).
+
+    Args:
+        simulation: The scenario after its market and agents were written.
+
+    Raises:
+        ValidationError: ``{"learning_starts": [message]}``.
+    """
+    from .services.simulation.context import (
+        SimulationValidationError,
+        scenario_learning_start,
+    )
+
+    try:
+        scenario_learning_start(simulation)
+    except SimulationValidationError as exc:
+        raise ValidationError({"learning_starts": [str(exc)]}) from exc
+
+
 def _save_scenario(
     write: Callable[[], None], entries: list[ScenarioAgentEntry]
 ) -> JsonResponse | None:
@@ -1673,6 +1693,10 @@ def run_simulation(request: HttpRequest, simulation_id: int) -> HttpResponse:
             )
         except checkpoints.WarmStartError as exc:
             return _error("warm_start_from", str(exc), 400)
+    try:
+        _check_learning_start(simulation)
+    except ValidationError as exc:
+        return _error("learning_starts", exc.message_dict["learning_starts"][0], 400)
     if options.dry_run:
         if wants_json:
             return JsonResponse({"warnings": warnings})
@@ -2206,6 +2230,7 @@ def create_simulation(request: HttpRequest) -> HttpResponse:
             clearing_params=header.clearing_params,
         )
         _write_scenario_agents(market, validated.entries)
+        _check_learning_start(simulation)
         created["simulation"] = simulation
 
     error_response = _save_scenario(write, validated.entries)
@@ -2285,6 +2310,7 @@ def update_simulation(request: HttpRequest, simulation_id: int) -> HttpResponse:
         market.save()
 
         _write_scenario_agents(market, validated.entries)
+        _check_learning_start(simulation)
 
     error_response = _save_scenario(write, validated.entries)
     if error_response is not None:

@@ -94,7 +94,7 @@ def _wizard_initial(html: str) -> dict[str, Any]:
 
 @pytest.mark.parametrize(
     ("raw_value", "stored"),
-    [("100", 100), (1, 1), ("", None), (None, None), ("  ", None)],
+    [("100", 100), (64, 64), ("", None), (None, None), ("  ", None)],
 )
 def test_create_stores_learning_starts(
     client: Client, fossil: Resource, raw_value: Any, stored: int | None
@@ -102,6 +102,19 @@ def test_create_stores_learning_starts(
     simulation = _created(client, _payload(fossil, learning_starts=raw_value))
 
     assert simulation.learning_starts == stored
+
+
+def test_create_rejects_a_value_below_the_agents_minimum(
+    client: Client, fossil: Resource
+) -> None:
+    # The TD3 agent needs at least its batch size (64) of transitions.
+    before = Simulation.objects.count()
+    response = _post(
+        client, reverse("create_simulation"), _payload(fossil, learning_starts=25)
+    )
+    assert response.status_code == 400
+    assert "below the minimum" in response.json()["errors"]["learning_starts"][0]
+    assert Simulation.objects.count() == before
 
 
 def test_create_without_the_key_is_automatic(client: Client, fossil: Resource) -> None:

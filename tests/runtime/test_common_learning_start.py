@@ -117,3 +117,42 @@ def test_value_above_a_buffer_is_rejected(fast_demand) -> None:
     simulation = _run({"DDPG": {"buffer_size": 128}}, learning_starts=200, periods=30)
     with pytest.raises(SimulationValidationError, match="DDPG"):
         SimulationContext.build(simulation, export_json=False)
+
+
+def test_min_learning_starts_per_config() -> None:
+    assert DDPGConfig(batch_size=32, learning_starts=64).min_learning_starts() == 32
+    assert RDPGConfig(batch_size=8, learning_starts=8, seq_len=24).min_learning_starts() == 24
+    assert PPOConfig(batch_size=8, learning_starts=8, minibatch_size=8, rollout_length=32).min_learning_starts() == 32
+
+
+def test_automatic_value_follows_a_larger_batch_size(fast_demand) -> None:
+    # learning_starts stays 64 for DDPG, its batch of 128 raises the minimum.
+    simulation = _run({"DDPG": {"batch_size": 128}}, periods=170)
+    simulation_service.run(simulation, export_json=False)
+    assert set(_first_updates(simulation).values()) == {25 + 128}
+
+
+def test_explicit_value_overrides_the_agents_own_learning_starts(fast_demand) -> None:
+    params = {a: {"batch_size": 32} for a in LEARNERS}
+    params["PPO"] = {"batch_size": 32, "rollout_length": 32, "minibatch_size": 32}
+    simulation = _run(params, learning_starts=32, periods=80)
+    simulation_service.run(simulation, export_json=False)
+    # Every agent keeps learning_starts 64 in its own parameters.
+    assert set(_first_updates(simulation).values()) == {25 + 32}
+
+
+def test_run_request_rejects_an_invalid_scenario_value(client) -> None:
+    from django.urls import reverse
+
+    from abmem.models import Simulation
+
+    scenario = _run(learning_starts=25, periods=30)
+    scenario.proxy = True
+    scenario.save(update_fields=["proxy"])
+    before = Simulation.objects.count()
+    response = client.get(
+        reverse("run_simulation", args=[scenario.id]), HTTP_ACCEPT="application/json"
+    )
+    assert response.status_code == 400
+    assert "below the minimum" in response.json()["errors"]["learning_starts"][0]
+    assert Simulation.objects.count() == before

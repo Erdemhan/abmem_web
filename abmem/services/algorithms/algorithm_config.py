@@ -161,14 +161,22 @@ class AlgorithmConfig:
                 raise TypeError(f"unsupported field type for {f.name}: {hint!r}")
             object.__setattr__(self, f.name, coerced)
 
-    def first_update_transitions(self) -> int:
-        """Return the stored transitions needed before the first update (PLAN 2.14).
+    def min_learning_starts(self) -> int:
+        """Return the smallest technically possible ``learning_starts`` (PLAN 2.14).
 
         Returns:
-            ``learning_starts`` for replay-buffer algorithms. Subclasses with
-            further conditions (sequence windows, full rollouts) override it.
+            ``batch_size``, the size of the first minibatch. Subclasses with
+            further conditions (sequence windows, full rollouts) extend it.
         """
-        return int(self.learning_starts)
+        return int(self.batch_size)
+
+    def first_update_transitions(self) -> int:
+        """Return the stored transitions before the first update (PLAN 2.14).
+
+        Returns:
+            ``max(learning_starts, min_learning_starts())``.
+        """
+        return max(int(self.learning_starts), self.min_learning_starts())
 
     def learning_starts_limit(self) -> int | None:
         """Return the largest reachable ``learning_starts`` (PLAN 2.14).
@@ -428,14 +436,14 @@ class PPOConfig(AlgorithmConfig):
     value_coef: float = 0.5
     initial_log_std: float = 0.0
 
-    def first_update_transitions(self) -> int:
-        """Return ``max(learning_starts, rollout_length)``.
+    def min_learning_starts(self) -> int:
+        """Return ``max(batch_size, rollout_length)``.
 
         The first update needs a complete rollout. With ``learning_starts``
         above ``rollout_length`` the first rollout is collected so that it
         completes after ``learning_starts`` transitions (PLAN 2.14).
         """
-        return max(int(self.learning_starts), int(self.rollout_length))
+        return max(super().min_learning_starts(), int(self.rollout_length))
 
     def learning_starts_limit(self) -> int | None:
         """Return None. PPO drops the oldest pre-learning transitions instead."""
@@ -494,9 +502,9 @@ class RDPGConfig(AlgorithmConfig):
     seq_len: int = 24
     lstm_hidden: int = 64
 
-    def first_update_transitions(self) -> int:
-        """Return ``max(learning_starts, seq_len)``, a full window is needed too."""
-        return max(int(self.learning_starts), int(self.seq_len))
+    def min_learning_starts(self) -> int:
+        """Return ``max(batch_size, seq_len)``, a full window is needed too."""
+        return max(super().min_learning_starts(), int(self.seq_len))
 
     def _validate(self) -> None:
         """Validate RDPG ranges in addition to the common ranges."""

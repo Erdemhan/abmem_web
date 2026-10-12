@@ -147,6 +147,43 @@ def agent_params(
     return params
 
 
+_UNBOUNDED_LEARNING_STARTS: Final[int] = 2**31 - 1
+
+
+def learner_config(algorithm_key: str, params: Mapping[str, Any]) -> AlgorithmConfig:
+    """Return the config of a learning agent with ``learning_starts`` made reachable.
+
+    ``learning_starts`` is raised to ``min_learning_starts()`` when the
+    agent's own value is smaller (for example after ``batch_size`` was
+    increased), so the automatic common learning start adapts instead of
+    failing (PLAN 2.14).
+
+    Args:
+        algorithm_key: Key of a learning algorithm.
+        params: Effective parameters of the agent (``agent_params``).
+
+    Returns:
+        The validated config.
+
+    Raises:
+        KeyError: Unknown algorithm key.
+        TypeError, ValueError: A parameter is invalid.
+    """
+    from abmem.services.algorithms import registry
+
+    config_class = registry.get_config_class(algorithm_key)
+    probe = config_class.from_dict(
+        {**params, "learning_starts": _UNBOUNDED_LEARNING_STARTS}
+    )
+    own = params.get("learning_starts", config_class().learning_starts)
+    if isinstance(own, bool):
+        raise TypeError(f"learning_starts must be an integer, got {own!r}")
+    own = int(own)
+    return config_class.from_dict(
+        {**params, "learning_starts": max(own, probe.min_learning_starts())}
+    )
+
+
 def common_learning_starts(
     explicit: int | None, learners: Sequence[tuple[str, AlgorithmConfig]]
 ) -> int | None:
@@ -154,28 +191,32 @@ def common_learning_starts(
 
     Args:
         explicit: ``Simulation.learning_starts``, None for automatic.
-        learners: ``(label, resolved config)`` of every learning agent, the
-            label being ``"<agent name> (<algorithm key>)"``.
+        learners: ``(label, config)`` of every learning agent from
+            :func:`learner_config`, the label being
+            ``"<agent name> (<algorithm key>)"``.
 
     Returns:
         ``explicit``, or the largest ``first_update_transitions()`` of the
         learners. None when the run has no learning agent.
 
     Raises:
-        SimulationValidationError: ``explicit`` is below the requirement or
-            above the reachable limit of a learning agent.
+        SimulationValidationError: The value is below the technical minimum
+            (``min_learning_starts()``) or above the replay buffer of a
+            learning agent.
     """
     if not learners:
         return None
     if explicit is None:
-        return max(config.first_update_transitions() for _, config in learners)
-    value = int(explicit)
+        value = max(config.first_update_transitions() for _, config in learners)
+    else:
+        value = int(explicit)
     for name, config in learners:
-        needed = config.first_update_transitions()
-        if value < needed:
+        minimum = config.min_learning_starts()
+        if value < minimum:
             raise SimulationValidationError(
-                f"learning start {value} is below the requirement of agent "
-                f"{name}: {needed} transitions"
+                f"learning start {value} is below the minimum of agent {name}: "
+                f"{minimum} transitions (its batch size, sequence length or "
+                "rollout length)"
             )
         limit = config.learning_starts_limit()
         if limit is not None and value > limit:
@@ -184,6 +225,40 @@ def common_learning_starts(
                 f"{name}: {limit} transitions"
             )
     return value
+
+
+def scenario_learning_start(simulation: Simulation) -> int | None:
+    """Check the learning start of a scenario or run before it starts (PLAN 2.14).
+
+    Resolves every agent of ``simulation.market`` with the stored defaults
+    and agent parameters, as :meth:`SimulationContext.build` does without
+    HPO overrides. Agents with invalid parameters are skipped here, because
+    :meth:`SimulationContext.build` reports those with their own message.
+
+    Args:
+        simulation: Scenario or run with a market.
+
+    Returns:
+        The common learning start, None without learning agents.
+
+    Raises:
+        SimulationValidationError: The value is out of range for an agent.
+    """
+    from abmem.services.algorithms import registry
+
+    defaults = algorithm_defaults()
+    learners: list[tuple[str, AlgorithmConfig]] = []
+    for agent in simulation.market.agent_set.order_by("id"):
+        key = str(agent.algorithm_type)
+        if not registry.is_known(key) or registry.is_baseline(key):
+            continue
+        label = f"{agent.name!r} ({key})"
+        try:
+            config = learner_config(key, agent_params(agent, key, defaults))
+        except (KeyError, TypeError, ValueError):
+            continue
+        learners.append((label, config))
+    return common_learning_starts(simulation.learning_starts, learners)
 
 
 def policy_spec_for(
@@ -563,7 +638,7 @@ class SimulationContext:
             if registry.is_baseline(algorithm_type):
                 continue
             try:
-                config = registry.get_config_class(algorithm_type).from_dict(params)
+                config = learner_config(algorithm_type, params)
             except (KeyError, TypeError, ValueError) as error:
                 raise SimulationValidationError(
                     f"agent {agent.name!r} ({algorithm_type}): {error}"
