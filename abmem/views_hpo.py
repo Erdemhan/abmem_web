@@ -200,10 +200,10 @@ def hpo_time_estimate(
 
 
 _PHASE_LABELS: Final[dict[int, str]] = {
-    int(HPOPhase.INIT): "initial colony",
+    int(HPOPhase.INIT): "initialisation",
     int(HPOPhase.EMPLOYED): "employed bees",
-    int(HPOPhase.ONLOOKER): "onlooker",
-    int(HPOPhase.SCOUT): "scout",
+    int(HPOPhase.ONLOOKER): "onlooker bees",
+    int(HPOPhase.SCOUT): "scout bees",
     int(HPOPhase.FINAL_EVAL): "final evaluation",
 }
 
@@ -211,9 +211,9 @@ _PHASE_LABELS: Final[dict[int, str]] = {
 def round_progress(
     rows: Iterable[Mapping[str, Any]], *, max_iter: int
 ) -> dict[str, Any] | None:
-    """Return the progress of the newest ABC round of a study.
+    """Return the progress of the newest ABC cycle of a study.
 
-    The round is the iteration of the newest trial. Its trials are counted
+    The cycle is the iteration of the newest trial (0 = initialisation). Its trials are counted
     as done when they finished or failed. Final evaluation trials form their
     own step.
 

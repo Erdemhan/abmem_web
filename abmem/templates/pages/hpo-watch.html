@@ -64,7 +64,7 @@
                 <div class="text-xs text-secondary mt-1" id="hpo-time-text" aria-live="polite"></div>
               </div>
               <div class="text-xs text-secondary mt-2">
-                Colony {{ study.colony_size }}, {{ study.max_iter }} iterations, limit {{ study.limit }} -
+                {{ study.colony_size }} food sources (SN), {{ study.max_iter }} cycles, abandonment limit {{ study.limit }} -
                 search seeds [{{ search_seeds }}], evaluation seeds [{{ evaluation_seeds }}] -
                 objective {{ weights.0 }} x agent score + {{ weights.1 }} x market score
                 {% if fixed_params.failstack_enabled %}- fail-stack on{% if fixed_params.failstack_limit %}, limit {{ fixed_params.failstack_limit }}{% endif %}{% if fixed_params.failstack_delta is not None %}, delta {{ fixed_params.failstack_delta }}{% endif %}{% else %}- fail-stack off{% endif %}
@@ -130,7 +130,7 @@
         <div class="col-lg-6 mb-4">
           <div class="card">
             <div class="card-header pb-0">
-              <h6 class="mb-0">Best score per iteration</h6>
+              <h6 class="mb-0">Best score per cycle</h6>
               <p class="text-xs text-secondary mb-0">Best weighted objective found so far (search seeds).</p>
             </div>
             <div class="card-body p-3"><div class="hpo-chart"><canvas id="hpo-history-chart"></canvas></div></div>
@@ -161,9 +161,9 @@
                 <thead>
                   <tr>
                     <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ps-3">#</th>
-                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7" title="ABC round the candidate belongs to. All trials of a round share its number, finished or not.">Round</th>
+                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7" title="ABC cycle the candidate belongs to (0 = initialisation). All trials of a cycle share its number, finished or not.">Cycle</th>
                     <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Phase</th>
-                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Source</th>
+                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7" title="Food source (candidate parameter set) the trial tests, 0 to SN - 1.">Food source</th>
                     <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Seed</th>
                     <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Status</th>
                     <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Agent score</th>
@@ -258,7 +258,7 @@
           data: { datasets: [{ label: 'Best score', data: [], borderColor: '#cb0c9f', backgroundColor: 'rgba(203,12,159,0.15)',
             stepped: true, fill: false, pointRadius: 3 }] },
           options: { maintainAspectRatio: false, animation: false, parsing: false,
-            scales: { x: { type: 'linear', title: { display: true, text: 'Iteration' }, ticks: { precision: 0 } },
+            scales: { x: { type: 'linear', title: { display: true, text: 'Cycle' }, ticks: { precision: 0 } },
               y: { title: { display: true, text: 'Weighted objective' } } },
             plugins: { legend: { display: false } } }
         });
@@ -316,7 +316,7 @@
           var tr = document.createElement('tr');
           tr.appendChild(cell(String(t.id), 'text-sm ps-3'));
           tr.appendChild(cell(String(t.iteration)));
-          tr.appendChild(cell(t.phase));
+          tr.appendChild(cell(PHASE_LABELS[t.phase] || t.phase));
           tr.appendChild(cell(String(t.source_index)));
           tr.appendChild(cell(String(t.seed)));
           var status = cell(t.status, 'text-sm font-weight-bold' + (t.status === 'FAILED' ? ' text-danger' : ''));
@@ -344,15 +344,20 @@
         return Math.floor(h / 24) + ' d ' + (h % 24) + ' h';
       }
 
-      // Newest ABC round, e.g. 'Round 0 of 10 (initial colony): 2 of 10 trials finished.'
+      var PHASE_LABELS = {
+        INIT: 'Initialisation', EMPLOYED: 'Employed bees', ONLOOKER: 'Onlooker bees',
+        SCOUT: 'Scout bees', FINAL_EVAL: 'Final evaluation'
+      };
+
+      // Newest ABC cycle, e.g. 'Cycle 0 of 10 (initialisation): 2 of 10 trials finished.'
       function roundText(round) {
         if (!round) { return ''; }
         var head = round.label === 'final evaluation'
           ? 'Final evaluation on held-out seeds'
-          : 'Round ' + round.iteration + ' of ' + round.max_iter + ' (' + round.label + ')';
+          : 'Cycle ' + round.iteration + ' of ' + round.max_iter + ' (' + round.label + ')';
         var text = head + ': ' + round.done + ' of ' + round.total + ' trials finished.';
         if (round.label !== 'final evaluation' && round.done < round.total) {
-          text += ' The next round starts when all of them are finished.';
+          text += ' The next phase starts when all of them are finished.';
         }
         return text;
       }

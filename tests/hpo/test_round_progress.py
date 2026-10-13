@@ -21,7 +21,7 @@ def test_no_trials_yet() -> None:
 def test_initial_round() -> None:
     rows = [_row(0, HPOPhase.INIT, DONE)] * 2 + [_row(0, HPOPhase.INIT, RUN)] * 8
     assert round_progress(rows, max_iter=10) == {
-        "label": "initial colony", "iteration": 0, "max_iter": 10, "done": 2, "total": 10,
+        "label": "initialisation", "iteration": 0, "max_iter": 10, "done": 2, "total": 10,
     }
 
 
@@ -33,7 +33,7 @@ def test_latest_round_counts_failed_as_done() -> None:
         + [_row(1, HPOPhase.ONLOOKER, RUN)] * 3
     )
     assert round_progress(rows, max_iter=10) == {
-        "label": "onlooker", "iteration": 1, "max_iter": 10, "done": 7, "total": 10,
+        "label": "onlooker bees", "iteration": 1, "max_iter": 10, "done": 7, "total": 10,
     }
 
 

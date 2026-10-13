@@ -89,24 +89,27 @@
               <div class="card-body">
                 <div class="row">
                   <div class="col-4 mb-3">
-                    <label class="form-label" for="hpo-colony">Colony size</label>
+                    <label class="form-label" for="hpo-colony">Food sources (SN)</label>
                     <input class="form-control" type="number" min="2" step="1" id="hpo-colony" name="colony_size"
                       value="{{ initial.colony_size }}">
                   </div>
                   <div class="col-4 mb-3">
-                    <label class="form-label" for="hpo-iter">Iterations</label>
+                    <label class="form-label" for="hpo-iter">Cycles</label>
                     <input class="form-control" type="number" min="1" step="1" id="hpo-iter" name="max_iter"
                       value="{{ initial.max_iter }}">
                   </div>
                   <div class="col-4 mb-3">
-                    <label class="form-label" for="hpo-limit">Limit</label>
+                    <label class="form-label" for="hpo-limit">Abandonment limit</label>
                     <input class="form-control" type="number" min="1" step="1" id="hpo-limit" name="limit"
                       value="{{ initial.limit }}">
                   </div>
                 </div>
-                <small class="text-secondary d-block mb-3">Colony size is the number of food sources. A source whose
-                  trial counter exceeds the limit is replaced by a scout. Karaboga and Basturk (2007) use limit =
-                  colony size x number of parameters.</small>
+                <small class="text-secondary d-block mb-3">Each food source is one candidate parameter set. Cycle 0
+                  evaluates the SN initial sources. Every following cycle has an employed-bee phase (one candidate next
+                  to each source, SN candidates) and an onlooker-bee phase (SN candidates next to sources picked by
+                  quality). A source that does not improve for more cycles than the abandonment limit is replaced by a
+                  scout bee. In Karaboga and Basturk (2007) the colony size is the number of employed plus onlooker
+                  bees, 2 x SN, and they use limit = SN x number of parameters.</small>
                 <div class="row">
                   <div class="col-6 mb-3">
                     <label class="form-label" for="hpo-search-seeds">Search seeds</label>
@@ -439,9 +442,10 @@
         var target = document.getElementById('hpo-estimate');
         if (!(sn >= 2) || !(iterations >= 1)) { target.textContent = '-'; return; }
         var total = sn * (1 + 2 * iterations) * nSearch + nEval;
-        target.textContent = 'at least ' + total + ' simulation runs (plus ' + nSearch +
-          ' per scout): ' + sn + ' x (1 + 2 x ' + iterations + ') candidates x ' + nSearch +
-          ' search seeds + ' + nEval + ' evaluation seeds.';
+        target.textContent = 'at least ' + total + ' trials (simulation runs), plus ' + nSearch +
+          ' per scout: (' + sn + ' initial + ' + iterations + ' cycles x 2 x ' + sn +
+          ' employed and onlooker candidates) x ' + nSearch + ' search seeds + ' + nEval +
+          ' evaluation seeds. Each cycle has ' + (2 * sn * nSearch) + ' trials.';
       }
 
       function showErrors(errors) {
