@@ -175,6 +175,23 @@ def test_list_page_shows_studies_and_fails_stale(scenario: Simulation) -> None:
     assert "heartbeat" in stale.error
 
 
+def test_list_page_shows_the_expected_total_of_trials(scenario: Simulation) -> None:
+    # SN 3, 2 cycles, 2 search seeds, 1 evaluation seed: (3 + 2 x 2 x 3) x 2 + 1 = 31.
+    study = make_study(
+        scenario, name="totals", status=HPOStatus.RUNNING, colony_size=3, max_iter=2,
+        search_seeds=[1, 2], evaluation_seeds=[9],
+    )
+    add_trial(study)
+    add_trial(study, status=HPOTrialStatus.RUNNING)
+    content = Client().get(reverse("hpo_list")).content.decode()
+    assert "1 / 31" in content
+    # Every scout candidate adds one trial per search seed.
+    add_trial(study, phase=HPOPhase.SCOUT, iteration=1, status=HPOTrialStatus.RUNNING)
+    add_trial(study, phase=HPOPhase.SCOUT, iteration=1, seed=2, status=HPOTrialStatus.RUNNING)
+    content = Client().get(reverse("hpo_list")).content.decode()
+    assert "1 / 33" in content
+
+
 def test_sidebar_links_to_hpo_list() -> None:
     response = Client().get(reverse("hpo_list"))
     assert "Hyperparameter Search" in response.content.decode()

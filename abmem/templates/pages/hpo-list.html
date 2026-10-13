@@ -95,7 +95,7 @@
                       <td><span class="text-sm">{{ row.algorithm }}</span></td>
                       <td><span class="text-sm hpo-target">{{ row.study.get_target_display }}</span></td>
                       <td><span class="text-sm">{{ row.study.scenario.name }}</span></td>
-                      <td><span class="text-sm">{{ row.n_done }} / {{ row.study.n_trials }}</span></td>
+                      <td><span class="text-sm">{{ row.n_done }} / {{ row.n_total }}</span></td>
                       <td>
                         <span class="text-sm font-weight-bold">
                           {% if row.study.best_score is not None %}{{ row.study.best_score|floatformat:4 }}{% else %}-{% endif %}

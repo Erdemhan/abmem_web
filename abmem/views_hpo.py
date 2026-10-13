@@ -503,6 +503,7 @@ def study_list(request: HttpRequest) -> HttpResponse:
                     trials__status__in=[HPOTrialStatus.FINISHED, HPOTrialStatus.FAILED]
                 ),
             ),
+            n_scout_trials=Count("trials", filter=Q(trials__phase=HPOPhase.SCOUT)),
         )
         .order_by("-created_at", "-id")
     )
@@ -512,6 +513,15 @@ def study_list(request: HttpRequest) -> HttpResponse:
             "status": _status_name(study.status, HPOStatus),
             "algorithm": str(study.algorithm_type),
             "n_done": study.n_done,
+            # Expected total as on the watch page. Each scout candidate is
+            # evaluated on every search seed.
+            "n_total": max(
+                _total_trials(
+                    study,
+                    math.ceil(study.n_scout_trials / max(len(study.search_seeds), 1)),
+                ),
+                study.n_trials,
+            ),
         }
         for study in studies
     ]
