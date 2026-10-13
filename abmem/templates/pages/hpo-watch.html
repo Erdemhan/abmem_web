@@ -60,6 +60,7 @@
                   <div class="progress-bar bg-gradient-info" id="hpo-progress-bar" role="progressbar" style="width: 0%; height: 8px;"
                     aria-valuemin="0" aria-valuemax="100"></div>
                 </div>
+                <div class="text-xs text-secondary mt-1" id="hpo-round-text" aria-live="polite"></div>
                 <div class="text-xs text-secondary mt-1" id="hpo-time-text" aria-live="polite"></div>
               </div>
               <div class="text-xs text-secondary mt-2">
@@ -160,7 +161,7 @@
                 <thead>
                   <tr>
                     <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7 ps-3">#</th>
-                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Iteration</th>
+                    <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7" title="ABC round the candidate belongs to. All trials of a round share its number, finished or not.">Round</th>
                     <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Phase</th>
                     <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Source</th>
                     <th class="text-uppercase text-secondary text-xxs font-weight-bolder opacity-7">Seed</th>
@@ -343,6 +344,19 @@
         return Math.floor(h / 24) + ' d ' + (h % 24) + ' h';
       }
 
+      // Newest ABC round, e.g. 'Round 0 of 10 (initial colony): 2 of 10 trials finished.'
+      function roundText(round) {
+        if (!round) { return ''; }
+        var head = round.label === 'final evaluation'
+          ? 'Final evaluation on held-out seeds'
+          : 'Round ' + round.iteration + ' of ' + round.max_iter + ' (' + round.label + ')';
+        var text = head + ': ' + round.done + ' of ' + round.total + ' trials finished.';
+        if (round.label !== 'final evaluation' && round.done < round.total) {
+          text += ' The next round starts when all of them are finished.';
+        }
+        return text;
+      }
+
       // Elapsed time and the estimate from the mean wall time per finished trial.
       function timeText(progress, status) {
         if (progress.elapsed_seconds === null || progress.elapsed_seconds === undefined) {
@@ -366,6 +380,7 @@
         var pct = total > 0 ? Math.min(100, Math.round(100 * done / total)) : 0;
         $('hpo-progress-text').textContent = done + ' / ' + total + ' trials (' + pct + '%)';
         $('hpo-progress-bar').style.width = pct + '%';
+        $('hpo-round-text').textContent = roundText(data.progress.round);
         $('hpo-time-text').textContent = timeText(data.progress, data.status);
         $('hpo-cancel').classList.toggle('d-none', !(ACTIVE.indexOf(data.status) >= 0 && !data.cancel_requested));
         var errorBox = $('hpo-error-box');

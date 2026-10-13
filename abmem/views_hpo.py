@@ -199,6 +199,57 @@ def hpo_time_estimate(
     return elapsed, elapsed / done * max(total - done, 0)
 
 
+_PHASE_LABELS: Final[dict[int, str]] = {
+    int(HPOPhase.INIT): "initial colony",
+    int(HPOPhase.EMPLOYED): "employed bees",
+    int(HPOPhase.ONLOOKER): "onlooker",
+    int(HPOPhase.SCOUT): "scout",
+    int(HPOPhase.FINAL_EVAL): "final evaluation",
+}
+
+
+def round_progress(
+    rows: Iterable[Mapping[str, Any]], *, max_iter: int
+) -> dict[str, Any] | None:
+    """Return the progress of the newest ABC round of a study.
+
+    The round is the iteration of the newest trial. Its trials are counted
+    as done when they finished or failed. Final evaluation trials form their
+    own step.
+
+    Args:
+        rows: Trial rows with ``iteration``, ``phase`` and ``status``, in id
+            order.
+        max_iter: Number of search iterations of the study.
+
+    Returns:
+        ``{label, iteration, max_iter, done, total}`` or None without trials.
+    """
+    rows = list(rows)
+    if not rows:
+        return None
+    last = rows[-1]
+    phase = int(last["phase"])
+    final_eval = int(HPOPhase.FINAL_EVAL)
+    if phase == final_eval:
+        current = [r for r in rows if int(r["phase"]) == final_eval]
+    else:
+        iteration = int(last["iteration"])
+        current = [
+            r
+            for r in rows
+            if int(r["iteration"]) == iteration and int(r["phase"]) != final_eval
+        ]
+    ended = {int(HPOTrialStatus.FINISHED), int(HPOTrialStatus.FAILED)}
+    return {
+        "label": _PHASE_LABELS.get(phase, str(phase)),
+        "iteration": int(last["iteration"]),
+        "max_iter": int(max_iter),
+        "done": sum(1 for r in current if int(r["status"]) in ended),
+        "total": len(current),
+    }
+
+
 def _candidate_key(row: Mapping[str, Any]) -> tuple[int, int, int, str]:
     """Identify a candidate by iteration, phase, source and parameters.
 
@@ -345,6 +396,7 @@ def _status_payload(study: HPOStudy) -> dict[str, Any]:
         "progress": {
             "done": done,
             "total": total,
+            "round": round_progress(rows, max_iter=study.max_iter),
             **dict(
                 zip(
                     ("elapsed_seconds", "remaining_seconds"),
