@@ -4,6 +4,6 @@ from .market import Market
 from .agent import Agent
 from .models import *
 from .diagnostics import AgentStepLog
-from .hpo import AlgorithmDefault, HPOStudy, HPOTarget, HPOTrial
+from .hpo import AlgorithmDefault, AlgorithmDefaultOrigin, HPOStudy, HPOTarget, HPOTrial
 from .checkpoint import PolicyCheckpoint
 from .clearing import ClearingDefault

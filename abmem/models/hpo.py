@@ -100,15 +100,43 @@ class HPOTrial(Base):
         indexes = [models.Index(fields=["study", "iteration", "phase"])]
 
 
+class AlgorithmDefaultOrigin(models.TextChoices):
+    """Where the stored default parameters of an algorithm come from.
+
+    ``CUSTOM``: saved by hand on the Algorithms page.
+    ``OPTIMIZED``: the best parameters of a hyperparameter search, applied
+    with the target ``default``. A later save on the Algorithms page makes
+    the row ``CUSTOM`` again.
+    """
+
+    CUSTOM = "CUSTOM", "Custom defaults"
+    OPTIMIZED = "OPTIMIZED", "Optimized"
+
+
 class AlgorithmDefault(models.Model):
     """Default hyperparameters of one algorithm key (OQ-9).
 
     Effective parameters are these defaults, overridden by
-    ``Agent.algorithm_params``, overridden by HPO overrides.
+    ``Agent.algorithm_params``, overridden by HPO overrides. ``origin`` and
+    ``source_study`` record whether the values were applied from a
+    hyperparameter search. When that study is deleted, ``source_study``
+    becomes NULL and the origin stays ``OPTIMIZED``.
     """
 
     algorithm_type = models.CharField(max_length=64, unique=True)
     params = models.JSONField(default=dict)
+    origin = models.CharField(
+        max_length=16,
+        choices=AlgorithmDefaultOrigin.choices,
+        default=AlgorithmDefaultOrigin.CUSTOM,
+    )
+    source_study = models.ForeignKey(
+        HPOStudy,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="applied_defaults",
+    )
     updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:

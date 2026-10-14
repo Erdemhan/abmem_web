@@ -3,14 +3,22 @@
 from __future__ import annotations
 
 import json
+import pathlib
 import re
+import shutil
+import subprocess
 from typing import Any
 
 import pytest
 from django.test import Client
 from django.urls import reverse
 
-from abmem.models import AlgorithmDefault, ClearingDefault
+from abmem.models import (
+    AlgorithmDefault,
+    AlgorithmDefaultOrigin,
+    ClearingDefault,
+    HPOStudy,
+)
 from abmem.services import algorithm_catalog
 from abmem.services.algorithms import registry as algorithm_registry
 from abmem.services.algorithms.algorithm_config import TD3Config
@@ -20,6 +28,7 @@ from tests.plugin_helpers import (
     temporary_agent_algorithm,
     temporary_param_clearing_algorithm,
 )
+from tests.factories import make_simulation
 from tests.runtime.conftest import make_run, resources
 
 pytestmark = pytest.mark.django_db
@@ -99,7 +108,7 @@ def test_cards_show_kind_badges_usage_counts_and_custom_defaults(
     page = client.get(reverse("algorithm_list")).content.decode()
     td3_card = page.split('data-key="TD3"')[1].split('data-kind="agent"')[0]
     assert "Learning" in td3_card and "Off-policy" in td3_card
-    assert 'js-custom-badge">Custom defaults' in td3_card
+    assert 'data-origin="CUSTOM">Custom defaults</span>' in td3_card
     assert re.search(r"0 library agents, 1 scenario\b", td3_card)
     assert "On-policy" in page.split('data-key="PPO"')[1].split('data-kind="agent"')[0]
 
@@ -295,3 +304,160 @@ def test_discovered_agent_algorithm_is_listed(client: Client) -> None:
         page = client.get(reverse("algorithm_list")).content.decode()
         assert 'data-key="TEST_AGENT_ALGO"' in page and "Test algorithm" in page
         assert client.get(_params_url("agent", "TEST_AGENT_ALGO")).status_code == 200
+
+
+# Origin of the stored default -------------------------------------------------------
+
+
+def _study(name: str = "td3 search") -> HPOStudy:
+    """Saved TD3 study on a proxy scenario."""
+    scenario = make_simulation(name="proxy")
+    scenario.proxy = True
+    scenario.save()
+    return HPOStudy.objects.create(
+        name=name,
+        algorithm_type="TD3",
+        scenario=scenario,
+        param_bounds={"gamma": {"low": 0.9, "high": 0.99, "scale": "linear"}},
+        colony_size=2,
+        max_iter=1,
+        limit=5,
+        search_seeds=[1],
+        evaluation_seeds=[9],
+        objective={"mode": "weighted", "weights": [1.0, 0.0]},
+    )
+
+
+def _optimized_row(study: HPOStudy) -> AlgorithmDefault:
+    return AlgorithmDefault.objects.create(
+        algorithm_type="TD3",
+        params={"gamma": 0.95},
+        origin=AlgorithmDefaultOrigin.OPTIMIZED,
+        source_study=study,
+    )
+
+
+def _form_values(client: Client) -> dict[str, Any]:
+    return {
+        name: field["value"]
+        for name, field in _fields(
+            client.get(_params_url("agent", "TD3")).json()
+        ).items()
+    }
+
+
+def test_new_default_row_is_custom_without_study() -> None:
+    row = AlgorithmDefault.objects.create(algorithm_type="TD3", params={})
+    row.refresh_from_db()
+    assert row.origin == AlgorithmDefaultOrigin.CUSTOM
+    assert row.source_study is None
+
+
+def test_page_shows_the_optimized_badge_with_the_study_link(client: Client) -> None:
+    study = _study()
+    _optimized_row(study)
+    page = client.get(reverse("algorithm_list")).content.decode()
+    td3_card = page.split('data-key="TD3"')[1].split('data-kind="agent"')[0]
+    watch = reverse("hpo_watch", args=[study.pk])
+    assert f'href="{watch}"' in td3_card
+    assert (
+        f'title="From hyperparameter search &#x27;td3 search&#x27; (#{study.pk})"'
+        in (td3_card)
+    )
+    assert 'data-origin="OPTIMIZED">Optimized</a>' in td3_card
+    assert "Custom defaults" not in td3_card
+
+    form = client.get(_params_url("agent", "TD3")).json()
+    assert form["origin"]["origin"] == "OPTIMIZED"
+    assert form["origin"]["study_id"] == study.pk
+    assert form["origin"]["study_name"] == "td3 search"
+    assert form["origin"]["watch_url"] == watch
+
+
+def test_deleted_study_shows_the_fallback_without_link(client: Client) -> None:
+    study = _study()
+    row = _optimized_row(study)
+    study.delete()
+    row.refresh_from_db()
+    assert row.origin == AlgorithmDefaultOrigin.OPTIMIZED
+    assert row.source_study is None
+    page = client.get(reverse("algorithm_list")).content.decode()
+    td3_card = page.split('data-key="TD3"')[1].split('data-kind="agent"')[0]
+    assert 'data-origin="OPTIMIZED_DELETED">Optimized (search deleted)</span>' in (
+        td3_card
+    )
+    assert "js-origin-link" not in td3_card
+    form = client.get(_params_url("agent", "TD3")).json()
+    assert form["origin"]["origin"] == "OPTIMIZED_DELETED"
+    assert form["origin"]["watch_url"] == ""
+
+
+def test_manual_save_turns_optimized_into_custom(client: Client) -> None:
+    study = _study()
+    _optimized_row(study)
+    values = _form_values(client)
+    values["tau"] = "0.01"
+    response = _post_params(client, "agent", "TD3", values)
+    assert response.status_code == 200, response.content
+    row = AlgorithmDefault.objects.get(algorithm_type="TD3")
+    assert row.origin == AlgorithmDefaultOrigin.CUSTOM
+    assert row.source_study is None
+    assert row.params["gamma"] == 0.95 and row.params["tau"] == 0.01
+    assert response.json()["origin"]["origin"] == "CUSTOM"
+    assert HPOStudy.objects.filter(pk=study.pk).exists()
+
+
+def test_saving_the_stored_values_keeps_the_origin(client: Client) -> None:
+    study = _study()
+    _optimized_row(study)
+    response = _post_params(client, "agent", "TD3", _form_values(client))
+    assert response.status_code == 200, response.content
+    row = AlgorithmDefault.objects.get(algorithm_type="TD3")
+    assert row.origin == AlgorithmDefaultOrigin.OPTIMIZED
+    assert row.source_study_id == study.pk
+    assert row.params == {"gamma": 0.95}
+
+
+def test_reset_deletes_an_optimized_default(client: Client) -> None:
+    study = _study()
+    _optimized_row(study)
+    response = client.post(_reset_url("agent", "TD3"))
+    assert response.status_code == 200
+    assert response.json()["origin"] is None
+    assert not AlgorithmDefault.objects.filter(algorithm_type="TD3").exists()
+    page = client.get(reverse("algorithm_list")).content.decode()
+    td3_card = page.split('data-key="TD3"')[1].split('data-kind="agent"')[0]
+    assert "data-origin=" not in td3_card
+
+
+def test_clearing_defaults_are_always_custom(client: Client) -> None:
+    with temporary_param_clearing_algorithm(PARAM):
+        response = _post_params(client, "clearing", PARAM, {"markup": "2.0"})
+        assert response.status_code == 200, response.content
+        assert response.json()["origin"]["origin"] == "CUSTOM"
+
+
+NODE = shutil.which("node")
+
+
+@pytest.mark.skipif(NODE is None, reason="node is not installed")
+def test_algorithms_inline_script_passes_node_check(
+    client: Client, tmp_path: pathlib.Path
+) -> None:
+    _optimized_row(_study())
+    html = client.get(reverse("algorithm_list")).content.decode()
+    scripts = [
+        body
+        for attrs, body in re.findall(
+            r"<script([^>]*)>(.*?)</script>", html, flags=re.S
+        )
+        if "src=" not in attrs and "application/json" not in attrs and body.strip()
+    ]
+    assert scripts
+    for index, body in enumerate(scripts):
+        path = tmp_path / f"algorithms_{index}.js"
+        path.write_text(body, encoding="utf-8")
+        result = subprocess.run(
+            [NODE, "--check", str(path)], capture_output=True, text=True, check=False
+        )
+        assert result.returncode == 0, f"script {index}: {result.stderr}"

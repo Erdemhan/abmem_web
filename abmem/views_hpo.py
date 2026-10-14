@@ -37,7 +37,15 @@ from .forms_hpo import (
     searchable_algorithms,
     supports_failstack,
 )
-from .models import Agent, AlgorithmDefault, HPOStudy, HPOTarget, HPOTrial, Simulation
+from .models import (
+    Agent,
+    AlgorithmDefault,
+    AlgorithmDefaultOrigin,
+    HPOStudy,
+    HPOTarget,
+    HPOTrial,
+    Simulation,
+)
 from .models.enums import HPOPhase, HPOStatus, HPOTrialStatus
 from .services.algorithms import registry as algorithm_registry
 from .services.hpo import hpo_service
@@ -738,6 +746,9 @@ def _apply_to_default(
 ) -> dict[str, Any]:
     """Merge the best parameters into ``AlgorithmDefault`` of the algorithm.
 
+    The row is marked ``OPTIMIZED`` with ``study`` as its source, so the
+    Algorithms page can show which search provided the values.
+
     Raises:
         ValueError: If the merged parameters are invalid.
     """
@@ -749,10 +760,17 @@ def _apply_to_default(
     merged = {**(dict(row.params or {}) if row else {}), **algo_params}
     _validated_params(algorithm, merged)
     if row is None:
-        AlgorithmDefault.objects.create(algorithm_type=algorithm, params=merged)
+        AlgorithmDefault.objects.create(
+            algorithm_type=algorithm,
+            params=merged,
+            origin=AlgorithmDefaultOrigin.OPTIMIZED,
+            source_study=study,
+        )
     else:
         row.params = merged
-        row.save(update_fields=["params", "updated_at"])
+        row.origin = AlgorithmDefaultOrigin.OPTIMIZED
+        row.source_study = study
+        row.save(update_fields=["params", "origin", "source_study", "updated_at"])
     skipped = sorted(k for k in (study.best_params or {}) if k in FAILSTACK_SEARCH_KEYS)
     return {
         "target": "default",

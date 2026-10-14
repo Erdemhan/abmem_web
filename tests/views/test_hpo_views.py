@@ -23,6 +23,7 @@ from django.utils import timezone
 from abmem.models import (
     Agent,
     AlgorithmDefault,
+    AlgorithmDefaultOrigin,
     HPOStudy,
     HPOTarget,
     HPOTrial,
@@ -716,6 +717,28 @@ def test_apply_as_default_creates_row(scenario: Simulation) -> None:
         "gamma": 0.95,
         "gradient_steps": 3,
     }
+
+
+def test_apply_as_default_marks_the_row_optimized(scenario: Simulation) -> None:
+    AlgorithmDefault.objects.create(algorithm_type="DDPG", params={"tau": 0.01})
+    study = finished_study(scenario)
+    response = post_json(
+        Client(), reverse("hpo_apply", args=[study.pk]), {"target": "default"}
+    )
+    assert response.status_code == 200, response.content
+    row = AlgorithmDefault.objects.get(algorithm_type="DDPG")
+    assert row.origin == AlgorithmDefaultOrigin.OPTIMIZED
+    assert row.source_study_id == study.pk
+    # A second study replaces the source.
+    other = finished_study(scenario, name="second")
+    post_json(Client(), reverse("hpo_apply", args=[other.pk]), {"target": "default"})
+    row.refresh_from_db()
+    assert row.source_study_id == other.pk
+    # Applying to the scenario does not touch the default row.
+    third = finished_study(scenario, name="third")
+    post_json(Client(), reverse("hpo_apply", args=[third.pk]), {"target": "scenario"})
+    row.refresh_from_db()
+    assert row.source_study_id == other.pk
 
 
 def test_apply_to_scenario_switches_all_agents(scenario: Simulation) -> None:

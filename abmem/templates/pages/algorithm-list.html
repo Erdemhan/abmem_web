@@ -27,6 +27,8 @@
         .param-changed { display: none; }
         .param-row.is-changed .param-changed { display: inline-block; }
         .module-traceback { white-space: pre-wrap; font-size: .7rem; max-height: 16rem; overflow: auto; }
+        a.js-origin-link.badge { color: #fff; text-decoration: none; }
+        a.js-origin-link.badge:hover, a.js-origin-link.badge:focus-visible { text-decoration: underline; }
     </style>
 </head>
 
@@ -84,7 +86,7 @@
                                         {% if card.is_learning %}<span class="badge badge-sm bg-gradient-info">Learning</span>{% else %}<span class="badge badge-sm bg-gradient-secondary">Baseline</span>{% endif %}
                                         {% if card.is_learning %}{% if card.is_on_policy %}<span class="badge badge-sm bg-gradient-dark">On-policy</span>{% else %}<span class="badge badge-sm bg-gradient-dark">Off-policy</span>{% endif %}{% endif %}
                                         {% endif %}
-                                        {% if card.has_custom_defaults %}<span class="badge badge-sm bg-gradient-warning js-custom-badge">Custom defaults</span>{% else %}<span class="badge badge-sm bg-gradient-warning js-custom-badge d-none">Custom defaults</span>{% endif %}
+                                        <span class="js-origin-badge">{% with origin=card.origin %}{% if origin %}{% if origin.watch_url %}<a class="badge badge-sm bg-gradient-success js-origin-link" href="{{ origin.watch_url }}" title="{{ origin.title }}" data-origin="{{ origin.origin }}">{{ origin.label }}</a>{% elif origin.origin == "OPTIMIZED_DELETED" %}<span class="badge badge-sm bg-gradient-secondary" title="{{ origin.title }}" data-origin="{{ origin.origin }}">{{ origin.label }}</span>{% else %}<span class="badge badge-sm bg-gradient-warning" title="{{ origin.title }}" data-origin="{{ origin.origin }}">{{ origin.label }}</span>{% endif %}{% endif %}{% endwith %}</span>
                                     </div>
                                     {% if card.description %}<p class="text-sm mb-1 mt-1">{{ card.description }}</p>{% endif %}
                                     <p class="text-xs text-secondary mb-0">
@@ -115,6 +117,7 @@
                         <div class="modal-body">
                             <p class="text-xs text-secondary mb-2">The values below are the global defaults. Fields marked
                                 "changed" differ from the published default of the algorithm class.</p>
+                            <p class="text-sm mb-2 d-none" id="params-origin"></p>
                             <div class="alert alert-warning text-white text-sm d-none" id="params-stored-error" role="alert"></div>
                             <div class="alert alert-danger text-white text-sm d-none" id="params-error" role="alert"></div>
                             <div class="alert alert-success text-white text-sm d-none" id="params-saved" role="status"></div>
@@ -226,6 +229,7 @@
                 byId('params-empty').classList.toggle('d-none', form.fields.length > 0);
                 byId('params-save').disabled = form.fields.length === 0;
                 byId('params-reset').disabled = !form.has_custom_defaults;
+                renderOrigin(form.origin);
                 showBox('params-stored-error', form.stored_error
                     ? 'The saved default is no longer valid and is shown with the published defaults: ' + form.stored_error
                     : '');
@@ -309,9 +313,50 @@
                     ? 'Some values are invalid, see the marked fields.' : ''));
             }
 
+            // Badge of the stored default: Optimized (link to the search), Optimized (search
+            // deleted) or Custom defaults. Same markup as the server-rendered card badge.
+            function originBadge(origin) {
+                var badge;
+                if (origin.watch_url) {
+                    badge = document.createElement('a');
+                    badge.href = origin.watch_url;
+                    badge.className = 'badge badge-sm bg-gradient-success js-origin-link';
+                } else {
+                    badge = document.createElement('span');
+                    badge.className = 'badge badge-sm ' + (origin.origin === 'OPTIMIZED_DELETED'
+                        ? 'bg-gradient-secondary' : 'bg-gradient-warning');
+                }
+                badge.title = origin.title || '';
+                badge.setAttribute('data-origin', origin.origin);
+                badge.textContent = origin.label;
+                return badge;
+            }
+
+            // A click on the search link opens the watch page, not the parameter editor.
+            function keepLinkClicks(holder) {
+                holder.addEventListener('click', function (event) {
+                    if (event.target.closest('.js-origin-link')) { event.stopPropagation(); }
+                });
+                holder.addEventListener('keydown', function (event) {
+                    if (event.target.closest('.js-origin-link')) { event.stopPropagation(); }
+                });
+            }
+
+            function renderOrigin(origin) {
+                var line = byId('params-origin');
+                line.innerHTML = '';
+                line.classList.toggle('d-none', !origin);
+                if (!origin) { return; }
+                line.appendChild(document.createTextNode('Saved default: '));
+                line.appendChild(originBadge(origin));
+                if (origin.title) { line.appendChild(document.createTextNode(' ' + origin.title)); }
+            }
+
             function updateCard(form) {
-                var badge = current.card.querySelector('.js-custom-badge');
-                if (badge) { badge.classList.toggle('d-none', !form.has_custom_defaults); }
+                var holder = current.card.querySelector('.js-origin-badge');
+                if (!holder) { return; }
+                holder.innerHTML = '';
+                if (form.origin) { holder.appendChild(originBadge(form.origin)); }
             }
 
             function resetMessages() {
@@ -326,6 +371,7 @@
                 current = { kind: kind, key: key, card: card, form: null };
                 resetMessages();
                 byId('params-form').innerHTML = '';
+                renderOrigin(null);
                 byId('params-modal-label').textContent = card.getAttribute('data-label') + ' (' + key + ')';
                 byId('params-save').disabled = true;
                 byId('params-reset').disabled = true;
@@ -350,6 +396,9 @@
                     body: JSON.stringify(body || {})
                 }).then(readJsonReply);
             }
+
+            Array.prototype.forEach.call(document.querySelectorAll('.js-origin-badge'), keepLinkClicks);
+            keepLinkClicks(byId('params-origin'));
 
             Array.prototype.forEach.call(document.querySelectorAll('.algorithm-card:not(.is-disabled)'), function (card) {
                 card.addEventListener('click', function () { openEditor(card); });

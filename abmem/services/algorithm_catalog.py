@@ -11,6 +11,12 @@ default of the config class, so a later change of a class default still
 applies to the other fields. Deleting the row restores the published
 defaults. Runs read the defaults once when they start
 (``SimulationContext.build``) and keep a snapshot of what they used.
+
+A stored agent default records its origin (``AlgorithmDefault.origin``).
+Values applied from a hyperparameter search are ``OPTIMIZED`` with the
+source study. A save on this page makes them ``CUSTOM`` again unless the
+submitted values equal the stored ones. Clearing defaults are always
+custom.
 """
 
 from __future__ import annotations
@@ -21,8 +27,15 @@ from typing import Any, Final, Literal
 
 from django.db import transaction
 from django.db.models import Count
+from django.urls import reverse
 
-from abmem.models import Agent, AlgorithmDefault, ClearingDefault, Market
+from abmem.models import (
+    Agent,
+    AlgorithmDefault,
+    AlgorithmDefaultOrigin,
+    ClearingDefault,
+    Market,
+)
 from abmem.services.algorithms import registry as algorithm_registry
 from abmem.services.market.clearing_algorithms import registry as clearing_registry
 from abmem.services.param_schema import (
@@ -43,6 +56,7 @@ __all__ = [
     "clearing_cards",
     "clearing_param_fields",
     "config_class_for",
+    "defaults_origin",
     "param_form",
     "reset_defaults",
     "save_defaults",
@@ -87,6 +101,8 @@ class AlgorithmCard:
         has_custom_defaults: A stored default row exists.
         config_error: Message when the config class cannot be described
             (unsupported field type or invalid class defaults), else empty.
+        origin: Origin of the stored default (see :func:`defaults_origin`),
+            None when no row exists.
     """
 
     kind: AlgorithmKind
@@ -100,6 +116,53 @@ class AlgorithmCard:
     param_count: int = 0
     has_custom_defaults: bool = False
     config_error: str = ""
+    origin: dict[str, Any] | None = None
+
+
+def defaults_origin(row: Any) -> dict[str, Any] | None:
+    """Describe where a stored default row comes from, for the page.
+
+    Args:
+        row: An ``AlgorithmDefault`` or ``ClearingDefault`` row, or None.
+            A row without an ``origin`` field (clearing defaults) is custom.
+
+    Returns:
+        None when ``row`` is None, else ``{"origin", "label", "title",
+        "study_id", "study_name", "watch_url"}``. ``origin`` is
+        ``"CUSTOM"``, ``"OPTIMIZED"`` or ``"OPTIMIZED_DELETED"`` (the
+        source study no longer exists). ``watch_url`` is the watch page of
+        the source study, empty when there is none.
+    """
+    if row is None:
+        return None
+    origin = getattr(row, "origin", AlgorithmDefaultOrigin.CUSTOM)
+    if origin != AlgorithmDefaultOrigin.OPTIMIZED:
+        return {
+            "origin": str(AlgorithmDefaultOrigin.CUSTOM.value),
+            "label": str(AlgorithmDefaultOrigin.CUSTOM.label),
+            "title": "Saved by hand on the Algorithms page.",
+            "study_id": None,
+            "study_name": "",
+            "watch_url": "",
+        }
+    study = row.source_study
+    if study is None:
+        return {
+            "origin": "OPTIMIZED_DELETED",
+            "label": "Optimized (search deleted)",
+            "title": "Applied from a hyperparameter search that was deleted.",
+            "study_id": None,
+            "study_name": "",
+            "watch_url": "",
+        }
+    return {
+        "origin": str(AlgorithmDefaultOrigin.OPTIMIZED.value),
+        "label": str(AlgorithmDefaultOrigin.OPTIMIZED.label),
+        "title": f"From hyperparameter search '{study.name}' (#{study.pk})",
+        "study_id": study.pk,
+        "study_name": study.name,
+        "watch_url": reverse("hpo_watch", args=[study.pk]),
+    }
 
 
 def _module_errors(errors: Mapping[str, str]) -> list[ModuleError]:
@@ -141,7 +204,10 @@ def agent_cards() -> tuple[list[AlgorithmCard], list[ModuleError]]:
         .values_list("algorithm_type")
         .annotate(n=Count("market__simulation", distinct=True))
     )
-    stored = set(AlgorithmDefault.objects.values_list("algorithm_type", flat=True))
+    stored = {
+        row.algorithm_type: row
+        for row in AlgorithmDefault.objects.select_related("source_study")
+    }
     cards = []
     for info in algorithm_registry.sorted_infos(classes):
         count, error = _param_count(classes[info.key].config_class)
@@ -158,6 +224,7 @@ def agent_cards() -> tuple[list[AlgorithmCard], list[ModuleError]]:
                 param_count=count,
                 has_custom_defaults=info.key in stored,
                 config_error=error,
+                origin=defaults_origin(stored.get(info.key)),
             )
         )
     return cards, _module_errors(errors)
@@ -176,7 +243,7 @@ def clearing_cards() -> tuple[list[AlgorithmCard], list[ModuleError]]:
         .values_list("clearing_algorithm")
         .annotate(n=Count("id"))
     )
-    stored = set(ClearingDefault.objects.values_list("algorithm_key", flat=True))
+    stored = {row.algorithm_key: row for row in ClearingDefault.objects.all()}
     cards = []
     for info in clearing_registry.sorted_clearing_infos(classes):
         count, error = _param_count(classes[info.key].config_class)
@@ -190,6 +257,7 @@ def clearing_cards() -> tuple[list[AlgorithmCard], list[ModuleError]]:
                 param_count=count,
                 has_custom_defaults=info.key in stored,
                 config_error=error,
+                origin=defaults_origin(stored.get(info.key)),
             )
         )
     return cards, _module_errors(errors)
@@ -236,9 +304,17 @@ def stored_defaults(kind: AlgorithmKind, key: str) -> dict[str, Any] | None:
     Returns:
         A copy of the stored params, None when no row exists.
     """
-    model, key_field = _row_manager(kind)
-    row = model.objects.filter(**{key_field: key}).first()
+    row = _stored_row(kind, key)
     return None if row is None else dict(row.params or {})
+
+
+def _stored_row(kind: AlgorithmKind, key: str) -> Any:
+    """Return the stored default row of an algorithm, None when absent."""
+    model, key_field = _row_manager(kind)
+    query = model.objects.filter(**{key_field: key})
+    if kind == AGENT:
+        query = query.select_related("source_study")
+    return query.first()
 
 
 def param_form(kind: AlgorithmKind, key: str) -> dict[str, Any]:
@@ -249,8 +325,9 @@ def param_form(kind: AlgorithmKind, key: str) -> dict[str, Any]:
         key: Registry key.
 
     Returns:
-        ``{"kind", "key", "label", "has_custom_defaults", "stored",
-        "stored_error", "fields"}``. Every field carries ``name``, ``kind``,
+        ``{"kind", "key", "label", "has_custom_defaults", "origin", "stored",
+        "stored_error", "fields"}``. ``origin`` is :func:`defaults_origin`
+        of the stored row (None without a row). Every field carries ``name``, ``kind``,
         ``default`` (class default), ``description``, ``search_bounds``,
         ``value`` (current global default) and ``differs`` (value differs from
         the class default). When the stored row does not validate any more,
@@ -262,7 +339,8 @@ def param_form(kind: AlgorithmKind, key: str) -> dict[str, Any]:
     """
     config_class = config_class_for(kind, key)
     fields = describe_config(config_class)
-    stored = stored_defaults(kind, key)
+    row = _stored_row(kind, key)
+    stored = None if row is None else dict(row.params or {})
     values = config_class().to_dict()
     stored_error = ""
     if stored:
@@ -280,6 +358,7 @@ def param_form(kind: AlgorithmKind, key: str) -> dict[str, Any]:
         "key": key,
         "label": _label(kind, key),
         "has_custom_defaults": stored is not None,
+        "origin": defaults_origin(row),
         "stored": stored or {},
         "stored_error": stored_error,
         "fields": [
@@ -299,7 +378,10 @@ def save_defaults(
     """Validate submitted values and store them as the global default.
 
     Only fields that differ from the class default are stored. When none
-    differs, the row is deleted (same effect as a reset).
+    differs, the row is deleted (same effect as a reset). A save that
+    changes the effective values of an agent default marks the row
+    ``CUSTOM`` and clears its source study. Submitting the values that are
+    already stored writes nothing, so an ``OPTIMIZED`` row keeps its origin.
 
     Args:
         kind: ``"agent"`` or ``"clearing"``.
@@ -319,13 +401,36 @@ def save_defaults(
     params = non_default_params(validation.config)
     model, key_field = _row_manager(kind)
     with transaction.atomic():
-        if params:
-            model.objects.update_or_create(
-                **{key_field: key}, defaults={"params": params}
-            )
-        else:
+        if not params:
             model.objects.filter(**{key_field: key}).delete()
+            return validation
+        row = model.objects.select_for_update().filter(**{key_field: key}).first()
+        if row is None:
+            model.objects.create(**{key_field: key, "params": params})
+        elif not _same_values(config_class, row.params, validation.config):
+            row.params = params
+            update_fields = ["params", "updated_at"]
+            if kind == AGENT:
+                row.origin = AlgorithmDefaultOrigin.CUSTOM
+                row.source_study = None
+                update_fields += ["origin", "source_study"]
+            row.save(update_fields=update_fields)
     return validation
+
+
+def _same_values(config_class: type, stored: Any, config: Any) -> bool:
+    """Return whether the stored params give the same config as ``config``.
+
+    Args:
+        config_class: Config dataclass of the algorithm.
+        stored: Params of the stored row.
+        config: Validated config of the submitted values.
+
+    Returns:
+        False when the stored params do not validate any more.
+    """
+    current = validate_params(config_class, stored or {})
+    return current.is_valid and current.config.to_dict() == config.to_dict()
 
 
 def reset_defaults(kind: AlgorithmKind, key: str) -> bool:
