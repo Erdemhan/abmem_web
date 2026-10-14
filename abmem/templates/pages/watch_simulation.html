@@ -31,6 +31,7 @@
         .wp-progress { height: 10px; }
         .wp-facts dt { font-weight: 600; font-size: 0.75rem; text-transform: uppercase; color: #8392ab; }
         .wp-facts dd { font-size: 0.95rem; margin-bottom: 0.6rem; font-variant-numeric: tabular-nums; }
+        .wp-chart { position: relative; height: 320px; }
     </style>
 </head>
 
@@ -110,6 +111,39 @@
                 </div>
             </div>
 
+            {% if live_series_url %}
+            <!-- LIVE CHARTS -->
+            <div id="live-charts">
+                <p class="text-sm text-secondary mb-2" id="live-charts-note">No completed period yet. The charts fill in as periods complete.</p>
+                <div class="row">
+                    <div class="col-xl-6 mb-4">
+                        <div class="card h-100">
+                            <div class="card-header pb-0 d-flex align-items-center">
+                                <h6 class="mb-0">Agent budgets</h6>
+                                <button class="btn btn-sm btn-outline-secondary mb-0 ms-auto" data-zoom-reset="budgets"
+                                    type="button" title="Reset zoom">Reset zoom</button>
+                            </div>
+                            <div class="card-body p-3">
+                                <div class="wp-chart"><canvas id="live-chart-budgets" aria-label="Agent budgets per period" role="img"></canvas></div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-xl-6 mb-4">
+                        <div class="card h-100">
+                            <div class="card-header pb-0 d-flex align-items-center">
+                                <h6 class="mb-0">Mean offer price and PTF</h6>
+                                <button class="btn btn-sm btn-outline-secondary mb-0 ms-auto" data-zoom-reset="offers"
+                                    type="button" title="Reset zoom">Reset zoom</button>
+                            </div>
+                            <div class="card-body p-3">
+                                <div class="wp-chart"><canvas id="live-chart-offers" aria-label="Mean offer price per agent and PTF per period" role="img"></canvas></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
             <!-- AGENTS TABLE -->
             <div class="card mb-2">
                 <div class="card-header pb-0">
@@ -144,6 +178,9 @@
     <script src="{% static 'assets/js/plugins/perfect-scrollbar.min.js' %}"></script>
     <script src="{% static 'assets/js/plugins/smooth-scrollbar.min.js' %}"></script>
     <script src="{% static 'assets/js/plugins/chartjs.min.js' %}"></script>
+    <script src="{% static 'assets/js/plugins/hammer.min.js' %}"></script>
+    <script src="{% static 'assets/js/plugins/chartjs-plugin-zoom.min.js' %}"></script>
+    <script src="{% static 'assets/js/chart-tools.js' %}"></script>
     <!-- MDB -->
     <script type="text/javascript"
         src="https://cdnjs.cloudflare.com/ajax/libs/mdb-ui-kit/7.2.0/mdb.umd.min.js"></script>
@@ -154,6 +191,8 @@
             // Chart.js 3.7.1 API (bundled plugins/chartjs.min.js).
             var STATUS_URL = "{% url 'get_simulation_status' %}";
             var NEXT_URL = "{% url 'nextPeriod' %}";
+            // Budget and offer series of the periods after ?after=<period> (null for scenario templates).
+            var LIVE_URL = "{{ live_series_url|default:'' }}" || null;
             var SIMULATION_ID = {{ simulation_id }};
             var POLL_MS = 1000;
             var TERMINAL = { FINISHED: true, FAILED: true, CANCELED: true, STOPPED: true };
@@ -162,6 +201,13 @@
             var BAR_CLASS = { FINISHED: 'bg-gradient-success', FAILED: 'bg-gradient-danger',
                 CANCELED: 'bg-gradient-danger', STOPPED: 'bg-gradient-warning' };
             var gauge = null;
+            // Agent colours of the analysis tab (agents in id order).
+            var LEGACY_COLORS = { 'SOLAR': '#edf066', 'GEOTHERMAL': '#e26363', 'BİOFUEL': '#bad34d', 'BIOFUEL': '#bad34d',
+                'COAL': '#96633A', 'CCGT': '#53a553', 'WİND': '#888888', 'WIND': '#888888', 'NUCLEAR': '#976ebd', 'HYDRO': '#3f97d6' };
+            var PALETTE = ['#cb0c9f', '#17c1e8', '#82d616', '#fbcf33', '#ea0606', '#3a416f', '#f5365c', '#2dce89',
+                '#8392ab', '#fb6340', '#5e72e4', '#11cdef'];
+            // last: largest period number already plotted, sent as ?after=.
+            var live = { last: 0, charts: {} };
 
             function duration(seconds) {
                 if (seconds === null || seconds === undefined || !isFinite(seconds)) { return '-'; }
@@ -269,6 +315,121 @@
                 return finished;
             }
 
+            // ---- Live budget and offer charts ------------------------------
+
+            function colorOf(name, index) {
+                return LEGACY_COLORS[String(name).toUpperCase()] || PALETTE[index % PALETTE.length];
+            }
+
+            function chartOptions(yTitle) {
+                return {
+                    maintainAspectRatio: false,
+                    animation: false,
+                    interaction: { mode: 'index', intersect: false },
+                    scales: {
+                        x: { type: 'linear', title: { display: true, text: 'Period' }, ticks: { precision: 0 } },
+                        y: { title: { display: true, text: yTitle } }
+                    },
+                    plugins: { legend: { position: 'bottom', labels: { boxWidth: 12, usePointStyle: true } } }
+                };
+            }
+
+            function makeLiveChart(key, config) {
+                var canvas = document.getElementById('live-chart-' + key);
+                if (typeof window.ChartTools !== 'undefined') { return window.ChartTools.create(canvas, config); }
+                return new Chart(canvas.getContext('2d'), config);
+            }
+
+            function money(value) {
+                return value === null || value === undefined ? '-' : Number(value).toFixed(2);
+            }
+
+            function buildLiveCharts(agents) {
+                var budgetSets = agents.map(function (agent, index) {
+                    var color = colorOf(agent.name, index);
+                    return { label: agent.name, data: [], borderColor: color, backgroundColor: color,
+                        pointRadius: 0, borderWidth: 2 };
+                });
+                var budgetOptions = chartOptions('Budget (USD)');
+                budgetOptions.plugins.tooltip = { callbacks: { label: function (context) {
+                    return context.dataset.label + ': ' + money(context.parsed.y) + ' USD';
+                } } };
+                live.charts.budgets = makeLiveChart('budgets', { type: 'line',
+                    data: { datasets: budgetSets }, options: budgetOptions });
+
+                var offerSets = agents.map(function (agent, index) {
+                    var color = colorOf(agent.name, index);
+                    return { label: agent.name, data: [], borderColor: color, backgroundColor: color,
+                        pointRadius: 0, borderWidth: 2, spanGaps: false };
+                });
+                offerSets.push({ label: 'PTF', data: [], borderColor: '#000000', backgroundColor: '#000000',
+                    borderDash: [6, 4], borderWidth: 2, pointRadius: 0, pointStyle: 'line', isPtf: true });
+                var offerOptions = chartOptions('Price (USD/MWh)');
+                offerOptions.plugins.tooltip = { callbacks: { label: function (context) {
+                    var text = context.dataset.label + ': ' + money(context.parsed.y) + ' USD/MWh';
+                    var raw = context.raw || {};
+                    if (!context.dataset.isPtf && raw.offers) {
+                        text += ' (' + raw.accepted + ' of ' + raw.offers + ' offers accepted)';
+                    }
+                    return text;
+                } } };
+                live.charts.offers = makeLiveChart('offers', { type: 'line',
+                    data: { datasets: offerSets }, options: offerOptions });
+
+                if (typeof window.ChartTools !== 'undefined') {
+                    window.ChartTools.bindButtons(document.getElementById('live-charts'), {
+                        chart: function (key) { return live.charts[key]; },
+                        config: function () { return null; },
+                        title: function () { return ''; },
+                        fileName: function () { return ''; }
+                    });
+                }
+            }
+
+            // Appends the periods of one live-series response and redraws without animation.
+            function appendSeries(series) {
+                if (series.after !== live.last || !series.periods.length) { return; }
+                if (typeof Chart === 'undefined') { return; }
+                if (!live.charts.budgets) { buildLiveCharts(series.agents); }
+                var budgetSets = live.charts.budgets.data.datasets;
+                var offerSets = live.charts.offers.data.datasets;
+                series.agents.forEach(function (agent, index) {
+                    if (!budgetSets[index]) { return; }
+                    var budget = budgetSets[index].data;
+                    var offers = offerSets[index].data;
+                    if (live.last === 0 && agent.budget_before !== null) {
+                        budget.push({ x: 0, y: agent.budget_before });
+                    }
+                    series.periods.forEach(function (period, i) {
+                        budget.push({ x: period, y: agent.budget[i] });
+                        offers.push({ x: period, y: agent.mean_bid[i], offers: agent.offers[i],
+                            accepted: agent.accepted_offers[i] });
+                    });
+                });
+                var ptf = offerSets[offerSets.length - 1].data;
+                series.periods.forEach(function (period, i) { ptf.push({ x: period, y: series.ptf[i] }); });
+                live.last = series.periods[series.periods.length - 1];
+                $('#live-charts-note').addClass('d-none');
+                live.charts.budgets.update('none');
+                live.charts.offers.update('none');
+            }
+
+            // Fetches the periods after the last plotted one, then calls done().
+            function refreshSeries(done) {
+                if (!LIVE_URL) { done(); return; }
+                $.ajax({
+                    url: LIVE_URL,
+                    data: { after: live.last },
+                    dataType: 'json',
+                    cache: false,
+                    success: appendSeries,
+                    error: function (xhr, status, error) {
+                        console.error('Error fetching the live series:', error);
+                    },
+                    complete: done
+                });
+            }
+
             function poll() {
                 $.ajax({
                     url: STATUS_URL,
@@ -276,7 +437,10 @@
                     dataType: 'json',
                     cache: false,
                     success: function (data) {
-                        if (!render(data)) { window.setTimeout(poll, POLL_MS); }
+                        var finished = render(data);
+                        refreshSeries(function () {
+                            if (!finished) { window.setTimeout(poll, POLL_MS); }
+                        });
                     },
                     error: function (xhr, status, error) {
                         console.error('Error fetching simulation status:', error);

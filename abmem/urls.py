@@ -36,6 +36,7 @@ urlpatterns = [
     path('simulation/<int:sim_id>/analysis/', views_analysis.simulation_analysis, name='simulation_analysis'),
     path('simulation/<int:sim_id>/analysis/data/', views_analysis.simulation_analysis_data, name='simulation_analysis_data'),
     path('simulation/<int:sim_id>/analysis/offers/', views_analysis.simulation_analysis_offers, name='simulation_analysis_offers'),
+    path('simulation/<int:sim_id>/live-series/', views_analysis.simulation_live_series, name='simulation_live_series'),
     path('simulation/<int:sim_id>/export/<str:kind>.csv', views_analysis.simulation_export_csv, name='simulation_export_csv'),
     path('demand-profiles/', views_demand.demand_profile_list, name='demand_profile_list'),
     path('demand-profiles/new/', views_demand.demand_profile_create, name='demand_profile_create'),

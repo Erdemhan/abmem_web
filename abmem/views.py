@@ -1970,9 +1970,10 @@ def watch_simulation(request: HttpRequest, simulation_id: str) -> HttpResponse:
         simulation_id: Id of the simulation.
 
     Returns:
-        The watch page. ``analysis_url`` is set for runs (not for scenario
-        templates). The page shows the Analysis button when the polled status
-        is FINISHED.
+        The watch page. ``analysis_url`` and ``live_series_url`` are set for
+        runs (not for scenario templates). The page shows the Analysis button
+        when the polled status is FINISHED, and the live budget and offer
+        charts when ``live_series_url`` is set.
     """
     simulation = get_object_or_404(Simulation, id=simulation_id)
     context = {
@@ -1982,6 +1983,11 @@ def watch_simulation(request: HttpRequest, simulation_id: str) -> HttpResponse:
             None
             if simulation.proxy
             else reverse("simulation_analysis", args=[simulation.id])
+        ),
+        "live_series_url": (
+            None
+            if simulation.proxy
+            else reverse("simulation_live_series", args=[simulation.id])
         ),
     }
     return render(request, "pages/watch_simulation.html", context)

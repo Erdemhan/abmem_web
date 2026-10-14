@@ -9,11 +9,15 @@ Routes (prefix ``/dev/``):
 * ``simulation/<id>/export/<kind>.csv`` CSV export, ``kind`` in
   ``{periods, offers, steps}``,
 * ``simulation/<id>/export/parameters.json`` the parameters the run used
-  (PLAN 2.12).
+  (PLAN 2.12),
+* ``simulation/<id>/live-series/?after=<period>`` JSON of the budget and
+  offer series of the periods after ``after`` for the live charts of the
+  watch page.
 
 All views are read-only GET views. An unknown simulation or a scenario
 template (proxy simulation) returns 404. A run that is not FINISHED or has no
-stored data returns 409 with a message.
+stored data returns 409 with a message, except for ``live-series``, which
+serves runs in every state.
 """
 
 from __future__ import annotations
@@ -38,6 +42,7 @@ from .services.analysis.run_analysis import (
     build_run_analysis,
     unavailable_reason,
 )
+from .services.simulation.live_series import live_series
 
 CSV_EXPORTS: Final[dict[str, Callable[[Simulation], str]]] = {
     "periods": exports.periods_csv,
@@ -225,3 +230,35 @@ def simulation_export_parameters(request: HttpRequest, sim_id: int) -> HttpRespo
         f'attachment; filename="simulation_{simulation.pk}_parameters.json"'
     )
     return response
+
+
+@require_GET
+def simulation_live_series(request: HttpRequest, sim_id: int) -> JsonResponse:
+    """Return the budget and offer series of the periods after ``after``.
+
+    Serves runs in every state (running, period by period, finished,
+    failed), so the watch page can append the new periods on each poll.
+
+    Query parameters: ``after`` (optional, integer >= 0, default 0), only
+    periods with a larger number are returned.
+
+    Args:
+        request: GET request.
+        sim_id: Primary key of the run.
+
+    Returns:
+        ``LiveSeries.to_dict()`` (200), or ``{"error": message}`` with 400
+        for an invalid ``after``.
+
+    Raises:
+        Http404: Unknown simulation or a scenario template.
+    """
+    simulation = _get_run(sim_id)
+    raw = request.GET.get("after", "0").strip() or "0"
+    try:
+        after = int(raw)
+    except ValueError:
+        return JsonResponse({"error": "after must be an integer."}, status=400)
+    if after < 0:
+        return JsonResponse({"error": "after must be >= 0."}, status=400)
+    return JsonResponse(live_series(simulation, after).to_dict())
